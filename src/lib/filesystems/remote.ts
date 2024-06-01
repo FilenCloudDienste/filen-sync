@@ -408,7 +408,8 @@ export class RemoteFileSystem {
 			region: item.region,
 			chunks: item.chunks,
 			version: item.version,
-			key: item.key
+			key: item.key,
+			size: item.size
 		})
 
 		await fs.move(tmpPath, localPath, {

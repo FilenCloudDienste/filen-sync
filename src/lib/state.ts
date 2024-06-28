@@ -1,10 +1,10 @@
 import type Sync from "./sync"
 import pathModule from "path"
 import fs from "fs-extra"
-import { unpack, pack } from "msgpackr"
-import type { RemoteTree, RemoteItem } from "./filesystems/remote"
-import type { LocalTree, LocalItem } from "./filesystems/local"
-import type { DoneTask } from "./tasks"
+import { serialize, deserialize } from "v8"
+import { type RemoteTree, type RemoteItem } from "./filesystems/remote"
+import { type LocalTree, type LocalItem } from "./filesystems/local"
+import { type DoneTask } from "./tasks"
 
 const STATE_VERSION = 1
 
@@ -261,7 +261,7 @@ export class State {
 
 	public async saveLocalFileHashes(): Promise<void> {
 		const path = pathModule.join(this.statePath, "localFileHashes")
-		const serialized = pack(this.sync.localFileHashes)
+		const serialized = serialize(this.sync.localFileHashes)
 
 		await fs.ensureDir(this.statePath)
 		await fs.writeFile(path, serialized)
@@ -278,7 +278,7 @@ export class State {
 
 		const buffer = await fs.readFile(path)
 
-		this.sync.localFileHashes = unpack(buffer)
+		this.sync.localFileHashes = deserialize(buffer)
 	}
 
 	public async initialize(): Promise<void> {
@@ -301,15 +301,15 @@ export class State {
 
 		const [localBuffer, remoteBuffer] = await Promise.all([fs.readFile(localPath), fs.readFile(remotePath)])
 
-		this.sync.previousLocalTree = unpack(localBuffer)
-		this.sync.previousRemoteTree = unpack(remoteBuffer)
+		this.sync.previousLocalTree = deserialize(localBuffer)
+		this.sync.previousRemoteTree = deserialize(remoteBuffer)
 	}
 
 	public async savePreviousTrees(): Promise<void> {
 		const localPath = pathModule.join(this.statePath, "previousLocalTree")
 		const remotePath = pathModule.join(this.statePath, "previousRemoteTree")
-		const localSerialized = pack(this.sync.previousLocalTree)
-		const remoteSerialized = pack(this.sync.previousRemoteTree)
+		const localSerialized = serialize(this.sync.previousLocalTree)
+		const remoteSerialized = serialize(this.sync.previousRemoteTree)
 
 		await fs.ensureDir(this.statePath)
 		await Promise.all([fs.writeFile(localPath, localSerialized), fs.writeFile(remotePath, remoteSerialized)])

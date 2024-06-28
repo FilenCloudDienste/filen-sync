@@ -1,4 +1,4 @@
-import type { SyncPair } from "./types"
+import { type SyncPair } from "./types"
 import Sync from "./lib/sync"
 import { type FilenSDKConfig } from "@filen/sdk"
 

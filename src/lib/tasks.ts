@@ -1,8 +1,31 @@
 import type Sync from "./sync"
-import type { Delta } from "./deltas"
-import { promiseAllSettledChunked } from "../utils"
-import type { CloudItem } from "@filen/sdk"
+import { type Delta } from "./deltas"
+import { promiseAllChunked } from "../utils"
+import { type CloudItem } from "@filen/sdk"
 import fs from "fs-extra"
+
+export type TaskError = {
+	path: string
+	error: Error
+	type:
+		| "uploadFile"
+		| "createRemoteDirectory"
+		| "createLocalDirectory"
+		| "deleteLocalFile"
+		| "deleteRemoteFile"
+		| "deleteLocalDirectory"
+		| "deleteRemoteDirectory"
+		| "downloadFile"
+		| "moveLocalFile"
+		| "renameLocalFile"
+		| "moveRemoteFile"
+		| "renameRemoteFile"
+		| "renameRemoteDirectory"
+		| "renameLocalDirectory"
+		| "moveRemoteDirectory"
+		| "moveLocalFile"
+		| "moveLocalDirectory"
+}
 
 export type DoneTask = { path: string } & (
 	| { type: "uploadFile"; item: CloudItem }
@@ -192,38 +215,48 @@ export class Tasks {
 
 	/**
 	 * Process all deltas.
-	 * @date 3/5/2024 - 3:59:51 PM
 	 *
 	 * @public
 	 * @async
 	 * @param {{ deltas: Delta[] }} param0
 	 * @param {{}} param0.deltas
-	 * @returns {Promise<DoneTask[]>}
+	 * @returns {Promise<{
+	 * 		doneTasks: DoneTask[]
+	 * 		errors: TaskError[]
+	 * 	}>}
 	 */
-	public async process({ deltas }: { deltas: Delta[] }): Promise<DoneTask[]> {
-		// Work on deltas from "left to right" (ascending order, path length).
-		deltas = deltas.sort((a, b) => a.path.split("/").length - b.path.split("/").length)
-
+	public async process({ deltas }: { deltas: Delta[] }): Promise<{
+		doneTasks: DoneTask[]
+		errors: TaskError[]
+	}> {
 		const executed: DoneTask[] = []
-		const promises: Promise<void>[] = []
+		const errors: TaskError[] = []
 
-		for (const delta of deltas) {
-			promises.push(
-				new Promise((resolve, reject) => {
-					this.processTask({ delta })
-						.then(doneTask => {
-							executed.push(doneTask)
+		await promiseAllChunked(
+			// Work on deltas from "left to right" (ascending order, path length).
+			deltas
+				.sort((a, b) => a.path.split("/").length - b.path.split("/").length)
+				.map(async delta => {
+					try {
+						const doneTask = await this.processTask({ delta })
 
-							resolve()
-						})
-						.catch(reject)
+						executed.push(doneTask)
+					} catch (e) {
+						if (e instanceof Error) {
+							errors.push({
+								path: delta.path,
+								type: delta.type,
+								error: e
+							})
+						}
+					}
 				})
-			)
+		)
+
+		return {
+			doneTasks: executed,
+			errors
 		}
-
-		await promiseAllSettledChunked(promises)
-
-		return executed
 	}
 }
 

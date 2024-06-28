@@ -1,24 +1,34 @@
 import type Sync from "../sync"
-import type { CloudItemTree, FSItemType, FileMetadata, FolderMetadata } from "@filen/sdk"
+import { type CloudItemTree, type FSItemType, type FileMetadata, type FolderMetadata, PauseSignal } from "@filen/sdk"
 import pathModule from "path"
 import { Semaphore } from "../../semaphore"
 import fs from "fs-extra"
-import type { DistributiveOmit, Prettify } from "../../types"
+import { type DistributiveOmit, type Prettify } from "../../types"
+import { postMessageToMain } from "../ipc"
+import { convertTimestampToMs } from "../../utils"
 
 export type RemoteItem = Prettify<DistributiveOmit<CloudItemTree, "parent"> & { path: string }>
 export type RemoteDirectoryTree = Record<string, RemoteItem>
 export type RemoteDirectoryUUIDs = Record<string, RemoteItem>
-export type RemoteTree = { tree: RemoteDirectoryTree; uuids: RemoteDirectoryUUIDs }
+export type RemoteTree = {
+	tree: RemoteDirectoryTree
+	uuids: RemoteDirectoryUUIDs
+}
 
 export class RemoteFileSystem {
 	private readonly sync: Sync
-	public getDirectoryTreeCache: { timestamp: number; tree: RemoteDirectoryTree; uuids: RemoteDirectoryUUIDs } = {
+	public getDirectoryTreeCache: {
+		timestamp: number
+		tree: RemoteDirectoryTree
+		uuids: RemoteDirectoryUUIDs
+	} = {
 		timestamp: 0,
 		tree: {},
 		uuids: {}
 	}
 	private readonly mutex = new Semaphore(1)
 	private readonly mkdirMutex = new Semaphore(1)
+	public readonly itemsMutex = new Semaphore(1)
 
 	public constructor({ sync }: { sync: Sync }) {
 		this.sync = sync
@@ -56,7 +66,10 @@ export class RemoteFileSystem {
 			uuids
 		}
 
-		return { tree, uuids }
+		return {
+			tree,
+			uuids
+		}
 	}
 
 	/**
@@ -118,6 +131,8 @@ export class RemoteFileSystem {
 			if (parentPath === "/" || parentPath === "." || parentPath.length <= 0) {
 				const uuid = await this.sync.sdk.cloud().createDirectory({ name: basename, parent: this.sync.syncPair.remoteParentUUID })
 
+				await this.itemsMutex.acquire()
+
 				this.getDirectoryTreeCache.tree[relativePath] = {
 					type: "directory",
 					uuid,
@@ -125,6 +140,16 @@ export class RemoteFileSystem {
 					size: 0,
 					path: relativePath
 				}
+
+				this.getDirectoryTreeCache.uuids[uuid] = {
+					type: "directory",
+					uuid,
+					name: basename,
+					size: 0,
+					path: relativePath
+				}
+
+				this.itemsMutex.release()
 
 				return uuid
 			}
@@ -152,6 +177,8 @@ export class RemoteFileSystem {
 					const parentUUID = parentIsBase ? this.sync.syncPair.remoteParentUUID : parentItem.uuid
 					const uuid = await this.sync.sdk.cloud().createDirectory({ name: partBasename, parent: parentUUID })
 
+					await this.itemsMutex.acquire()
+
 					this.getDirectoryTreeCache.tree[relativePath] = {
 						type: "directory",
 						uuid,
@@ -159,6 +186,16 @@ export class RemoteFileSystem {
 						size: 0,
 						path: relativePath
 					}
+
+					this.getDirectoryTreeCache.uuids[uuid] = {
+						type: "directory",
+						uuid,
+						name: partBasename,
+						size: 0,
+						path: relativePath
+					}
+
+					this.itemsMutex.release()
 				}
 			}
 
@@ -197,18 +234,19 @@ export class RemoteFileSystem {
 
 		try {
 			const uuid = await this.pathToItemUUID({ relativePath })
+			const item = this.getDirectoryTreeCache.tree[relativePath]
 
-			if (!uuid || !this.getDirectoryTreeCache.tree[relativePath]) {
+			if (!uuid || !item) {
 				return
 			}
 
 			const acceptedTypes: FSItemType[] = !type ? ["directory", "file"] : type === "directory" ? ["directory"] : ["file"]
 
-			if (!acceptedTypes.includes(this.getDirectoryTreeCache.tree[relativePath]!.type)) {
+			if (!acceptedTypes.includes(item.type)) {
 				return
 			}
 
-			if (this.getDirectoryTreeCache.tree[relativePath]!.type === "directory") {
+			if (item.type === "directory") {
 				if (permanent) {
 					await this.sync.sdk.cloud().deleteDirectory({ uuid })
 				} else {
@@ -222,13 +260,24 @@ export class RemoteFileSystem {
 				}
 			}
 
+			await this.itemsMutex.acquire()
+
 			delete this.getDirectoryTreeCache.tree[relativePath]
+			delete this.getDirectoryTreeCache.uuids[uuid]
 
 			for (const entry in this.getDirectoryTreeCache.tree) {
-				if (entry.startsWith(relativePath + "/")) {
+				if (entry.startsWith(relativePath + "/") || entry === relativePath) {
+					const entryItem = this.getDirectoryTreeCache.tree[entry]
+
+					if (entryItem) {
+						delete this.getDirectoryTreeCache.uuids[entryItem.uuid]
+					}
+
 					delete this.getDirectoryTreeCache.tree[entry]
 				}
 			}
+
+			this.itemsMutex.release()
 		} finally {
 			this.mutex.release()
 		}
@@ -286,7 +335,10 @@ export class RemoteFileSystem {
 				}
 
 				if (item.type === "directory") {
-					await this.sync.sdk.cloud().renameDirectory({ uuid, name: newBasename })
+					await this.sync.sdk.cloud().renameDirectory({
+						uuid,
+						name: newBasename
+					})
 				} else {
 					await this.sync.sdk.cloud().renameFile({
 						uuid,
@@ -294,21 +346,17 @@ export class RemoteFileSystem {
 						name: newBasename
 					})
 				}
-
-				const oldItem = this.getDirectoryTreeCache.tree[fromRelativePath]
-
-				if (oldItem) {
-					this.getDirectoryTreeCache.tree[toRelativePath] = {
-						...oldItem,
-						name: newBasename
-					}
+			} else {
+				if (toRelativePath.startsWith(fromRelativePath)) {
+					return
 				}
 
-				delete this.getDirectoryTreeCache.tree[fromRelativePath]
-			} else {
 				if (oldBasename !== newBasename) {
 					if (item.type === "directory") {
-						await this.sync.sdk.cloud().renameDirectory({ uuid, name: newBasename })
+						await this.sync.sdk.cloud().renameDirectory({
+							uuid,
+							name: newBasename
+						})
 					} else {
 						await this.sync.sdk.cloud().renameFile({
 							uuid,
@@ -320,13 +368,17 @@ export class RemoteFileSystem {
 
 				if (newParentPath === "/" || newParentPath === "." || newParentPath === "") {
 					if (item.type === "directory") {
-						await this.sync.sdk
-							.cloud()
-							.moveDirectory({ uuid, to: this.sync.syncPair.remoteParentUUID, metadata: itemMetadata as FolderMetadata })
+						await this.sync.sdk.cloud().moveDirectory({
+							uuid,
+							to: this.sync.syncPair.remoteParentUUID,
+							metadata: itemMetadata as FolderMetadata
+						})
 					} else {
-						await this.sync.sdk
-							.cloud()
-							.moveFile({ uuid, to: this.sync.syncPair.remoteParentUUID, metadata: itemMetadata as FileMetadata })
+						await this.sync.sdk.cloud().moveFile({
+							uuid,
+							to: this.sync.syncPair.remoteParentUUID,
+							metadata: itemMetadata as FileMetadata
+						})
 					}
 				} else {
 					await this.mkdir({ relativePath: newParentPath })
@@ -338,40 +390,64 @@ export class RemoteFileSystem {
 					}
 
 					if (item.type === "directory") {
-						await this.sync.sdk
-							.cloud()
-							.moveDirectory({ uuid, to: newParentItem.uuid!, metadata: itemMetadata as FolderMetadata })
+						await this.sync.sdk.cloud().moveDirectory({
+							uuid,
+							to: newParentItem.uuid!,
+							metadata: itemMetadata as FolderMetadata
+						})
 					} else {
-						await this.sync.sdk.cloud().moveFile({ uuid, to: newParentItem.uuid, metadata: itemMetadata as FileMetadata })
+						await this.sync.sdk.cloud().moveFile({
+							uuid,
+							to: newParentItem.uuid,
+							metadata: itemMetadata as FileMetadata
+						})
 					}
 				}
 
-				const oldItem = this.getDirectoryTreeCache.tree[fromRelativePath]
+				await this.itemsMutex.acquire()
 
-				if (oldItem) {
-					this.getDirectoryTreeCache.tree[toRelativePath] = {
-						...oldItem,
-						name: newBasename
-					}
+				this.getDirectoryTreeCache.tree[toRelativePath] = {
+					...item,
+					name: pathModule.basename(toRelativePath),
+					path: toRelativePath
+				}
+
+				this.getDirectoryTreeCache.uuids[item.uuid] = {
+					...item,
+					name: pathModule.basename(toRelativePath),
+					path: toRelativePath
 				}
 
 				delete this.getDirectoryTreeCache.tree[fromRelativePath]
 
 				for (const oldPath in this.getDirectoryTreeCache.tree) {
-					if (oldPath.startsWith(fromRelativePath + "/")) {
+					if (oldPath.startsWith(fromRelativePath + "/") && oldPath !== fromRelativePath) {
 						const newPath = oldPath.split(fromRelativePath).join(toRelativePath)
 						const oldItem = this.getDirectoryTreeCache.tree[oldPath]
 
 						if (oldItem) {
 							this.getDirectoryTreeCache.tree[newPath] = {
 								...oldItem,
-								name: newBasename
+								name: pathModule.basename(newPath),
+								path: newPath
+							}
+
+							delete this.getDirectoryTreeCache.tree[oldPath]
+
+							const oldItemUUID = this.getDirectoryTreeCache.uuids[oldItem.uuid]
+
+							if (oldItemUUID) {
+								this.getDirectoryTreeCache.uuids[oldItem.uuid] = {
+									...oldItemUUID,
+									name: pathModule.basename(newPath),
+									path: newPath
+								}
 							}
 						}
-
-						delete this.getDirectoryTreeCache.tree[oldPath]
 					}
 				}
+
+				this.itemsMutex.release()
 			}
 		} finally {
 			this.mutex.release()
@@ -390,35 +466,127 @@ export class RemoteFileSystem {
 	 */
 	public async download({ relativePath }: { relativePath: string }): Promise<fs.Stats> {
 		const localPath = pathModule.posix.join(this.sync.syncPair.localPath, relativePath)
+		const signalKey = `upload:${relativePath}`
 
-		const uuid = await this.pathToItemUUID({ relativePath })
-		const item = this.getDirectoryTreeCache.tree[relativePath]
-
-		if (!uuid || !item) {
-			throw new Error(`Could not download ${relativePath}: File not found.`)
+		if (!this.sync.pauseSignals[signalKey]) {
+			this.sync.pauseSignals[signalKey] = new PauseSignal()
 		}
 
-		if (item.type === "directory") {
-			throw new Error(`Could not download ${relativePath}: Not a file.`)
+		if (!this.sync.abortControllers[signalKey]) {
+			this.sync.abortControllers[signalKey] = new AbortController()
 		}
 
-		const tmpPath = await this.sync.sdk.cloud().downloadFileToLocal({
-			uuid,
-			bucket: item.bucket,
-			region: item.region,
-			chunks: item.chunks,
-			version: item.version,
-			key: item.key,
-			size: item.size
+		postMessageToMain({
+			type: "transfer",
+			syncPair: this.sync.syncPair,
+			data: {
+				of: "download",
+				type: "queued",
+				relativePath,
+				localPath
+			}
 		})
 
-		await fs.move(tmpPath, localPath, {
-			overwrite: true
-		})
+		try {
+			const uuid = await this.pathToItemUUID({ relativePath })
+			const item = this.getDirectoryTreeCache.tree[relativePath]
 
-		await fs.utimes(localPath, Date.now(), item.lastModified)
+			if (!uuid || !item) {
+				throw new Error(`Could not download ${relativePath}: File not found.`)
+			}
 
-		return await fs.stat(localPath)
+			if (item.type === "directory") {
+				throw new Error(`Could not download ${relativePath}: Not a file.`)
+			}
+
+			const tmpPath = await this.sync.sdk.cloud().downloadFileToLocal({
+				uuid,
+				bucket: item.bucket,
+				region: item.region,
+				chunks: item.chunks,
+				version: item.version,
+				key: item.key,
+				size: item.size,
+				pauseSignal: this.sync.pauseSignals[signalKey],
+				abortSignal: this.sync.abortControllers[signalKey]?.signal,
+				onError: err => {
+					postMessageToMain({
+						type: "transfer",
+						syncPair: this.sync.syncPair,
+						data: {
+							of: "download",
+							type: "error",
+							relativePath,
+							localPath,
+							error: err
+						}
+					})
+				},
+				onProgress: bytes => {
+					postMessageToMain({
+						type: "transfer",
+						syncPair: this.sync.syncPair,
+						data: {
+							of: "download",
+							type: "progress",
+							relativePath,
+							localPath,
+							bytes
+						}
+					})
+				},
+				onStarted: () => {
+					postMessageToMain({
+						type: "transfer",
+						syncPair: this.sync.syncPair,
+						data: {
+							of: "download",
+							type: "started",
+							relativePath,
+							localPath
+						}
+					})
+				}
+			})
+
+			await fs.move(tmpPath, localPath, {
+				overwrite: true
+			})
+
+			await fs.utimes(localPath, Date.now(), convertTimestampToMs(item.lastModified))
+
+			postMessageToMain({
+				type: "transfer",
+				syncPair: this.sync.syncPair,
+				data: {
+					of: "download",
+					type: "finished",
+					relativePath,
+					localPath
+				}
+			})
+
+			return await fs.stat(localPath)
+		} catch (e) {
+			if (e instanceof Error) {
+				postMessageToMain({
+					type: "transfer",
+					syncPair: this.sync.syncPair,
+					data: {
+						of: "download",
+						type: "error",
+						relativePath,
+						localPath,
+						error: e
+					}
+				})
+			}
+
+			throw e
+		} finally {
+			delete this.sync.pauseSignals[signalKey]
+			delete this.sync.abortControllers[signalKey]
+		}
 	}
 }
 

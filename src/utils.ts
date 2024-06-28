@@ -52,3 +52,20 @@ export async function promiseAllSettledChunked<T>(promises: Promise<T>[], chunkS
 
 	return results
 }
+
+/**
+ * Convert a timestamp from seconds to milliseconds.
+ *
+ * @export
+ * @param {number} timestamp
+ * @returns {number}
+ */
+export function convertTimestampToMs(timestamp: number): number {
+	const now = Date.now()
+
+	if (Math.abs(now - timestamp) < Math.abs(now - timestamp * 1000)) {
+		return timestamp
+	}
+
+	return Math.floor(timestamp * 1000)
+}

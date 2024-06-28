@@ -1,6 +1,6 @@
 import type Sync from "./sync"
-import type { LocalTree } from "./filesystems/local"
-import type { RemoteTree } from "./filesystems/remote"
+import { type LocalTree, type LocalTreeError } from "./filesystems/local"
+import { type RemoteTree } from "./filesystems/remote"
 import pathModule from "path"
 
 export type Delta = { path: string } & (
@@ -101,7 +101,6 @@ export class Deltas {
 
 	/**
 	 * Process the directory trees and return all sync deltas.
-	 * @date 3/2/2024 - 8:42:25 AM
 	 *
 	 * @public
 	 * @async
@@ -109,27 +108,36 @@ export class Deltas {
 	 * 		currentLocalTree: LocalTree
 	 * 		currentRemoteTree: RemoteTree
 	 * 		previousLocalTree: LocalTree
-	 * 		previousRemoteTree: RemoteTree
+	 * 		previousRemoteTree: RemoteTree,
+	 * 		currentLocalTreeErrors: LocalTreeError[]
 	 * 	}} param0
 	 * @param {LocalTree} param0.currentLocalTree
 	 * @param {RemoteTree} param0.currentRemoteTree
 	 * @param {LocalTree} param0.previousLocalTree
 	 * @param {RemoteTree} param0.previousRemoteTree
+	 * @param {{}} param0.currentLocalTreeErrors
 	 * @returns {Promise<Delta[]>}
 	 */
 	public async process({
 		currentLocalTree,
 		currentRemoteTree,
 		previousLocalTree,
-		previousRemoteTree
+		previousRemoteTree,
+		currentLocalTreeErrors
 	}: {
 		currentLocalTree: LocalTree
 		currentRemoteTree: RemoteTree
 		previousLocalTree: LocalTree
 		previousRemoteTree: RemoteTree
+		currentLocalTreeErrors: LocalTreeError[]
 	}): Promise<Delta[]> {
 		const deltas: Delta[] = []
 		const pathsAdded: Record<string, boolean> = {}
+		const erroredLocalPaths: Record<string, boolean> = {}
+
+		for (const error of currentLocalTreeErrors) {
+			erroredLocalPaths[error.relativePath] = true
+		}
 
 		// Local file/directory move/rename
 
@@ -137,7 +145,14 @@ export class Deltas {
 			const currentItem = currentLocalTree.inodes[inode]
 			const previousItem = previousLocalTree.inodes[inode]
 
-			if (!currentItem || !previousItem || pathsAdded[currentItem.path] || pathsAdded[previousItem.path]) {
+			if (
+				!currentItem ||
+				!previousItem ||
+				pathsAdded[currentItem.path] ||
+				pathsAdded[previousItem.path] ||
+				erroredLocalPaths[currentItem.path] ||
+				erroredLocalPaths[previousItem.path]
+			) {
 				continue
 			}
 
@@ -228,7 +243,7 @@ export class Deltas {
 		// Local deletions
 
 		for (const path in previousLocalTree.tree) {
-			if (pathsAdded[path]) {
+			if (pathsAdded[path] || erroredLocalPaths[path]) {
 				continue
 			}
 
@@ -265,10 +280,10 @@ export class Deltas {
 			}
 		}
 
-		// Local additions/changes
+		// Local additions/filemodifications
 
 		for (const path in currentLocalTree.tree) {
-			if (pathsAdded[path]) {
+			if (pathsAdded[path] || erroredLocalPaths[path]) {
 				continue
 			}
 

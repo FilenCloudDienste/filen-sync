@@ -8,7 +8,8 @@ import { SYNC_INTERVAL } from "../../constants"
 import crypto from "crypto"
 import { pipeline } from "stream"
 import { promisify } from "util"
-import type { CloudItem } from "@filen/sdk"
+import { type CloudItem, PauseSignal } from "@filen/sdk"
+import { postMessageToMain } from "../ipc"
 
 const pipelineAsync = promisify(pipeline)
 
@@ -23,7 +24,15 @@ export type LocalItem = {
 
 export type LocalDirectoryTree = Record<string, LocalItem>
 export type LocalDirectoryINodes = Record<number, LocalItem>
-export type LocalTree = { tree: LocalDirectoryTree; inodes: LocalDirectoryINodes }
+export type LocalTree = {
+	tree: LocalDirectoryTree
+	inodes: LocalDirectoryINodes
+}
+export type LocalTreeError = {
+	localPath: string
+	relativePath: string
+	error: Error
+}
 
 /**
  * LocalFileSystem
@@ -36,7 +45,11 @@ export type LocalTree = { tree: LocalDirectoryTree; inodes: LocalDirectoryINodes
 export class LocalFileSystem {
 	private readonly sync: Sync
 	public lastDirectoryChangeTimestamp = Date.now() - SYNC_INTERVAL * 2
-	public getDirectoryTreeCache: { timestamp: number; tree: LocalDirectoryTree; inodes: LocalDirectoryINodes } = {
+	public getDirectoryTreeCache: {
+		timestamp: number
+		tree: LocalDirectoryTree
+		inodes: LocalDirectoryINodes
+	} = {
 		timestamp: 0,
 		tree: {},
 		inodes: {}
@@ -59,66 +72,74 @@ export class LocalFileSystem {
 
 	/**
 	 * Get the local directory tree.
-	 * @date 3/2/2024 - 12:38:13 PM
 	 *
 	 * @public
 	 * @async
-	 * @returns {Promise<LocalTree>}
+	 * @returns {Promise<{
+	 * 		result: LocalTree
+	 * 		errors: LocalTreeError[]
+	 * 	}>}
 	 */
-	public async getDirectoryTree(): Promise<LocalTree> {
+	public async getDirectoryTree(): Promise<{
+		result: LocalTree
+		errors: LocalTreeError[]
+	}> {
 		if (
 			this.lastDirectoryChangeTimestamp > 0 &&
 			this.getDirectoryTreeCache.timestamp > 0 &&
 			this.lastDirectoryChangeTimestamp < this.getDirectoryTreeCache.timestamp
 		) {
 			return {
-				tree: this.getDirectoryTreeCache.tree,
-				inodes: this.getDirectoryTreeCache.inodes
+				result: {
+					tree: this.getDirectoryTreeCache.tree,
+					inodes: this.getDirectoryTreeCache.inodes
+				},
+				errors: []
 			}
 		}
 
+		const isWindows = process.platform === "win32"
 		const tree: LocalDirectoryTree = {}
 		const inodes: LocalDirectoryINodes = {}
+		const errors: LocalTreeError[] = []
 		const dir = await fs.readdir(this.sync.syncPair.localPath, {
 			recursive: true,
 			encoding: "utf-8"
 		})
-		const promises: Promise<void>[] = []
 
-		for (const entry of dir) {
-			promises.push(
-				new Promise((resolve, reject) => {
-					if (entry.startsWith(".filen.trash.local")) {
-						resolve()
+		await promiseAllChunked(
+			dir.map(async entry => {
+				if (entry.startsWith(".filen.trash.local")) {
+					return
+				}
 
-						return
+				const itemPath = pathModule.join(this.sync.syncPair.localPath, entry)
+				const entryPath = `/${isWindows ? entry.replace(/\\/g, "/") : entry}`
+
+				try {
+					const stats = await fs.stat(itemPath)
+					const item: LocalItem = {
+						lastModified: parseInt(stats.mtimeMs as unknown as string), // Sometimes comes as a float, but we need an int
+						type: stats.isDirectory() ? "directory" : "file",
+						path: entryPath,
+						creation: parseInt(stats.birthtimeMs as unknown as string), // Sometimes comes as a float, but we need an int
+						size: stats.size,
+						inode: stats.ino
 					}
 
-					const itemPath = pathModule.join(this.sync.syncPair.localPath, entry)
-					const entryPath = `/${process.platform === "win32" ? entry.replace(/\\/g, "/") : entry}`
-
-					fs.stat(itemPath)
-						.then(stats => {
-							const item: LocalItem = {
-								lastModified: parseInt(stats.mtimeMs as unknown as string), // Sometimes comes as a float, but we need an int
-								type: stats.isDirectory() ? "directory" : "file",
-								path: entryPath,
-								creation: parseInt(stats.birthtimeMs as unknown as string), // Sometimes comes as a float, but we need an int
-								size: stats.size,
-								inode: stats.ino
-							}
-
-							tree[entryPath] = item
-							inodes[stats.ino] = item
-
-							resolve()
+					tree[entryPath] = item
+					inodes[stats.ino] = item
+				} catch (e) {
+					if (e instanceof Error) {
+						errors.push({
+							localPath: itemPath,
+							relativePath: entryPath,
+							error: e
 						})
-						.catch(reject)
-				})
-			)
-		}
-
-		await promiseAllChunked(promises)
+					}
+				}
+			})
+		)
 
 		this.getDirectoryTreeCache = {
 			timestamp: Date.now(),
@@ -126,7 +147,13 @@ export class LocalFileSystem {
 			inodes
 		}
 
-		return { tree, inodes }
+		return {
+			result: {
+				tree,
+				inodes
+			},
+			errors
+		}
 	}
 
 	/**
@@ -314,21 +341,147 @@ export class LocalFileSystem {
 	 */
 	public async upload({ relativePath }: { relativePath: string }): Promise<CloudItem> {
 		const localPath = pathModule.join(this.sync.syncPair.localPath, relativePath)
-		const parentPath = pathModule.posix.dirname(relativePath)
+		let readStream: fs.ReadStream | null = null
+		const signalKey = `upload:${relativePath}`
 
-		await this.sync.remoteFileSystem.mkdir({ relativePath: parentPath })
-
-		const parentUUID = await this.sync.remoteFileSystem.pathToItemUUID({ relativePath: parentPath })
-
-		if (!parentUUID) {
-			throw new Error(`Could not upload ${relativePath}: Parent path not found.`)
+		if (!this.sync.pauseSignals[signalKey]) {
+			this.sync.pauseSignals[signalKey] = new PauseSignal()
 		}
 
-		const hash = await this.createFileHash({ relativePath, algorithm: "sha512" })
+		if (!this.sync.abortControllers[signalKey]) {
+			this.sync.abortControllers[signalKey] = new AbortController()
+		}
 
-		this.sync.localFileHashes[relativePath] = hash
+		postMessageToMain({
+			type: "transfer",
+			syncPair: this.sync.syncPair,
+			data: {
+				of: "upload",
+				type: "queued",
+				relativePath,
+				localPath
+			}
+		})
 
-		return await this.sync.sdk.cloud().uploadLocalFile({ source: localPath, parent: parentUUID })
+		try {
+			const parentPath = pathModule.posix.dirname(relativePath)
+
+			readStream = fs.createReadStream(localPath)
+
+			await this.sync.remoteFileSystem.mkdir({ relativePath: parentPath })
+
+			const parentUUID = await this.sync.remoteFileSystem.pathToItemUUID({ relativePath: parentPath })
+
+			if (!parentUUID) {
+				throw new Error(`Could not upload ${relativePath}: Parent path not found.`)
+			}
+
+			const hash = await this.createFileHash({ relativePath, algorithm: "sha512" })
+
+			this.sync.localFileHashes[relativePath] = hash
+
+			const item = await this.sync.sdk.cloud().uploadLocalFileStream({
+				source: readStream,
+				parent: parentUUID,
+				name: pathModule.basename(localPath),
+				pauseSignal: this.sync.pauseSignals[signalKey],
+				abortSignal: this.sync.abortControllers[signalKey]?.signal,
+				onError: err => {
+					postMessageToMain({
+						type: "transfer",
+						syncPair: this.sync.syncPair,
+						data: {
+							of: "upload",
+							type: "error",
+							relativePath,
+							localPath,
+							error: err
+						}
+					})
+				},
+				onProgress: bytes => {
+					postMessageToMain({
+						type: "transfer",
+						syncPair: this.sync.syncPair,
+						data: {
+							of: "upload",
+							type: "progress",
+							relativePath,
+							localPath,
+							bytes
+						}
+					})
+				},
+				onStarted: () => {
+					postMessageToMain({
+						type: "transfer",
+						syncPair: this.sync.syncPair,
+						data: {
+							of: "upload",
+							type: "started",
+							relativePath,
+							localPath
+						}
+					})
+				}
+			})
+
+			await this.sync.remoteFileSystem.itemsMutex.acquire()
+
+			this.sync.remoteFileSystem.getDirectoryTreeCache.tree[relativePath] = {
+				...item,
+				path: relativePath
+			}
+
+			this.sync.remoteFileSystem.getDirectoryTreeCache.uuids[item.uuid] = {
+				...item,
+				path: relativePath
+			}
+
+			this.sync.remoteFileSystem.itemsMutex.release()
+
+			postMessageToMain({
+				type: "transfer",
+				syncPair: this.sync.syncPair,
+				data: {
+					of: "upload",
+					type: "finished",
+					relativePath,
+					localPath
+				}
+			})
+
+			return item
+		} catch (e) {
+			if (e instanceof Error) {
+				postMessageToMain({
+					type: "transfer",
+					syncPair: this.sync.syncPair,
+					data: {
+						of: "upload",
+						type: "error",
+						relativePath,
+						localPath,
+						error: e
+					}
+				})
+			}
+
+			throw e
+		} finally {
+			if (readStream) {
+				try {
+					if (!readStream.closed && !readStream.destroyed) {
+						readStream.destroy()
+					}
+				} catch {
+					// Noop
+				}
+			}
+
+			delete this.sync.pauseSignals[signalKey]
+			delete this.sync.abortControllers[signalKey]
+		}
 	}
 }
 

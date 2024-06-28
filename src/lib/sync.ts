@@ -1,11 +1,13 @@
-import SDK, { type FilenSDKConfig } from "@filen/sdk"
-import type { SyncPair } from "../types"
+import SDK, { type FilenSDKConfig, type PauseSignal } from "@filen/sdk"
+import { type SyncPair, type SyncMessage } from "../types"
 import { SYNC_INTERVAL } from "../constants"
 import { LocalFileSystem, LocalTree } from "./filesystems/local"
 import { RemoteFileSystem, RemoteTree } from "./filesystems/remote"
 import Deltas from "./deltas"
 import Tasks from "./tasks"
 import State from "./state"
+import { postMessageToMain } from "./ipc"
+import { isMainThread, parentPort } from "worker_threads"
 
 /**
  * Sync
@@ -27,6 +29,8 @@ export class Sync {
 	public readonly tasks: Tasks
 	public readonly state: State
 	public readonly dbPath: string
+	public readonly abortControllers: Record<string, AbortController> = {}
+	public readonly pauseSignals: Record<string, PauseSignal> = {}
 
 	/**
 	 * Creates an instance of Sync.
@@ -47,6 +51,49 @@ export class Sync {
 		this.deltas = new Deltas({ sync: this })
 		this.tasks = new Tasks({ sync: this })
 		this.state = new State({ sync: this })
+
+		this.setupMainThreadListeners()
+	}
+
+	/**
+	 * Sets up receiving message from the main thread.
+	 *
+	 * @private
+	 */
+	private setupMainThreadListeners(): void {
+		if (isMainThread || !parentPort) {
+			return
+		}
+
+		parentPort.removeAllListeners()
+
+		parentPort.on("message", (message: SyncMessage) => {
+			if (message.type === "stopTransfer" && message.syncPair.uuid === this.syncPair.uuid) {
+				const abortController = this.abortControllers[`${message.data.of}:${message.data.relativePath}`]
+
+				if (!abortController || abortController.signal.aborted) {
+					return
+				}
+
+				abortController.abort()
+			} else if (message.type === "pauseTransfer" && message.syncPair.uuid === this.syncPair.uuid) {
+				const pauseSignal = this.pauseSignals[`${message.data.of}:${message.data.relativePath}`]
+
+				if (!pauseSignal || pauseSignal.isPaused()) {
+					return
+				}
+
+				pauseSignal.pause()
+			} else if (message.type === "resumeTransfer" && message.syncPair.uuid === this.syncPair.uuid) {
+				const pauseSignal = this.pauseSignals[`${message.data.of}:${message.data.relativePath}`]
+
+				if (!pauseSignal || !pauseSignal.isPaused()) {
+					return
+				}
+
+				pauseSignal.resume()
+			}
+		})
 	}
 
 	public async initialize(): Promise<void> {
@@ -59,8 +106,7 @@ export class Sync {
 		try {
 			//local/remote smoke test
 
-			await this.localFileSystem.startDirectoryWatcher()
-			await this.state.initialize()
+			await Promise.all([this.localFileSystem.startDirectoryWatcher(), this.state.initialize()])
 
 			this.run()
 		} catch (e) {
@@ -71,44 +117,159 @@ export class Sync {
 	}
 
 	private async run(): Promise<void> {
+		postMessageToMain({
+			type: "cycleStarted",
+			syncPair: this.syncPair
+		})
+
 		try {
+			postMessageToMain({
+				type: "cycleWaitingForLocalDirectoryChangesStarted",
+				syncPair: this.syncPair
+			})
+
 			await this.localFileSystem.waitForLocalDirectoryChanges()
 
+			postMessageToMain({
+				type: "cycleWaitingForLocalDirectoryChangesDone",
+				syncPair: this.syncPair
+			})
+
+			postMessageToMain({
+				type: "cycleGettingTreesStarted",
+				syncPair: this.syncPair
+			})
+
+			// eslint-disable-next-line prefer-const
 			let [currentLocalTree, currentRemoteTree] = await Promise.all([
 				this.localFileSystem.getDirectoryTree(),
 				this.remoteFileSystem.getDirectoryTree()
 			])
 
-			const deltas = await this.deltas.process({
-				currentLocalTree,
-				currentRemoteTree,
-				previousLocalTree: this.previousLocalTree,
-				previousRemoteTree: this.previousRemoteTree
+			postMessageToMain({
+				type: "cycleGettingTreesDone",
+				syncPair: this.syncPair
 			})
 
-			console.log(deltas)
+			postMessageToMain({
+				type: "localTreeErrors",
+				syncPair: this.syncPair,
+				data: currentLocalTree.errors
+			})
 
-			const doneTasks = await this.tasks.process({ deltas })
+			postMessageToMain({
+				type: "cycleProcessingDeltasStarted",
+				syncPair: this.syncPair
+			})
 
-			console.log(doneTasks)
+			const deltas = await this.deltas.process({
+				currentLocalTree: currentLocalTree.result,
+				currentRemoteTree,
+				previousLocalTree: this.previousLocalTree,
+				previousRemoteTree: this.previousRemoteTree,
+				currentLocalTreeErrors: currentLocalTree.errors
+			})
+
+			postMessageToMain({
+				type: "cycleProcessingDeltasDone",
+				syncPair: this.syncPair
+			})
+
+			postMessageToMain({
+				type: "deltas",
+				syncPair: this.syncPair,
+				data: deltas
+			})
+
+			console.log({ deltas, localErrors: currentLocalTree.errors })
+
+			postMessageToMain({
+				type: "cycleProcessingTasksStarted",
+				syncPair: this.syncPair
+			})
+
+			const { doneTasks, errors } = await this.tasks.process({ deltas })
+
+			console.log({ doneTasks, errors })
+
+			postMessageToMain({
+				type: "cycleProcessingTasksDone",
+				syncPair: this.syncPair
+			})
+
+			postMessageToMain({
+				type: "doneTasks",
+				syncPair: this.syncPair,
+				data: {
+					tasks: doneTasks,
+					errors
+				}
+			})
 
 			if (doneTasks.length > 0) {
-				const applied = this.state.applyDoneTasksToState({ doneTasks, currentLocalTree, currentRemoteTree })
+				postMessageToMain({
+					type: "cycleApplyingStateStarted",
+					syncPair: this.syncPair
+				})
 
-				currentLocalTree = applied.currentLocalTree
+				const applied = this.state.applyDoneTasksToState({
+					doneTasks,
+					currentLocalTree: currentLocalTree.result,
+					currentRemoteTree
+				})
+
+				currentLocalTree.result = applied.currentLocalTree
 				currentRemoteTree = applied.currentRemoteTree
+
+				postMessageToMain({
+					type: "cycleApplyingStateDone",
+					syncPair: this.syncPair
+				})
 			}
 
-			this.previousLocalTree = currentLocalTree
+			postMessageToMain({
+				type: "cycleSavingStateStarted",
+				syncPair: this.syncPair
+			})
+
+			this.previousLocalTree = currentLocalTree.result
 			this.previousRemoteTree = currentRemoteTree
 
 			await this.state.save()
+
+			postMessageToMain({
+				type: "cycleSavingStateDone",
+				syncPair: this.syncPair
+			})
+
+			postMessageToMain({
+				type: "cycleSuccess",
+				syncPair: this.syncPair
+			})
 		} catch (e) {
 			console.error(e) // TODO: Proper debugger
+
+			if (e instanceof Error) {
+				postMessageToMain({
+					type: "cycleError",
+					syncPair: this.syncPair,
+					data: e
+				})
+			}
 		} finally {
+			postMessageToMain({
+				type: "cycleFinished",
+				syncPair: this.syncPair
+			})
+
 			setTimeout(() => {
 				this.run()
 			}, SYNC_INTERVAL)
+
+			postMessageToMain({
+				type: "cycleRestarting",
+				syncPair: this.syncPair
+			})
 		}
 	}
 }

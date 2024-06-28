@@ -553,7 +553,7 @@ export class RemoteFileSystem {
 				overwrite: true
 			})
 
-			await fs.utimes(localPath, Date.now(), convertTimestampToMs(item.lastModified))
+			await fs.utimes(localPath, new Date(), new Date(convertTimestampToMs(item.lastModified)))
 
 			postMessageToMain({
 				type: "transfer",
@@ -581,6 +581,10 @@ export class RemoteFileSystem {
 					}
 				})
 			}
+
+			// TODO: Proper logging
+
+			console.error(e)
 
 			throw e
 		} finally {

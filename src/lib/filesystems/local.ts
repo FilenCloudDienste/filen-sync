@@ -225,16 +225,24 @@ export class LocalFileSystem {
 
 	/**
 	 * Creates a hash of a file using streams.
-	 * @date 3/2/2024 - 9:29:48 AM
 	 *
 	 * @public
 	 * @async
-	 * @param {{ relativePath: string; algorithm: "sha512" }} param0
+	 * @param {{
+	 * 		relativePath: string
+	 * 		algorithm: "sha512" | "md5" | "sha256"
+	 * 	}} param0
 	 * @param {string} param0.relativePath
-	 * @param {"sha512"} param0.algorithm
+	 * @param {("sha512" | "md5" | "sha256")} param0.algorithm
 	 * @returns {Promise<string>}
 	 */
-	public async createFileHash({ relativePath, algorithm }: { relativePath: string; algorithm: "sha512" }): Promise<string> {
+	public async createFileHash({
+		relativePath,
+		algorithm
+	}: {
+		relativePath: string
+		algorithm: "sha512" | "md5" | "sha256"
+	}): Promise<string> {
 		const localPath = pathModule.join(this.sync.syncPair.localPath, relativePath)
 		const hasher = crypto.createHash(algorithm)
 
@@ -341,7 +349,6 @@ export class LocalFileSystem {
 	 */
 	public async upload({ relativePath }: { relativePath: string }): Promise<CloudItem> {
 		const localPath = pathModule.join(this.sync.syncPair.localPath, relativePath)
-		let readStream: fs.ReadStream | null = null
 		const signalKey = `upload:${relativePath}`
 
 		if (!this.sync.pauseSignals[signalKey]) {
@@ -366,8 +373,6 @@ export class LocalFileSystem {
 		try {
 			const parentPath = pathModule.posix.dirname(relativePath)
 
-			readStream = fs.createReadStream(localPath)
-
 			await this.sync.remoteFileSystem.mkdir({ relativePath: parentPath })
 
 			const parentUUID = await this.sync.remoteFileSystem.pathToItemUUID({ relativePath: parentPath })
@@ -376,12 +381,15 @@ export class LocalFileSystem {
 				throw new Error(`Could not upload ${relativePath}: Parent path not found.`)
 			}
 
-			const hash = await this.createFileHash({ relativePath, algorithm: "sha512" })
+			const hash = await this.createFileHash({
+				relativePath,
+				algorithm: "md5"
+			})
 
 			this.sync.localFileHashes[relativePath] = hash
 
-			const item = await this.sync.sdk.cloud().uploadLocalFileStream({
-				source: readStream,
+			const item = await this.sync.sdk.cloud().uploadLocalFile({
+				source: localPath,
 				parent: parentUUID,
 				name: pathModule.basename(localPath),
 				pauseSignal: this.sync.pauseSignals[signalKey],
@@ -469,16 +477,6 @@ export class LocalFileSystem {
 
 			throw e
 		} finally {
-			if (readStream) {
-				try {
-					if (!readStream.closed && !readStream.destroyed) {
-						readStream.destroy()
-					}
-				} catch {
-					// Noop
-				}
-			}
-
 			delete this.sync.pauseSignals[signalKey]
 			delete this.sync.abortControllers[signalKey]
 		}

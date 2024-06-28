@@ -306,8 +306,10 @@ export class Deltas {
 					const itemLocalPath = pathModule.join(this.sync.syncPair.localPath, currentLocalItem.path)
 
 					if (
-						(await this.sync.localFileSystem.createFileHash({ relativePath: path, algorithm: "sha512" })) !==
-						this.sync.localFileHashes[itemLocalPath]
+						(await this.sync.localFileSystem.createFileHash({
+							relativePath: path,
+							algorithm: "md5"
+						})) !== this.sync.localFileHashes[itemLocalPath]
 					) {
 						deltas.push({
 							type: "uploadFile",

@@ -61,13 +61,9 @@ export class Sync {
 	 * @private
 	 */
 	private setupMainThreadListeners(): void {
-		if (isMainThread || !parentPort) {
-			return
-		}
+		const receiver = !isMainThread && parentPort ? parentPort : process
 
-		parentPort.removeAllListeners()
-
-		parentPort.on("message", (message: SyncMessage) => {
+		receiver.on("message", (message: SyncMessage) => {
 			if (message.type === "stopTransfer" && message.syncPair.uuid === this.syncPair.uuid) {
 				const abortController = this.abortControllers[`${message.data.of}:${message.data.relativePath}`]
 
@@ -117,6 +113,24 @@ export class Sync {
 	}
 
 	private async run(): Promise<void> {
+		if (this.syncPair.paused) {
+			postMessageToMain({
+				type: "cyclePaused",
+				syncPair: this.syncPair
+			})
+
+			setTimeout(() => {
+				this.run()
+			}, SYNC_INTERVAL)
+
+			postMessageToMain({
+				type: "cycleRestarting",
+				syncPair: this.syncPair
+			})
+
+			return
+		}
+
 		postMessageToMain({
 			type: "cycleStarted",
 			syncPair: this.syncPair

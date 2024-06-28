@@ -1,6 +1,9 @@
-import { type SyncPair } from "./types"
+import { type SyncPair, type SyncMessage } from "./types"
 import Sync from "./lib/sync"
 import { type FilenSDKConfig } from "@filen/sdk"
+import { isMainThread, parentPort } from "worker_threads"
+import { postMessageToMain } from "./lib/ipc"
+import { Semaphore } from "./semaphore"
 
 /**
  * SyncWorker
@@ -15,6 +18,7 @@ export class SyncWorker {
 	private readonly syncs: Record<string, Sync> = {}
 	private readonly dbPath: string
 	private readonly sdkConfig: FilenSDKConfig
+	private readonly initSyncPairsMutex = new Semaphore(1)
 
 	/**
 	 * Creates an instance of SyncWorker.
@@ -30,6 +34,72 @@ export class SyncWorker {
 		this.syncPairs = syncPairs
 		this.dbPath = dbPath
 		this.sdkConfig = sdkConfig
+
+		this.setupMainThreadListeners()
+	}
+
+	/**
+	 * Sets up receiving message from the main thread.
+	 *
+	 * @private
+	 */
+	private setupMainThreadListeners(): void {
+		const receiver = !isMainThread && parentPort ? parentPort : process
+
+		receiver.on("message", async (message: SyncMessage) => {
+			if (message.type === "updateSyncPairs") {
+				try {
+					await this.initSyncPairs(message.data)
+
+					postMessageToMain({
+						type: "syncPairsUpdated"
+					})
+				} catch (e) {
+					// TODO: Proper debugger
+
+					console.error(e)
+
+					if (e instanceof Error) {
+						postMessageToMain({
+							type: "error",
+							data: e
+						})
+					}
+				}
+			}
+		})
+	}
+
+	/**
+	 * Initialize sync pairs.
+	 *
+	 * @private
+	 * @async
+	 * @param {SyncPair[]} pairs
+	 * @returns {Promise<void>}
+	 */
+	private async initSyncPairs(pairs: SyncPair[]): Promise<void> {
+		await this.initSyncPairsMutex.acquire()
+
+		try {
+			const promises: Promise<void>[] = []
+
+			for (const pair of pairs) {
+				if (!this.syncs[pair.uuid]) {
+					this.syncs[pair.uuid] = new Sync({
+						syncPair: pair,
+						dbPath: this.dbPath,
+						sdkConfig: this.sdkConfig
+					})
+
+					promises.push(this.syncs[pair.uuid]!.initialize())
+				}
+			}
+
+			await Promise.all(promises)
+		} finally {
+			this.initSyncPairsMutex.release()
+		}
 	}
 
 	/**
@@ -41,21 +111,7 @@ export class SyncWorker {
 	 * @returns {Promise<void>}
 	 */
 	public async initialize(): Promise<void> {
-		const promises: Promise<void>[] = []
-
-		for (const pair of this.syncPairs) {
-			if (!this.syncs[pair.uuid]) {
-				this.syncs[pair.uuid] = new Sync({
-					syncPair: pair,
-					dbPath: this.dbPath,
-					sdkConfig: this.sdkConfig
-				})
-
-				promises.push(this.syncs[pair.uuid]!.initialize())
-			}
-		}
-
-		await Promise.all(promises)
+		await this.initSyncPairs(this.syncPairs)
 	}
 }
 

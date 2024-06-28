@@ -1,9 +1,10 @@
 import { type SyncPair, type SyncMessage } from "./types"
 import Sync from "./lib/sync"
-import { type FilenSDKConfig } from "@filen/sdk"
+import FilenSDK, { type FilenSDKConfig } from "@filen/sdk"
 import { isMainThread, parentPort } from "worker_threads"
 import { postMessageToMain } from "./lib/ipc"
 import { Semaphore } from "./semaphore"
+import { SYNC_INTERVAL } from "./constants"
 
 /**
  * SyncWorker
@@ -17,8 +18,8 @@ export class SyncWorker {
 	private readonly syncPairs: SyncPair[]
 	private readonly syncs: Record<string, Sync> = {}
 	private readonly dbPath: string
-	private readonly sdkConfig: FilenSDKConfig
 	private readonly initSyncPairsMutex = new Semaphore(1)
+	private readonly sdk: FilenSDK
 
 	/**
 	 * Creates an instance of SyncWorker.
@@ -33,7 +34,11 @@ export class SyncWorker {
 	public constructor({ syncPairs, dbPath, sdkConfig }: { syncPairs: SyncPair[]; dbPath: string; sdkConfig: FilenSDKConfig }) {
 		this.syncPairs = syncPairs
 		this.dbPath = dbPath
-		this.sdkConfig = sdkConfig
+		this.sdk = new FilenSDK({
+			...sdkConfig,
+			connectToSocket: true,
+			metadataCache: true
+		})
 
 		this.setupMainThreadListeners()
 	}
@@ -49,7 +54,11 @@ export class SyncWorker {
 		receiver.on("message", async (message: SyncMessage) => {
 			if (message.type === "updateSyncPairs") {
 				try {
-					await this.initSyncPairs(message.data)
+					await this.initSyncPairs(message.data.pairs)
+
+					if (message.data.resetCache) {
+						this.resetSyncPairsCache()
+					}
 
 					postMessageToMain({
 						type: "syncPairsUpdated"
@@ -66,8 +75,38 @@ export class SyncWorker {
 						})
 					}
 				}
+			} else if (message.type === "resetSyncPairCache") {
+				this.resetSyncPairsCache()
 			}
 		})
+	}
+
+	private resetSyncPairsCache(): void {
+		for (const pair of this.syncPairs) {
+			const sync = this.syncs[pair.uuid]
+
+			if (!sync) {
+				continue
+			}
+
+			sync.localFileSystem.lastDirectoryChangeTimestamp = Date.now() - SYNC_INTERVAL * 2
+			sync.localFileSystem.getDirectoryTreeCache = {
+				timestamp: 0,
+				tree: {},
+				inodes: {}
+			}
+
+			sync.remoteFileSystem.previousTreeRawResponse = ""
+			sync.remoteFileSystem.getDirectoryTreeCache = {
+				timestamp: 0,
+				tree: {},
+				uuids: {}
+			}
+			sync.remoteFileSystem.treeCache = {
+				tree: {},
+				timestamp: 0
+			}
+		}
 	}
 
 	/**
@@ -89,7 +128,7 @@ export class SyncWorker {
 					this.syncs[pair.uuid] = new Sync({
 						syncPair: pair,
 						dbPath: this.dbPath,
-						sdkConfig: this.sdkConfig
+						sdk: this.sdk
 					})
 
 					promises.push(this.syncs[pair.uuid]!.initialize())

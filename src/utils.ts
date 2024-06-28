@@ -1,3 +1,7 @@
+import memoize from "lodash/memoize"
+import { DEFAULT_IGNORED } from "./constants"
+import pathModule from "path"
+
 /**
  * Chunk large Promise.all executions.
  * @date 2/14/2024 - 11:59:34 PM
@@ -69,3 +73,114 @@ export function convertTimestampToMs(timestamp: number): number {
 
 	return Math.floor(timestamp * 1000)
 }
+
+export function isPathOverMaxLength(path: string): boolean {
+	if (process.platform === "linux") {
+		return path.length + 1 > 4096
+	} else if (process.platform === "darwin") {
+		return path.length + 1 > 1024
+	} else if (process.platform === "win32") {
+		return path.length + 1 > 260
+	}
+
+	return path.length + 1 > 260
+}
+
+export function isNameOverMaxLength(name: string): boolean {
+	if (process.platform === "linux") {
+		return name.length + 1 > 255
+	} else if (process.platform === "darwin") {
+		return name.length + 1 > 255
+	} else if (process.platform === "win32") {
+		return name.length + 1 > 255
+	}
+
+	return name.length + 1 > 255
+}
+
+export const isValidPath = memoize((path: string): boolean => {
+	const illegalCharsWindows = /[<>:"/\\|?*]|^(?:aux|con|clock\$|nul|prn|com[1-9]|lpt[1-9])$/i
+	const illegalCharsMacOS = /[:]/i
+	const illegalCharsLinux = /[\0/]/i
+
+	switch (process.platform) {
+		case "win32": {
+			return illegalCharsWindows.test(path)
+		}
+
+		case "darwin": {
+			return illegalCharsMacOS.test(path)
+		}
+
+		case "linux": {
+			return illegalCharsLinux.test(path)
+		}
+
+		default: {
+			return false
+		}
+	}
+})
+
+export const isNameIgnoredByDefault = memoize((name: string): boolean => {
+	const nameLowercase = name.toLowerCase()
+	const extension = pathModule.extname(name)
+	const extensionLowercase = extension.toLowerCase()
+
+	if (
+		name.length === 0 ||
+		name.startsWith(" ") ||
+		name.endsWith(" ") ||
+		name.includes("\n") ||
+		name.includes("\r") ||
+		nameLowercase.startsWith(".~lock.") ||
+		nameLowercase.startsWith(".~lock") ||
+		nameLowercase.startsWith("~$") ||
+		DEFAULT_IGNORED.extensions.includes(extensionLowercase) ||
+		DEFAULT_IGNORED.names.includes(nameLowercase)
+	) {
+		return true
+	}
+
+	return false
+})
+
+export const isRelativePathIgnoredByDefault = memoize((path: string): boolean => {
+	if (isNameIgnoredByDefault(pathModule.basename(path))) {
+		return true
+	}
+
+	const ex = path.split("/")
+
+	for (const part of ex) {
+		if (part.length === 0) {
+			continue
+		}
+
+		if (isNameIgnoredByDefault(part)) {
+			return true
+		}
+	}
+
+	return false
+})
+
+export const isSystemPathIgnoredByDefault = memoize((path: string): boolean => {
+	for (const systemPath of DEFAULT_IGNORED.system) {
+		if (path.toLowerCase().includes(systemPath.toLowerCase())) {
+			return true
+		}
+	}
+
+	return false
+})
+
+export const isDirectoryPathIgnoredByDefault = memoize((path: string): boolean => {
+	for (const directoryPath of DEFAULT_IGNORED.directories) {
+		if (path.toLowerCase().includes(directoryPath.toLowerCase())) {
+			return true
+		}
+	}
+
+	return false
+})

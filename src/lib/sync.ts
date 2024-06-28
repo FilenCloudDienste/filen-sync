@@ -1,4 +1,4 @@
-import SDK, { type FilenSDKConfig, type PauseSignal } from "@filen/sdk"
+import FilenSDK, { type PauseSignal } from "@filen/sdk"
 import { type SyncPair, type SyncMessage } from "../types"
 import { SYNC_INTERVAL } from "../constants"
 import { LocalFileSystem, LocalTree } from "./filesystems/local"
@@ -8,6 +8,7 @@ import Tasks from "./tasks"
 import State from "./state"
 import { postMessageToMain } from "./ipc"
 import { isMainThread, parentPort } from "worker_threads"
+import Ignorer from "../ignorer"
 
 /**
  * Sync
@@ -17,40 +18,50 @@ import { isMainThread, parentPort } from "worker_threads"
  * @typedef {Sync}
  */
 export class Sync {
-	public readonly sdk: SDK
+	public readonly sdk: FilenSDK
 	public readonly syncPair: SyncPair
 	private isInitialized = false
 	public readonly localFileSystem: LocalFileSystem
 	public readonly remoteFileSystem: RemoteFileSystem
 	public readonly deltas: Deltas
-	public previousLocalTree: LocalTree = { tree: {}, inodes: {} }
-	public previousRemoteTree: RemoteTree = { tree: {}, uuids: {} }
+	public previousLocalTree: LocalTree = {
+		tree: {},
+		inodes: {}
+	}
+	public previousRemoteTree: RemoteTree = {
+		tree: {},
+		uuids: {}
+	}
 	public localFileHashes: Record<string, string> = {}
 	public readonly tasks: Tasks
 	public readonly state: State
 	public readonly dbPath: string
 	public readonly abortControllers: Record<string, AbortController> = {}
 	public readonly pauseSignals: Record<string, PauseSignal> = {}
+	public readonly localIgnorer: Ignorer
+	public readonly remoteIgnorer: Ignorer
 
 	/**
 	 * Creates an instance of Sync.
 	 *
 	 * @constructor
 	 * @public
-	 * @param {{ syncPair: SyncPair; dbPath: string, sdkConfig: FilenSDKConfig }} param0
+	 * @param {{ syncPair: SyncPair; dbPath: string; sdk: FilenSDK }} param0
 	 * @param {SyncPair} param0.syncPair
 	 * @param {string} param0.dbPath
-	 * @param {FilenSDKConfig} param0.sdkConfig
+	 * @param {FilenSDK} param0.sdk
 	 */
-	public constructor({ syncPair, dbPath, sdkConfig }: { syncPair: SyncPair; dbPath: string; sdkConfig: FilenSDKConfig }) {
+	public constructor({ syncPair, dbPath, sdk }: { syncPair: SyncPair; dbPath: string; sdk: FilenSDK }) {
 		this.syncPair = syncPair
 		this.dbPath = dbPath
-		this.sdk = new SDK(sdkConfig)
-		this.localFileSystem = new LocalFileSystem({ sync: this })
-		this.remoteFileSystem = new RemoteFileSystem({ sync: this })
-		this.deltas = new Deltas({ sync: this })
-		this.tasks = new Tasks({ sync: this })
-		this.state = new State({ sync: this })
+		this.sdk = sdk
+		this.localFileSystem = new LocalFileSystem(this)
+		this.remoteFileSystem = new RemoteFileSystem(this)
+		this.deltas = new Deltas(this)
+		this.tasks = new Tasks(this)
+		this.state = new State(this)
+		this.localIgnorer = new Ignorer(this, "localIgnorer")
+		this.remoteIgnorer = new Ignorer(this, "remoteIgnorer")
 
 		this.setupMainThreadListeners()
 	}
@@ -88,6 +99,10 @@ export class Sync {
 				}
 
 				pauseSignal.resume()
+			} else if (message.type === "updateLocalIgnorer" && message.syncPair.uuid === this.syncPair.uuid) {
+				this.localIgnorer.update(message.data).catch(console.error)
+			} else if (message.type === "updateRemoteIgnorer" && message.syncPair.uuid === this.syncPair.uuid) {
+				this.remoteIgnorer.update(message.data).catch(console.error)
 			}
 		})
 	}
@@ -102,7 +117,12 @@ export class Sync {
 		try {
 			//local/remote smoke test
 
-			await Promise.all([this.localFileSystem.startDirectoryWatcher(), this.state.initialize()])
+			await Promise.all([
+				this.localFileSystem.startDirectoryWatcher(),
+				this.state.initialize(),
+				this.localIgnorer.initialize(),
+				this.remoteIgnorer.initialize()
+			])
 
 			this.run()
 		} catch (e) {
@@ -172,13 +192,25 @@ export class Sync {
 			})
 
 			postMessageToMain({
+				type: "localTreeIgnored",
+				syncPair: this.syncPair,
+				data: currentLocalTree.ignored
+			})
+
+			postMessageToMain({
+				type: "remoteTreeIgnored",
+				syncPair: this.syncPair,
+				data: currentRemoteTree.ignored
+			})
+
+			postMessageToMain({
 				type: "cycleProcessingDeltasStarted",
 				syncPair: this.syncPair
 			})
 
 			const deltas = await this.deltas.process({
 				currentLocalTree: currentLocalTree.result,
-				currentRemoteTree,
+				currentRemoteTree: currentRemoteTree.result,
 				previousLocalTree: this.previousLocalTree,
 				previousRemoteTree: this.previousRemoteTree,
 				currentLocalTreeErrors: currentLocalTree.errors
@@ -229,11 +261,11 @@ export class Sync {
 				const applied = this.state.applyDoneTasksToState({
 					doneTasks,
 					currentLocalTree: currentLocalTree.result,
-					currentRemoteTree
+					currentRemoteTree: currentRemoteTree.result
 				})
 
 				currentLocalTree.result = applied.currentLocalTree
-				currentRemoteTree = applied.currentRemoteTree
+				currentRemoteTree.result = applied.currentRemoteTree
 
 				postMessageToMain({
 					type: "cycleApplyingStateDone",
@@ -247,7 +279,7 @@ export class Sync {
 			})
 
 			this.previousLocalTree = currentLocalTree.result
-			this.previousRemoteTree = currentRemoteTree
+			this.previousRemoteTree = currentRemoteTree.result
 
 			await this.state.save()
 

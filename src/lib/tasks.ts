@@ -1,6 +1,6 @@
 import type Sync from "./sync"
 import { type Delta } from "./deltas"
-import { promiseAllChunked } from "../utils"
+import { promiseAllSettledChunked } from "../utils"
 import { type CloudItem } from "@filen/sdk"
 import fs from "fs-extra"
 
@@ -117,14 +117,12 @@ export class Tasks {
 
 	/**
 	 * Creates an instance of Tasks.
-	 * @date 3/1/2024 - 11:11:36 PM
 	 *
 	 * @constructor
 	 * @public
-	 * @param {{ sync: Sync }} param0
-	 * @param {Sync} param0.sync
+	 * @param {Sync} sync
 	 */
-	public constructor({ sync }: { sync: Sync }) {
+	public constructor(sync: Sync) {
 		this.sync = sync
 	}
 
@@ -176,7 +174,10 @@ export class Tasks {
 			case "renameLocalDirectory":
 			case "renameLocalFile":
 			case "moveLocalFile": {
-				const stats = await this.sync.localFileSystem.rename({ fromRelativePath: delta.from, toRelativePath: delta.to })
+				const stats = await this.sync.localFileSystem.rename({
+					fromRelativePath: delta.from,
+					toRelativePath: delta.to
+				})
 
 				return {
 					...delta,
@@ -188,7 +189,10 @@ export class Tasks {
 			case "renameRemoteDirectory":
 			case "renameRemoteFile":
 			case "moveRemoteFile": {
-				await this.sync.remoteFileSystem.rename({ fromRelativePath: delta.from, toRelativePath: delta.to })
+				await this.sync.remoteFileSystem.rename({
+					fromRelativePath: delta.from,
+					toRelativePath: delta.to
+				})
 
 				return delta
 			}
@@ -232,7 +236,7 @@ export class Tasks {
 		const executed: DoneTask[] = []
 		const errors: TaskError[] = []
 
-		await promiseAllChunked(
+		await promiseAllSettledChunked(
 			// Work on deltas from "left to right" (ascending order, path length).
 			deltas
 				.sort((a, b) => a.path.split("/").length - b.path.split("/").length)

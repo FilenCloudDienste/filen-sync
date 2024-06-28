@@ -20,18 +20,9 @@ export class State {
 	private readonly sync: Sync
 	private readonly statePath: string
 
-	/**
-	 * Creates an instance of State.
-	 * @date 3/1/2024 - 11:11:36 PM
-	 *
-	 * @constructor
-	 * @public
-	 * @param {{ sync: Sync }} param0
-	 * @param {Sync} param0.sync
-	 */
-	public constructor({ sync }: { sync: Sync }) {
+	public constructor(sync: Sync) {
 		this.sync = sync
-		this.statePath = pathModule.join(this.sync.dbPath, "state", `v${STATE_VERSION}`)
+		this.statePath = pathModule.join(this.sync.dbPath, "state", `v${STATE_VERSION}`, sync.syncPair.uuid)
 	}
 
 	public applyDoneTasksToState({

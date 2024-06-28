@@ -88,14 +88,12 @@ export class Deltas {
 
 	/**
 	 * Creates an instance of Deltas.
-	 * @date 3/1/2024 - 11:11:36 PM
 	 *
 	 * @constructor
 	 * @public
-	 * @param {{ sync: Sync }} param0
-	 * @param {Sync} param0.sync
+	 * @param {Sync} sync
 	 */
-	public constructor({ sync }: { sync: Sync }) {
+	public constructor(sync: Sync) {
 		this.sync = sync
 	}
 

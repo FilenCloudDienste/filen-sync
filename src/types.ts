@@ -1,6 +1,7 @@
-import { type LocalTreeError } from "./lib/filesystems/local"
+import { type LocalTreeError, type LocalTreeIgnored } from "./lib/filesystems/local"
 import { type Delta } from "./lib/deltas"
 import { type DoneTask, type TaskError } from "./lib/tasks"
+import { type RemoteTreeIgnored } from "./lib/filesystems/remote"
 
 export type SyncMode = "twoWay" | "localToCloud" | "localBackup" | "cloudToLocal" | "cloudBackup"
 
@@ -11,6 +12,7 @@ export type SyncPair = {
 	remoteParentUUID: string
 	mode: SyncMode
 	paused: boolean
+	excludeDotFiles: boolean
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -82,6 +84,14 @@ export type SyncMessage =
 			| {
 					type: "localTreeErrors"
 					data: LocalTreeError[]
+			  }
+			| {
+					type: "localTreeIgnored"
+					data: LocalTreeIgnored[]
+			  }
+			| {
+					type: "remoteTreeIgnored"
+					data: RemoteTreeIgnored[]
 			  }
 			| {
 					type: "deltas"
@@ -173,7 +183,10 @@ export type SyncMessage =
 	  ))
 	| {
 			type: "updateSyncPairs"
-			data: SyncPair[]
+			data: {
+				pairs: SyncPair[]
+				resetCache: boolean
+			}
 	  }
 	| {
 			type: "error"
@@ -181,4 +194,17 @@ export type SyncMessage =
 	  }
 	| {
 			type: "syncPairsUpdated"
+	  }
+	| {
+			type: "updateLocalIgnorer"
+			syncPair: SyncPair
+			data?: string
+	  }
+	| {
+			type: "updateRemoteIgnorer"
+			syncPair: SyncPair
+			data?: string
+	  }
+	| {
+			type: "resetSyncPairCache"
 	  }

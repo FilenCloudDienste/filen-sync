@@ -1,6 +1,11 @@
 import fs from "fs-extra"
 import watcher from "@parcel/watcher"
-import { promiseAllChunked } from "../../utils"
+import {
+	promiseAllSettledChunked,
+	isRelativePathIgnoredByDefault,
+	isDirectoryPathIgnoredByDefault,
+	isSystemPathIgnoredByDefault
+} from "../../utils"
 import pathModule from "path"
 import process from "process"
 import type Sync from "../sync"
@@ -33,6 +38,11 @@ export type LocalTreeError = {
 	relativePath: string
 	error: Error
 }
+export type LocalTreeIgnored = {
+	localPath: string
+	relativePath: string
+	reason: "dotFile" | "localIgnore" | "defaultIgnore"
+}
 
 /**
  * LocalFileSystem
@@ -59,14 +69,12 @@ export class LocalFileSystem {
 
 	/**
 	 * Creates an instance of LocalFileSystem.
-	 * @date 3/2/2024 - 12:38:20 PM
 	 *
 	 * @constructor
 	 * @public
-	 * @param {{ sync: Sync }} param0
-	 * @param {Sync} param0.sync
+	 * @param {Sync} sync
 	 */
-	public constructor({ sync }: { sync: Sync }) {
+	public constructor(sync: Sync) {
 		this.sync = sync
 	}
 
@@ -77,12 +85,14 @@ export class LocalFileSystem {
 	 * @async
 	 * @returns {Promise<{
 	 * 		result: LocalTree
-	 * 		errors: LocalTreeError[]
+	 * 		errors: LocalTreeError[],
+	 * 		ignored:  LocalTreeIgnored[]
 	 * 	}>}
 	 */
 	public async getDirectoryTree(): Promise<{
 		result: LocalTree
 		errors: LocalTreeError[]
+		ignored: LocalTreeIgnored[]
 	}> {
 		if (
 			this.lastDirectoryChangeTimestamp > 0 &&
@@ -94,7 +104,8 @@ export class LocalFileSystem {
 					tree: this.getDirectoryTreeCache.tree,
 					inodes: this.getDirectoryTreeCache.inodes
 				},
-				errors: []
+				errors: [],
+				ignored: []
 			}
 		}
 
@@ -102,19 +113,60 @@ export class LocalFileSystem {
 		const tree: LocalDirectoryTree = {}
 		const inodes: LocalDirectoryINodes = {}
 		const errors: LocalTreeError[] = []
+		const ignored: LocalTreeIgnored[] = []
 		const dir = await fs.readdir(this.sync.syncPair.localPath, {
 			recursive: true,
 			encoding: "utf-8"
 		})
 
-		await promiseAllChunked(
+		await promiseAllSettledChunked(
 			dir.map(async entry => {
 				if (entry.startsWith(".filen.trash.local")) {
 					return
 				}
 
 				const itemPath = pathModule.join(this.sync.syncPair.localPath, entry)
+
+				if (this.sync.localIgnorer.ignores(entry)) {
+					ignored.push({
+						localPath: itemPath,
+						relativePath: entry,
+						reason: "localIgnore"
+					})
+
+					return
+				}
+
+				if (
+					isDirectoryPathIgnoredByDefault(entry) ||
+					isRelativePathIgnoredByDefault(entry) ||
+					isSystemPathIgnoredByDefault(itemPath)
+				) {
+					ignored.push({
+						localPath: itemPath,
+						relativePath: entry,
+						reason: "defaultIgnore"
+					})
+
+					return
+				}
+
 				const entryPath = `/${isWindows ? entry.replace(/\\/g, "/") : entry}`
+				const itemName = pathModule.posix.basename(entryPath)
+
+				if (itemName.startsWith(".filen.trash.local")) {
+					return
+				}
+
+				if (this.sync.syncPair.excludeDotFiles && itemName.startsWith(".")) {
+					ignored.push({
+						localPath: itemPath,
+						relativePath: entry,
+						reason: "dotFile"
+					})
+
+					return
+				}
 
 				try {
 					const stats = await fs.stat(itemPath)
@@ -152,7 +204,8 @@ export class LocalFileSystem {
 				tree,
 				inodes
 			},
-			errors
+			errors,
+			ignored
 		}
 	}
 

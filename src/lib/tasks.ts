@@ -16,15 +16,10 @@ export type TaskError = {
 		| "deleteLocalDirectory"
 		| "deleteRemoteDirectory"
 		| "downloadFile"
-		| "moveLocalFile"
 		| "renameLocalFile"
-		| "moveRemoteFile"
 		| "renameRemoteFile"
 		| "renameRemoteDirectory"
 		| "renameLocalDirectory"
-		| "moveRemoteDirectory"
-		| "moveLocalFile"
-		| "moveLocalDirectory"
 }
 
 export type DoneTask = { path: string } & (
@@ -54,20 +49,10 @@ export type DoneTask = { path: string } & (
 			stats: fs.Stats
 	  }
 	| {
-			type: "moveLocalFile"
-			from: string
-			to: string
-	  }
-	| {
 			type: "renameLocalFile"
 			from: string
 			to: string
 			stats: fs.Stats
-	  }
-	| {
-			type: "moveRemoteFile"
-			from: string
-			to: string
 	  }
 	| {
 			type: "renameRemoteFile"
@@ -81,23 +66,6 @@ export type DoneTask = { path: string } & (
 	  }
 	| {
 			type: "renameLocalDirectory"
-			from: string
-			to: string
-			stats: fs.Stats
-	  }
-	| {
-			type: "moveRemoteDirectory"
-			from: string
-			to: string
-	  }
-	| {
-			type: "moveLocalFile"
-			from: string
-			to: string
-			stats: fs.Stats
-	  }
-	| {
-			type: "moveLocalDirectory"
 			from: string
 			to: string
 			stats: fs.Stats
@@ -170,10 +138,8 @@ export class Tasks {
 				return delta
 			}
 
-			case "moveLocalDirectory":
 			case "renameLocalDirectory":
-			case "renameLocalFile":
-			case "moveLocalFile": {
+			case "renameLocalFile": {
 				const stats = await this.sync.localFileSystem.rename({
 					fromRelativePath: delta.from,
 					toRelativePath: delta.to
@@ -185,10 +151,8 @@ export class Tasks {
 				}
 			}
 
-			case "moveRemoteDirectory":
 			case "renameRemoteDirectory":
-			case "renameRemoteFile":
-			case "moveRemoteFile": {
+			case "renameRemoteFile": {
 				await this.sync.remoteFileSystem.rename({
 					fromRelativePath: delta.from,
 					toRelativePath: delta.to

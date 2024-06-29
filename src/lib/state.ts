@@ -41,9 +41,7 @@ export class State {
 		for (const task of tasks) {
 			switch (task.type) {
 				case "renameRemoteDirectory":
-				case "renameRemoteFile":
-				case "moveRemoteDirectory":
-				case "moveRemoteFile": {
+				case "renameRemoteFile": {
 					for (const oldPath in currentRemoteTree.tree) {
 						if (oldPath.startsWith(task.from + "/") || oldPath === task.from) {
 							const newPath = oldPath.split(task.from).join(task.to)
@@ -88,8 +86,6 @@ export class State {
 					break
 				}
 
-				case "moveLocalDirectory":
-				case "moveLocalFile":
 				case "renameLocalDirectory":
 				case "renameLocalFile": {
 					for (const oldPath in currentLocalTree.tree) {
@@ -251,17 +247,18 @@ export class State {
 	}
 
 	public async saveLocalFileHashes(): Promise<void> {
+		await fs.ensureDir(this.statePath)
+
 		const path = pathModule.join(this.statePath, "localFileHashes")
 		const serialized = serialize(this.sync.localFileHashes)
 
-		await fs.ensureDir(this.statePath)
 		await fs.writeFile(path, serialized)
 	}
 
 	public async loadLocalFileHashes(): Promise<void> {
-		const path = pathModule.join(this.statePath, "localFileHashes")
-
 		await fs.ensureDir(this.statePath)
+
+		const path = pathModule.join(this.statePath, "localFileHashes")
 
 		if (!(await fs.exists(path))) {
 			return
@@ -281,10 +278,10 @@ export class State {
 	}
 
 	public async loadPreviousTrees(): Promise<void> {
+		await fs.ensureDir(this.statePath)
+
 		const localPath = pathModule.join(this.statePath, "previousLocalTree")
 		const remotePath = pathModule.join(this.statePath, "previousRemoteTree")
-
-		await fs.ensureDir(this.statePath)
 
 		if (!(await fs.exists(localPath)) || !(await fs.exists(remotePath))) {
 			return
@@ -297,12 +294,13 @@ export class State {
 	}
 
 	public async savePreviousTrees(): Promise<void> {
+		await fs.ensureDir(this.statePath)
+
 		const localPath = pathModule.join(this.statePath, "previousLocalTree")
 		const remotePath = pathModule.join(this.statePath, "previousRemoteTree")
 		const localSerialized = serialize(this.sync.previousLocalTree)
 		const remoteSerialized = serialize(this.sync.previousRemoteTree)
 
-		await fs.ensureDir(this.statePath)
 		await Promise.all([fs.writeFile(localPath, localSerialized), fs.writeFile(remotePath, remoteSerialized)])
 	}
 }

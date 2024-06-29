@@ -1,7 +1,6 @@
 import type Sync from "./sync"
 import { type LocalTree, type LocalTreeError } from "./filesystems/local"
 import { type RemoteTree } from "./filesystems/remote"
-import pathModule from "path"
 
 export type Delta = { path: string } & (
 	| {
@@ -29,17 +28,7 @@ export type Delta = { path: string } & (
 			type: "downloadFile"
 	  }
 	| {
-			type: "moveLocalFile"
-			from: string
-			to: string
-	  }
-	| {
 			type: "renameLocalFile"
-			from: string
-			to: string
-	  }
-	| {
-			type: "moveRemoteFile"
 			from: string
 			to: string
 	  }
@@ -55,21 +44,6 @@ export type Delta = { path: string } & (
 	  }
 	| {
 			type: "renameLocalDirectory"
-			from: string
-			to: string
-	  }
-	| {
-			type: "moveRemoteDirectory"
-			from: string
-			to: string
-	  }
-	| {
-			type: "moveLocalFile"
-			from: string
-			to: string
-	  }
-	| {
-			type: "moveLocalDirectory"
 			from: string
 			to: string
 	  }
@@ -156,38 +130,15 @@ export class Deltas {
 
 			// Path from current item changed, it was either renamed or moved
 			if (currentItem.path !== previousItem.path) {
-				const currentItemParentPath = pathModule.posix.dirname(currentItem.path)
-				const previousItemParentPath = pathModule.posix.dirname(previousItem.path)
-				const currentItemParent = currentLocalTree.tree[currentItemParentPath]
-				const previousItemParent = previousLocalTree.tree[previousItemParentPath]
-				const currentItemName = pathModule.posix.basename(currentItem.path)
-				const previousItemName = pathModule.posix.basename(previousItem.path)
-
-				// Names changed
-				if (currentItemName !== previousItemName) {
-					deltas.push({
-						type: currentItem.type === "directory" ? "renameRemoteDirectory" : "renameRemoteFile",
-						path: currentItem.path,
-						from: previousItem.path,
-						to: currentItem.path
-					})
-				}
-
-				pathsAdded[currentItem.path] = true
-				pathsAdded[previousItem.path] = true
-
-				// Parents did not change, continue
-				if (currentItemParent?.inode === previousItemParent?.inode) {
-					continue
-				}
-
-				// Item was also moved
 				deltas.push({
-					type: currentItem.type === "directory" ? "moveRemoteDirectory" : "moveRemoteFile",
+					type: currentItem.type === "directory" ? "renameRemoteDirectory" : "renameRemoteFile",
 					path: currentItem.path,
 					from: previousItem.path,
 					to: currentItem.path
 				})
+
+				pathsAdded[currentItem.path] = true
+				pathsAdded[previousItem.path] = true
 			}
 		}
 
@@ -203,38 +154,15 @@ export class Deltas {
 
 			// Path from current item changed, it was either renamed or moved
 			if (currentItem.path !== previousItem.path) {
-				const currentItemParentPath = pathModule.posix.dirname(currentItem.path)
-				const previousItemParentPath = pathModule.posix.dirname(previousItem.path)
-				const currentItemParent = currentRemoteTree.tree[currentItemParentPath]
-				const previousItemParent = previousRemoteTree.tree[previousItemParentPath]
-				const currentItemName = pathModule.posix.basename(currentItem.path)
-				const previousItemName = pathModule.posix.basename(previousItem.path)
-
-				// Names changed
-				if (currentItemName !== previousItemName) {
-					deltas.push({
-						type: currentItem.type === "directory" ? "renameRemoteDirectory" : "renameRemoteFile",
-						path: currentItem.path,
-						from: previousItem.path,
-						to: currentItem.path
-					})
-				}
-
-				pathsAdded[currentItem.path] = true
-				pathsAdded[previousItem.path] = true
-
-				// Parents did not change, continue
-				if (currentItemParent?.uuid === previousItemParent?.uuid) {
-					continue
-				}
-
-				// Item was also moved
 				deltas.push({
-					type: currentItem.type === "directory" ? "moveRemoteDirectory" : "moveRemoteFile",
+					type: currentItem.type === "directory" ? "renameRemoteDirectory" : "renameRemoteFile",
 					path: currentItem.path,
 					from: previousItem.path,
 					to: currentItem.path
 				})
+
+				pathsAdded[currentItem.path] = true
+				pathsAdded[previousItem.path] = true
 			}
 		}
 
@@ -301,13 +229,11 @@ export class Deltas {
 
 			if (currentRemoteItem && currentRemoteItem.type === "file") {
 				if (currentLocalItem && currentLocalItem.lastModified > currentRemoteItem.lastModified) {
-					const itemLocalPath = pathModule.join(this.sync.syncPair.localPath, currentLocalItem.path)
-
 					if (
 						(await this.sync.localFileSystem.createFileHash({
 							relativePath: path,
 							algorithm: "md5"
-						})) !== this.sync.localFileHashes[itemLocalPath]
+						})) !== this.sync.localFileHashes[currentLocalItem.path]
 					) {
 						deltas.push({
 							type: "uploadFile",

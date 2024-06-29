@@ -15,6 +15,7 @@ import {
 	isRelativePathIgnoredByDefault
 } from "../../utils"
 import { v4 as uuidv4 } from "uuid"
+import { LOCAL_TRASH_NAME } from "../../constants"
 
 export type RemoteItem = Prettify<DistributiveOmit<CloudItemTree, "parent"> & { path: string }>
 export type RemoteDirectoryTree = Record<string, RemoteItem>
@@ -39,13 +40,6 @@ export class RemoteFileSystem {
 		timestamp: 0,
 		tree: {},
 		uuids: {}
-	}
-	public treeCache: {
-		tree: Record<string, CloudItemTree>
-		timestamp: number
-	} = {
-		tree: {},
-		timestamp: 0
 	}
 	public previousTreeRawResponse: string = ""
 	private readonly mutex = new Semaphore(1)
@@ -85,9 +79,12 @@ export class RemoteFileSystem {
 		return deviceId
 	}
 
-	public async tree(skipCache: boolean = false): Promise<Record<string, CloudItemTree>> {
+	public async getDirectoryTree(skipCache: boolean = false): Promise<{
+		result: RemoteTree
+		ignored: RemoteTreeIgnored[]
+	}> {
 		const deviceId = await this.getDeviceId()
-		const tree = await this.sync.sdk.api(3).dir().tree({
+		const dir = await this.sync.sdk.api(3).dir().tree({
 			uuid: this.sync.syncPair.remoteParentUUID,
 			deviceId,
 			skipCache,
@@ -95,24 +92,30 @@ export class RemoteFileSystem {
 		})
 
 		// Data did not change, use cache
-		if (tree.files.length === 0 && tree.folders.length === 0) {
-			if (this.treeCache.timestamp === 0) {
+		if (dir.files.length === 0 && dir.folders.length === 0) {
+			if (this.getDirectoryTreeCache.timestamp === 0) {
 				// Re-run but with API caching disabled since our internal client cache is empty
-				return await this.tree(true)
+				return await this.getDirectoryTree(true)
 			}
 
-			return this.treeCache.tree
+			return {
+				result: this.getDirectoryTreeCache,
+				ignored: []
+			}
 		}
 
 		// eslint-disable-next-line quotes
-		const rawEx = tree.raw.split('"randomBytes"')
+		const rawEx = dir.raw.split('"randomBytes"')
 
 		// Compare API response with the previous dataset, this way we can save time computing the tree if it's the same
-		if (rawEx.length === 2 && this.previousTreeRawResponse === rawEx[0] && this.treeCache.timestamp !== 0) {
-			return this.treeCache.tree
+		if (rawEx.length === 2 && this.previousTreeRawResponse === rawEx[0] && this.getDirectoryTreeCache.timestamp !== 0) {
+			return {
+				result: this.getDirectoryTreeCache,
+				ignored: []
+			}
 		}
 
-		const baseFolder = tree.folders[0]
+		const baseFolder = dir.folders[0]
 
 		if (!baseFolder) {
 			throw new Error("Could not get base folder.")
@@ -124,34 +127,119 @@ export class RemoteFileSystem {
 			throw new Error("Invalid base folder parent.")
 		}
 
-		const treeResult: Record<string, CloudItemTree> = {}
 		const folderNames: Record<string, string> = { base: "/" }
+		const tree: RemoteDirectoryTree = {}
+		const uuids: RemoteDirectoryUUIDs = {}
+		const pathsAdded: Record<string, boolean> = {}
+		const ignored: RemoteTreeIgnored[] = []
 
-		for (const folder of tree.folders) {
+		for (const folder of dir.folders) {
 			try {
 				const decrypted = await this.sync.sdk.crypto().decrypt().folderMetadata({ metadata: folder[1] })
+
+				if (folder[2] !== "base" && decrypted.name.length === 0) {
+					continue
+				}
+
 				const parentPath = folder[2] === "base" ? "" : `${folderNames[folder[2]]}/`
 				const folderPath = folder[2] === "base" ? "" : `${parentPath}${decrypted.name}`
+				const localPath = pathModule.join(this.sync.syncPair.localPath, folderPath)
 
 				folderNames[folder[0]] = folderPath
-				treeResult[folderPath] = {
+
+				if (folderPath.startsWith(LOCAL_TRASH_NAME) || decrypted.name.startsWith(LOCAL_TRASH_NAME)) {
+					continue
+				}
+
+				if (this.sync.remoteIgnorer.ignores(folderPath)) {
+					ignored.push({
+						localPath,
+						relativePath: folderPath,
+						reason: "remoteIgnore"
+					})
+
+					continue
+				}
+
+				if (this.sync.syncPair.excludeDotFiles && decrypted.name.startsWith(".")) {
+					ignored.push({
+						localPath,
+						relativePath: folderPath,
+						reason: "dotFile"
+					})
+
+					continue
+				}
+
+				if (isPathOverMaxLength(localPath)) {
+					ignored.push({
+						localPath,
+						relativePath: folderPath,
+						reason: "pathLength"
+					})
+
+					continue
+				}
+
+				if (isNameOverMaxLength(decrypted.name)) {
+					ignored.push({
+						localPath,
+						relativePath: folderPath,
+						reason: "nameLength"
+					})
+
+					continue
+				}
+
+				if (!isValidPath(localPath)) {
+					ignored.push({
+						localPath,
+						relativePath: folderPath,
+						reason: "invalidPath"
+					})
+
+					continue
+				}
+
+				if (isDirectoryPathIgnoredByDefault(folderPath) || isRelativePathIgnoredByDefault(folderPath)) {
+					ignored.push({
+						localPath,
+						relativePath: folderPath,
+						reason: "defaultIgnore"
+					})
+
+					continue
+				}
+
+				const lowercasePath = folderPath.toLowerCase()
+
+				if (pathsAdded[lowercasePath]) {
+					continue
+				}
+
+				pathsAdded[lowercasePath] = true
+
+				const item: RemoteItem = {
 					type: "directory",
 					uuid: folder[0],
 					name: decrypted.name,
-					parent: folder[2],
-					size: 0
+					size: 0,
+					path: folderPath
 				}
+
+				tree[folderPath] = item
+				uuids[folder[0]] = item
 			} catch {
-				continue
+				// TODO: Proper logger
 			}
 		}
 
-		if (Object.keys(folderNames).length === 0 || Object.keys(treeResult).length === 0) {
+		if (Object.keys(folderNames).length === 0) {
 			throw new Error("Could not build directory tree.")
 		}
 
 		await promiseAllSettledChunked(
-			tree.files.map(async file => {
+			dir.files.map(async file => {
 				try {
 					const decrypted = await this.sync.sdk.crypto().decrypt().fileMetadata({ metadata: file[5] })
 
@@ -161,144 +249,111 @@ export class RemoteFileSystem {
 
 					const parentPath = folderNames[file[4]]
 					const filePath = `${parentPath}/${decrypted.name}`
+					const localPath = pathModule.join(this.sync.syncPair.localPath, filePath)
 
-					treeResult[filePath] = {
+					if (filePath.startsWith(LOCAL_TRASH_NAME) || decrypted.name.startsWith(LOCAL_TRASH_NAME)) {
+						return
+					}
+
+					if (this.sync.remoteIgnorer.ignores(filePath)) {
+						ignored.push({
+							localPath,
+							relativePath: filePath,
+							reason: "remoteIgnore"
+						})
+
+						return
+					}
+
+					if (this.sync.syncPair.excludeDotFiles && decrypted.name.startsWith(".")) {
+						ignored.push({
+							localPath,
+							relativePath: filePath,
+							reason: "dotFile"
+						})
+
+						return
+					}
+
+					if (isPathOverMaxLength(localPath)) {
+						ignored.push({
+							localPath,
+							relativePath: filePath,
+							reason: "pathLength"
+						})
+
+						return
+					}
+
+					if (isNameOverMaxLength(decrypted.name)) {
+						ignored.push({
+							localPath,
+							relativePath: filePath,
+							reason: "nameLength"
+						})
+
+						return
+					}
+
+					if (!isValidPath(localPath)) {
+						ignored.push({
+							localPath,
+							relativePath: filePath,
+							reason: "invalidPath"
+						})
+
+						return
+					}
+
+					if (isDirectoryPathIgnoredByDefault(filePath) || isRelativePathIgnoredByDefault(filePath)) {
+						ignored.push({
+							localPath,
+							relativePath: filePath,
+							reason: "defaultIgnore"
+						})
+
+						return
+					}
+
+					const lowercasePath = filePath.toLowerCase()
+
+					if (pathsAdded[lowercasePath]) {
+						return
+					}
+
+					pathsAdded[lowercasePath] = true
+
+					const item: RemoteItem = {
 						type: "file",
 						uuid: file[0],
 						name: decrypted.name,
 						size: decrypted.size,
 						mime: decrypted.mime,
 						lastModified: convertTimestampToMs(decrypted.lastModified),
-						parent: file[4],
 						version: file[6],
 						chunks: file[3],
 						key: decrypted.key,
 						bucket: file[1],
 						region: file[2],
 						creation: decrypted.creation,
-						hash: decrypted.hash
+						hash: decrypted.hash,
+						path: filePath
 					}
+
+					tree[filePath] = item
+					uuids[item.uuid] = item
 				} catch {
 					// TODO: Proper logger
-					// Noop
 				}
 			})
 		)
 
 		this.previousTreeRawResponse = rawEx.length === 2 ? rawEx[0] ?? "" : ""
-		this.treeCache = {
-			tree: treeResult,
-			timestamp: Date.now()
-		}
-
-		return treeResult
-	}
-
-	public async getDirectoryTree(): Promise<{
-		result: RemoteTree
-		ignored: RemoteTreeIgnored[]
-	}> {
-		const dir = await this.tree()
-		const tree: RemoteDirectoryTree = {}
-		const uuids: RemoteDirectoryUUIDs = {}
-		const pathsAdded: Record<string, boolean> = {}
-		const ignored: RemoteTreeIgnored[] = []
-
-		for (const path in dir) {
-			if (dir[path]!.parent === "base" || path.startsWith(".filen.trash.local")) {
-				continue
-			}
-
-			const localPath = pathModule.join(this.sync.syncPair.localPath, path)
-
-			console.log(localPath)
-
-			if (this.sync.remoteIgnorer.ignores(path)) {
-				ignored.push({
-					localPath,
-					relativePath: path,
-					reason: "remoteIgnore"
-				})
-
-				continue
-			}
-
-			if (this.sync.syncPair.excludeDotFiles && dir[path]!.name.startsWith(".")) {
-				ignored.push({
-					localPath,
-					relativePath: path,
-					reason: "dotFile"
-				})
-
-				continue
-			}
-
-			if (isPathOverMaxLength(localPath)) {
-				ignored.push({
-					localPath,
-					relativePath: path,
-					reason: "pathLength"
-				})
-
-				continue
-			}
-
-			if (isNameOverMaxLength(dir[path]!.name)) {
-				ignored.push({
-					localPath,
-					relativePath: path,
-					reason: "nameLength"
-				})
-
-				continue
-			}
-
-			if (!isValidPath(localPath)) {
-				ignored.push({
-					localPath,
-					relativePath: path,
-					reason: "invalidPath"
-				})
-
-				continue
-			}
-
-			if (isDirectoryPathIgnoredByDefault(path) || isRelativePathIgnoredByDefault(path)) {
-				ignored.push({
-					localPath,
-					relativePath: path,
-					reason: "defaultIgnore"
-				})
-
-				continue
-			}
-
-			// TODO: Default ignore list
-
-			const lowercasePath = path.toLowerCase()
-
-			if (pathsAdded[lowercasePath]) {
-				continue
-			}
-
-			pathsAdded[lowercasePath] = true
-
-			const item = {
-				...dir[path]!,
-				path
-			}
-
-			tree[path] = item
-			uuids[item.uuid] = item
-		}
-
 		this.getDirectoryTreeCache = {
 			timestamp: Date.now(),
 			tree,
 			uuids
 		}
-
-		console.log(ignored)
 
 		return {
 			result: {

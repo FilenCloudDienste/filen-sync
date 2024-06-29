@@ -9,7 +9,7 @@ import {
 import pathModule from "path"
 import process from "process"
 import type Sync from "../sync"
-import { SYNC_INTERVAL } from "../../constants"
+import { SYNC_INTERVAL, LOCAL_TRASH_NAME } from "../../constants"
 import crypto from "crypto"
 import { pipeline } from "stream"
 import { promisify } from "util"
@@ -121,7 +121,7 @@ export class LocalFileSystem {
 
 		await promiseAllSettledChunked(
 			dir.map(async entry => {
-				if (entry.startsWith(".filen.trash.local")) {
+				if (entry.startsWith(LOCAL_TRASH_NAME)) {
 					return
 				}
 
@@ -154,7 +154,7 @@ export class LocalFileSystem {
 				const entryPath = `/${isWindows ? entry.replace(/\\/g, "/") : entry}`
 				const itemName = pathModule.posix.basename(entryPath)
 
-				if (itemName.startsWith(".filen.trash.local")) {
+				if (itemName.startsWith(LOCAL_TRASH_NAME)) {
 					return
 				}
 
@@ -339,7 +339,7 @@ export class LocalFileSystem {
 		const localPath = pathModule.join(this.sync.syncPair.localPath, relativePath)
 
 		if (!permanent) {
-			const localTrashPath = pathModule.join(this.sync.syncPair.localPath, ".filen.trash.local")
+			const localTrashPath = pathModule.join(this.sync.syncPair.localPath, LOCAL_TRASH_NAME)
 
 			await fs.ensureDir(localTrashPath)
 

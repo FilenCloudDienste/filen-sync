@@ -6,6 +6,7 @@ import { postMessageToMain } from "./lib/ipc"
 import { Semaphore } from "./semaphore"
 import { SYNC_INTERVAL } from "./constants"
 import { serializeError } from "./utils"
+import Logger from "./lib/logger"
 
 /**
  * SyncWorker
@@ -16,11 +17,12 @@ import { serializeError } from "./utils"
  * @typedef {SyncWorker}
  */
 export class SyncWorker {
-	private readonly syncPairs: SyncPair[]
-	private readonly syncs: Record<string, Sync> = {}
-	private readonly dbPath: string
-	private readonly initSyncPairsMutex = new Semaphore(1)
-	private readonly sdk: FilenSDK
+	public readonly syncPairs: SyncPair[]
+	public readonly syncs: Record<string, Sync> = {}
+	public readonly dbPath: string
+	public readonly initSyncPairsMutex = new Semaphore(1)
+	public readonly sdk: FilenSDK
+	public readonly logger: Logger
 
 	/**
 	 * Creates an instance of SyncWorker.
@@ -35,6 +37,7 @@ export class SyncWorker {
 	public constructor({ syncPairs, dbPath, sdkConfig }: { syncPairs: SyncPair[]; dbPath: string; sdkConfig: FilenSDKConfig }) {
 		this.syncPairs = syncPairs
 		this.dbPath = dbPath
+		this.logger = new Logger(dbPath)
 		this.sdk = new FilenSDK({
 			...sdkConfig,
 			connectToSocket: true,
@@ -65,9 +68,7 @@ export class SyncWorker {
 						type: "syncPairsUpdated"
 					})
 				} catch (e) {
-					// TODO: Proper debugger
-
-					console.error(e)
+					this.logger.log("error", e, "index.setupMainThreadListeners")
 
 					if (e instanceof Error) {
 						postMessageToMain({
@@ -126,8 +127,7 @@ export class SyncWorker {
 				if (!this.syncs[pair.uuid]) {
 					this.syncs[pair.uuid] = new Sync({
 						syncPair: pair,
-						dbPath: this.dbPath,
-						sdk: this.sdk
+						worker: this
 					})
 
 					promises.push(this.syncs[pair.uuid]!.initialize())
@@ -135,6 +135,10 @@ export class SyncWorker {
 			}
 
 			await Promise.all(promises)
+		} catch (e) {
+			this.logger.log("error", e, "index.initSyncPairs")
+
+			throw e
 		} finally {
 			this.initSyncPairsMutex.release()
 		}

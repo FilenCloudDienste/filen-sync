@@ -68,7 +68,13 @@ export class Ignorer {
 			return this.cache[path]!
 		}
 
-		const ig = this.instance.ignores(path.startsWith("\\") ? path.slice(1) : path.startsWith("/") ? path.slice(1) : path)
+		const normalizedPath = path.startsWith("\\") ? path.slice(1) : path.startsWith("/") ? path.slice(1) : path
+
+		if (normalizedPath.length === 0) {
+			return false
+		}
+
+		const ig = this.instance.ignores(normalizedPath)
 
 		this.cache[path] = ig
 

@@ -183,6 +183,8 @@ export class LocalFileSystem {
 					tree[entryPath] = item
 					inodes[stats.ino] = item
 				} catch (e) {
+					this.sync.worker.logger.log("error", e, "filesystems.local.getDirectoryTree")
+
 					if (e instanceof Error) {
 						errors.push({
 							localPath: itemPath,
@@ -451,6 +453,8 @@ export class LocalFileSystem {
 				pauseSignal: this.sync.pauseSignals[signalKey],
 				abortSignal: this.sync.abortControllers[signalKey]?.signal,
 				onError: err => {
+					this.sync.worker.logger.log("error", err, "filesystems.local.upload")
+
 					postMessageToMain({
 						type: "transfer",
 						syncPair: this.sync.syncPair,
@@ -517,6 +521,8 @@ export class LocalFileSystem {
 
 			return item
 		} catch (e) {
+			this.sync.worker.logger.log("error", e, "filesystems.local.upload")
+
 			if (e instanceof Error) {
 				postMessageToMain({
 					type: "transfer",

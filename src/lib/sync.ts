@@ -10,6 +10,7 @@ import { postMessageToMain } from "./ipc"
 import { isMainThread, parentPort } from "worker_threads"
 import Ignorer from "../ignorer"
 import { serializeError } from "../utils"
+import type SyncWorker from ".."
 
 /**
  * Sync
@@ -44,24 +45,25 @@ export class Sync {
 	public paused: boolean
 	public mode: SyncMode
 	public excludeDotFiles: boolean
+	public readonly worker: SyncWorker
 
 	/**
 	 * Creates an instance of Sync.
 	 *
 	 * @constructor
 	 * @public
-	 * @param {{ syncPair: SyncPair; dbPath: string; sdk: FilenSDK }} param0
+	 * @param {{ syncPair: SyncPair; worker: SyncWorker }} param0
 	 * @param {SyncPair} param0.syncPair
-	 * @param {string} param0.dbPath
-	 * @param {FilenSDK} param0.sdk
+	 * @param {SyncWorker} param0.worker
 	 */
-	public constructor({ syncPair, dbPath, sdk }: { syncPair: SyncPair; dbPath: string; sdk: FilenSDK }) {
+	public constructor({ syncPair, worker }: { syncPair: SyncPair; worker: SyncWorker }) {
+		this.worker = worker
 		this.syncPair = syncPair
 		this.mode = syncPair.mode
 		this.paused = syncPair.paused
 		this.excludeDotFiles = syncPair.excludeDotFiles
-		this.dbPath = dbPath
-		this.sdk = sdk
+		this.dbPath = worker.dbPath
+		this.sdk = worker.sdk
 		this.localFileSystem = new LocalFileSystem(this)
 		this.remoteFileSystem = new RemoteFileSystem(this)
 		this.deltas = new Deltas(this)
@@ -143,6 +145,8 @@ export class Sync {
 
 			this.run()
 		} catch (e) {
+			this.worker.logger.log("error", e, "sync.initialize")
+
 			this.isInitialized = false
 
 			throw e
@@ -257,6 +261,8 @@ export class Sync {
 
 			console.log({ deltas, localErrors: currentLocalTree.errors })
 
+			this.worker.logger.log("info", { deltas, localErrors: currentLocalTree.errors })
+
 			postMessageToMain({
 				type: "cycleProcessingTasksStarted",
 				syncPair: this.syncPair
@@ -328,7 +334,7 @@ export class Sync {
 				syncPair: this.syncPair
 			})
 		} catch (e) {
-			console.error(e) // TODO: Proper debugger
+			this.worker.logger.log("error", e, "sync.run")
 
 			if (e instanceof Error) {
 				postMessageToMain({

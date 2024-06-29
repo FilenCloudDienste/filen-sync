@@ -221,6 +221,8 @@ export class Tasks {
 
 						executed.push(doneTask)
 					} catch (e) {
+						this.sync.worker.logger.log("error", e, "tasks.process")
+
 						if (e instanceof Error) {
 							errors.push({
 								path: delta.path,

@@ -230,8 +230,8 @@ export class RemoteFileSystem {
 
 				tree[folderPath] = item
 				uuids[folder[0]] = item
-			} catch {
-				// TODO: Proper logger
+			} catch (e) {
+				this.sync.worker.logger.log("error", e, "filesystems.remote.getDirectoryTree")
 			}
 		}
 
@@ -343,8 +343,8 @@ export class RemoteFileSystem {
 
 					tree[filePath] = item
 					uuids[item.uuid] = item
-				} catch {
-					// TODO: Proper logger
+				} catch (e) {
+					this.sync.worker.logger.log("error", e, "filesystems.remote.getDirectoryTree")
 				}
 			})
 		)
@@ -805,6 +805,8 @@ export class RemoteFileSystem {
 				pauseSignal: this.sync.pauseSignals[signalKey],
 				abortSignal: this.sync.abortControllers[signalKey]?.signal,
 				onError: err => {
+					this.sync.worker.logger.log("error", err, "filesystems.remote.download")
+
 					postMessageToMain({
 						type: "transfer",
 						syncPair: this.sync.syncPair,
@@ -863,6 +865,8 @@ export class RemoteFileSystem {
 
 			return await fs.stat(localPath)
 		} catch (e) {
+			this.sync.worker.logger.log("error", e, "filesystems.remote.download")
+
 			if (e instanceof Error) {
 				postMessageToMain({
 					type: "transfer",
@@ -876,10 +880,6 @@ export class RemoteFileSystem {
 					}
 				})
 			}
-
-			// TODO: Proper logging
-
-			console.error(e)
 
 			throw e
 		} finally {

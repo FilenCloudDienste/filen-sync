@@ -102,10 +102,6 @@ export class SyncWorker {
 				tree: {},
 				uuids: {}
 			}
-			sync.remoteFileSystem.treeCache = {
-				tree: {},
-				timestamp: 0
-			}
 		}
 	}
 

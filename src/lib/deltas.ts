@@ -103,7 +103,7 @@ export class Deltas {
 		previousRemoteTree: RemoteTree
 		currentLocalTreeErrors: LocalTreeError[]
 	}): Promise<Delta[]> {
-		const deltas: Delta[] = []
+		let deltas: Delta[] = []
 		const pathsAdded: Record<string, boolean> = {}
 		const erroredLocalPaths: Record<string, boolean> = {}
 
@@ -277,6 +277,51 @@ export class Deltas {
 					pathsAdded[path] = true
 				}
 			}
+		}
+
+		// Filter deltas by sync mode
+		if (this.sync.mode === "localToCloud") {
+			deltas = deltas.filter(
+				delta =>
+					delta.type === "createRemoteDirectory" ||
+					delta.type === "deleteRemoteDirectory" ||
+					delta.type === "deleteRemoteFile" ||
+					delta.type === "renameRemoteDirectory" ||
+					delta.type === "renameRemoteFile" ||
+					delta.type === "uploadFile"
+			)
+		}
+
+		if (this.sync.mode === "localBackup") {
+			deltas = deltas.filter(
+				delta =>
+					delta.type === "createRemoteDirectory" ||
+					delta.type === "renameRemoteDirectory" ||
+					delta.type === "renameRemoteFile" ||
+					delta.type === "uploadFile"
+			)
+		}
+
+		if (this.sync.mode === "cloudToLocal") {
+			deltas = deltas.filter(
+				delta =>
+					delta.type === "createLocalDirectory" ||
+					delta.type === "deleteLocalDirectory" ||
+					delta.type === "deleteLocalFile" ||
+					delta.type === "renameLocalDirectory" ||
+					delta.type === "renameLocalFile" ||
+					delta.type === "downloadFile"
+			)
+		}
+
+		if (this.sync.mode === "cloudBackup") {
+			deltas = deltas.filter(
+				delta =>
+					delta.type === "createLocalDirectory" ||
+					delta.type === "renameLocalDirectory" ||
+					delta.type === "renameLocalFile" ||
+					delta.type === "downloadFile"
+			)
 		}
 
 		return deltas

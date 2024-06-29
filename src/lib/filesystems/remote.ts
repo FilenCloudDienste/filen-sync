@@ -161,7 +161,7 @@ export class RemoteFileSystem {
 					continue
 				}
 
-				if (this.sync.syncPair.excludeDotFiles && decrypted.name.startsWith(".")) {
+				if (this.sync.excludeDotFiles && decrypted.name.startsWith(".")) {
 					ignored.push({
 						localPath,
 						relativePath: folderPath,
@@ -265,7 +265,7 @@ export class RemoteFileSystem {
 						return
 					}
 
-					if (this.sync.syncPair.excludeDotFiles && decrypted.name.startsWith(".")) {
+					if (this.sync.excludeDotFiles && decrypted.name.startsWith(".")) {
 						ignored.push({
 							localPath,
 							relativePath: filePath,
@@ -576,7 +576,7 @@ export class RemoteFileSystem {
 	}
 
 	/**
-	 * Rename a file/directory inside the remote sync path. Recursively creates intermediate directories if needed.
+	 * Rename/Move a file/directory inside the remote sync path. Recursively creates intermediate directories if needed.
 	 * @date 3/2/2024 - 9:35:12 PM
 	 *
 	 * @public
@@ -758,6 +758,7 @@ export class RemoteFileSystem {
 	 */
 	public async download({ relativePath }: { relativePath: string }): Promise<fs.Stats> {
 		const localPath = pathModule.posix.join(this.sync.syncPair.localPath, relativePath)
+		const tmpLocalPath = pathModule.join(this.sync.syncPair.localPath, LOCAL_TRASH_NAME, uuidv4())
 		const signalKey = `upload:${relativePath}`
 
 		if (!this.sync.pauseSignals[signalKey]) {
@@ -791,12 +792,13 @@ export class RemoteFileSystem {
 				throw new Error(`Could not download ${relativePath}: Not a file.`)
 			}
 
-			const tmpPath = await this.sync.sdk.cloud().downloadFileToLocal({
+			await this.sync.sdk.cloud().downloadFileToLocal({
 				uuid,
 				bucket: item.bucket,
 				region: item.region,
 				chunks: item.chunks,
 				version: item.version,
+				to: tmpLocalPath,
 				key: item.key,
 				size: item.size,
 				pauseSignal: this.sync.pauseSignals[signalKey],
@@ -841,11 +843,11 @@ export class RemoteFileSystem {
 				}
 			})
 
-			await fs.move(tmpPath, localPath, {
+			await fs.utimes(tmpLocalPath, new Date(), new Date(convertTimestampToMs(item.lastModified)))
+
+			await fs.move(tmpLocalPath, localPath, {
 				overwrite: true
 			})
-
-			await fs.utimes(localPath, new Date(), new Date(convertTimestampToMs(item.lastModified)))
 
 			postMessageToMain({
 				type: "transfer",

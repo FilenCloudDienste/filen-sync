@@ -3,6 +3,7 @@ import { type Delta } from "./deltas"
 import { promiseAllSettledChunked } from "../utils"
 import { type CloudItem } from "@filen/sdk"
 import fs from "fs-extra"
+import { Semaphore } from "../semaphore"
 
 export type TaskError = {
 	path: string
@@ -82,6 +83,7 @@ export type DoneTask = { path: string } & (
  */
 export class Tasks {
 	private readonly sync: Sync
+	private readonly mutex = new Semaphore(1)
 
 	/**
 	 * Creates an instance of Tasks.
@@ -205,6 +207,15 @@ export class Tasks {
 			deltas
 				.sort((a, b) => a.path.split("/").length - b.path.split("/").length)
 				.map(async delta => {
+					const semaphoreToAcquire =
+						delta.type === "createRemoteDirectory" ||
+						delta.type === "renameLocalDirectory" ||
+						delta.type === "deleteRemoteDirectory"
+							? this.mutex
+							: null
+
+					await semaphoreToAcquire?.acquire()
+
 					try {
 						const doneTask = await this.processTask({ delta })
 
@@ -217,6 +228,8 @@ export class Tasks {
 								error: e
 							})
 						}
+					} finally {
+						semaphoreToAcquire?.release()
 					}
 				})
 		)

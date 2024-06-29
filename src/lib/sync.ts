@@ -1,5 +1,5 @@
 import FilenSDK, { type PauseSignal } from "@filen/sdk"
-import { type SyncPair, type SyncMessage } from "../types"
+import { type SyncPair, type SyncMessage, type SyncMode } from "../types"
 import { SYNC_INTERVAL } from "../constants"
 import { LocalFileSystem, LocalTree } from "./filesystems/local"
 import { RemoteFileSystem, RemoteTree } from "./filesystems/remote"
@@ -40,6 +40,9 @@ export class Sync {
 	public readonly pauseSignals: Record<string, PauseSignal> = {}
 	public readonly localIgnorer: Ignorer
 	public readonly remoteIgnorer: Ignorer
+	public paused: boolean
+	public mode: SyncMode
+	public excludeDotFiles: boolean
 
 	/**
 	 * Creates an instance of Sync.
@@ -53,6 +56,9 @@ export class Sync {
 	 */
 	public constructor({ syncPair, dbPath, sdk }: { syncPair: SyncPair; dbPath: string; sdk: FilenSDK }) {
 		this.syncPair = syncPair
+		this.mode = syncPair.mode
+		this.paused = syncPair.paused
+		this.excludeDotFiles = syncPair.excludeDotFiles
 		this.dbPath = dbPath
 		this.sdk = sdk
 		this.localFileSystem = new LocalFileSystem(this)
@@ -103,6 +109,16 @@ export class Sync {
 				this.localIgnorer.update(message.data).catch(console.error)
 			} else if (message.type === "updateRemoteIgnorer" && message.syncPair.uuid === this.syncPair.uuid) {
 				this.remoteIgnorer.update(message.data).catch(console.error)
+			} else if (message.type === "pauseSyncPair" && message.syncPair.uuid === this.syncPair.uuid) {
+				this.paused = true
+			} else if (message.type === "resumeSyncPair" && message.syncPair.uuid === this.syncPair.uuid) {
+				this.paused = false
+			} else if (message.type === "changeSyncPairMode" && message.syncPair.uuid === this.syncPair.uuid) {
+				this.mode = message.data.mode
+			} else if (message.type === "syncPairExcludeDotFiles" && message.syncPair.uuid === this.syncPair.uuid) {
+				this.excludeDotFiles = true
+			} else if (message.type === "syncPairIncludeDotFiles" && message.syncPair.uuid === this.syncPair.uuid) {
+				this.excludeDotFiles = false
 			}
 		})
 	}
@@ -133,7 +149,7 @@ export class Sync {
 	}
 
 	private async run(): Promise<void> {
-		if (this.syncPair.paused) {
+		if (this.paused) {
 			postMessageToMain({
 				type: "cyclePaused",
 				syncPair: this.syncPair

@@ -11,8 +11,8 @@ export type SyncPair = {
 	remotePath: string
 	remoteParentUUID: string
 	mode: SyncMode
-	paused: boolean
 	excludeDotFiles: boolean
+	paused: boolean
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -207,4 +207,27 @@ export type SyncMessage =
 	  }
 	| {
 			type: "resetSyncPairCache"
+	  }
+	| {
+			type: "pauseSyncPair"
+			syncPair: SyncPair
+	  }
+	| {
+			type: "resumeSyncPair"
+			syncPair: SyncPair
+	  }
+	| {
+			type: "changeSyncPairMode"
+			syncPair: SyncPair
+			data: {
+				mode: SyncMode
+			}
+	  }
+	| {
+			type: "syncPairExcludeDotFiles"
+			syncPair: SyncPair
+	  }
+	| {
+			type: "syncPairIncludeDotFiles"
+			syncPair: SyncPair
 	  }

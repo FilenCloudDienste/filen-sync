@@ -158,7 +158,7 @@ export class LocalFileSystem {
 					return
 				}
 
-				if (this.sync.syncPair.excludeDotFiles && itemName.startsWith(".")) {
+				if (this.sync.excludeDotFiles && itemName.startsWith(".")) {
 					ignored.push({
 						localPath: itemPath,
 						relativePath: entry,

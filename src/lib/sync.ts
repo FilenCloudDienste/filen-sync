@@ -9,6 +9,7 @@ import State from "./state"
 import { postMessageToMain } from "./ipc"
 import { isMainThread, parentPort } from "worker_threads"
 import Ignorer from "../ignorer"
+import { serializeError } from "../utils"
 
 /**
  * Sync
@@ -106,9 +107,9 @@ export class Sync {
 
 				pauseSignal.resume()
 			} else if (message.type === "updateLocalIgnorer" && message.syncPair.uuid === this.syncPair.uuid) {
-				this.localIgnorer.update(message.data).catch(console.error)
+				this.localIgnorer.update(message.data?.content).catch(console.error)
 			} else if (message.type === "updateRemoteIgnorer" && message.syncPair.uuid === this.syncPair.uuid) {
-				this.remoteIgnorer.update(message.data).catch(console.error)
+				this.remoteIgnorer.update(message.data?.content).catch(console.error)
 			} else if (message.type === "pauseSyncPair" && message.syncPair.uuid === this.syncPair.uuid) {
 				this.paused = true
 			} else if (message.type === "resumeSyncPair" && message.syncPair.uuid === this.syncPair.uuid) {
@@ -204,19 +205,28 @@ export class Sync {
 			postMessageToMain({
 				type: "localTreeErrors",
 				syncPair: this.syncPair,
-				data: currentLocalTree.errors
+				data: {
+					errors: currentLocalTree.errors.map(e => ({
+						...e,
+						error: serializeError(e.error)
+					}))
+				}
 			})
 
 			postMessageToMain({
 				type: "localTreeIgnored",
 				syncPair: this.syncPair,
-				data: currentLocalTree.ignored
+				data: {
+					ignored: currentLocalTree.ignored
+				}
 			})
 
 			postMessageToMain({
 				type: "remoteTreeIgnored",
 				syncPair: this.syncPair,
-				data: currentRemoteTree.ignored
+				data: {
+					ignored: currentRemoteTree.ignored
+				}
 			})
 
 			postMessageToMain({
@@ -240,7 +250,9 @@ export class Sync {
 			postMessageToMain({
 				type: "deltas",
 				syncPair: this.syncPair,
-				data: deltas
+				data: {
+					deltas
+				}
 			})
 
 			console.log({ deltas, localErrors: currentLocalTree.errors })
@@ -263,8 +275,15 @@ export class Sync {
 				type: "doneTasks",
 				syncPair: this.syncPair,
 				data: {
-					tasks: doneTasks,
-					errors
+					tasks: doneTasks.map(task => ({
+						path: task.path,
+						type: task.type,
+						...(task.type === "uploadFile" ? { item: task.item } : {})
+					})),
+					errors: errors.map(e => ({
+						...e,
+						error: serializeError(e.error)
+					}))
 				}
 			})
 
@@ -315,7 +334,9 @@ export class Sync {
 				postMessageToMain({
 					type: "cycleError",
 					syncPair: this.syncPair,
-					data: e
+					data: {
+						error: serializeError(e)
+					}
 				})
 			}
 		} finally {

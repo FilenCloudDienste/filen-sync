@@ -12,7 +12,8 @@ import {
 	isNameOverMaxLength,
 	isValidPath,
 	isDirectoryPathIgnoredByDefault,
-	isRelativePathIgnoredByDefault
+	isRelativePathIgnoredByDefault,
+	serializeError
 } from "../../utils"
 import { v4 as uuidv4 } from "uuid"
 import { LOCAL_TRASH_NAME } from "../../constants"
@@ -812,7 +813,7 @@ export class RemoteFileSystem {
 							type: "error",
 							relativePath,
 							localPath,
-							error: err
+							error: serializeError(err)
 						}
 					})
 				},
@@ -871,7 +872,7 @@ export class RemoteFileSystem {
 						type: "error",
 						relativePath,
 						localPath,
-						error: e
+						error: serializeError(e)
 					}
 				})
 			}

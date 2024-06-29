@@ -5,6 +5,7 @@ import { isMainThread, parentPort } from "worker_threads"
 import { postMessageToMain } from "./lib/ipc"
 import { Semaphore } from "./semaphore"
 import { SYNC_INTERVAL } from "./constants"
+import { serializeError } from "./utils"
 
 /**
  * SyncWorker
@@ -71,7 +72,9 @@ export class SyncWorker {
 					if (e instanceof Error) {
 						postMessageToMain({
 							type: "error",
-							data: e
+							data: {
+								error: serializeError(e)
+							}
 						})
 					}
 				}
@@ -150,4 +153,5 @@ export class SyncWorker {
 	}
 }
 
+export * from "./utils"
 export default SyncWorker

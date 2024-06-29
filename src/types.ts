@@ -2,6 +2,7 @@ import { type LocalTreeError, type LocalTreeIgnored } from "./lib/filesystems/lo
 import { type Delta } from "./lib/deltas"
 import { type DoneTask, type TaskError } from "./lib/tasks"
 import { type RemoteTreeIgnored } from "./lib/filesystems/remote"
+import { type SerializedError } from "./utils"
 
 export type SyncMode = "twoWay" | "localToCloud" | "localBackup" | "cloudToLocal" | "cloudBackup"
 
@@ -78,30 +79,38 @@ export type SyncMessage =
 								type: "error"
 								relativePath: string
 								localPath: string
-								error: Error
+								error: SerializedError
 						  }
 			  }
 			| {
 					type: "localTreeErrors"
-					data: LocalTreeError[]
+					data: {
+						errors: Prettify<Omit<LocalTreeError, "error"> & { error: SerializedError }>[]
+					}
 			  }
 			| {
 					type: "localTreeIgnored"
-					data: LocalTreeIgnored[]
+					data: {
+						ignored: LocalTreeIgnored[]
+					}
 			  }
 			| {
 					type: "remoteTreeIgnored"
-					data: RemoteTreeIgnored[]
+					data: {
+						ignored: RemoteTreeIgnored[]
+					}
 			  }
 			| {
 					type: "deltas"
-					data: Delta[]
+					data: {
+						deltas: Delta[]
+					}
 			  }
 			| {
 					type: "doneTasks"
 					data: {
-						tasks: DoneTask[]
-						errors: TaskError[]
+						tasks: Prettify<Omit<DoneTask, "stats">>[]
+						errors: Prettify<Omit<TaskError, "error"> & { error: SerializedError }>[]
 					}
 			  }
 			| {
@@ -112,7 +121,9 @@ export type SyncMessage =
 			  }
 			| {
 					type: "cycleError"
-					data: Error
+					data: {
+						error: SerializedError
+					}
 			  }
 			| {
 					type: "cycleSuccess"
@@ -190,7 +201,9 @@ export type SyncMessage =
 	  }
 	| {
 			type: "error"
-			data: Error
+			data: {
+				error: SerializedError
+			}
 	  }
 	| {
 			type: "syncPairsUpdated"
@@ -198,12 +211,16 @@ export type SyncMessage =
 	| {
 			type: "updateLocalIgnorer"
 			syncPair: SyncPair
-			data?: string
+			data?: {
+				content?: string
+			}
 	  }
 	| {
 			type: "updateRemoteIgnorer"
 			syncPair: SyncPair
-			data?: string
+			data?: {
+				content?: string
+			}
 	  }
 	| {
 			type: "resetSyncPairCache"

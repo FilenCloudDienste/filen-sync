@@ -4,7 +4,8 @@ import {
 	promiseAllSettledChunked,
 	isRelativePathIgnoredByDefault,
 	isDirectoryPathIgnoredByDefault,
-	isSystemPathIgnoredByDefault
+	isSystemPathIgnoredByDefault,
+	serializeError
 } from "../../utils"
 import pathModule from "path"
 import process from "process"
@@ -259,15 +260,17 @@ export class LocalFileSystem {
 	 * @returns {Promise<void>}
 	 */
 	public async waitForLocalDirectoryChanges(): Promise<void> {
+		const waitTimeout = SYNC_INTERVAL * 2
+
 		await new Promise<void>(resolve => {
-			if (Date.now() > this.lastDirectoryChangeTimestamp + SYNC_INTERVAL) {
+			if (Date.now() > this.lastDirectoryChangeTimestamp + waitTimeout) {
 				resolve()
 
 				return
 			}
 
 			const wait = setInterval(() => {
-				if (Date.now() > this.lastDirectoryChangeTimestamp + SYNC_INTERVAL) {
+				if (Date.now() > this.lastDirectoryChangeTimestamp + waitTimeout) {
 					clearInterval(wait)
 
 					resolve()
@@ -456,7 +459,7 @@ export class LocalFileSystem {
 							type: "error",
 							relativePath,
 							localPath,
-							error: err
+							error: serializeError(err)
 						}
 					})
 				},
@@ -523,7 +526,7 @@ export class LocalFileSystem {
 						type: "error",
 						relativePath,
 						localPath,
-						error: e
+						error: serializeError(e)
 					}
 				})
 			}

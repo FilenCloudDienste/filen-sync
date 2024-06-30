@@ -83,6 +83,7 @@ export class RemoteFileSystem {
 	public async getDirectoryTree(skipCache: boolean = false): Promise<{
 		result: RemoteTree
 		ignored: RemoteTreeIgnored[]
+		changed: boolean
 	}> {
 		const deviceId = await this.getDeviceId()
 		const dir = await this.sync.sdk.api(3).dir().tree({
@@ -101,7 +102,8 @@ export class RemoteFileSystem {
 
 			return {
 				result: this.getDirectoryTreeCache,
-				ignored: []
+				ignored: [],
+				changed: false
 			}
 		}
 
@@ -112,7 +114,8 @@ export class RemoteFileSystem {
 		if (rawEx.length === 2 && this.previousTreeRawResponse === rawEx[0] && this.getDirectoryTreeCache.timestamp !== 0) {
 			return {
 				result: this.getDirectoryTreeCache,
-				ignored: []
+				ignored: [],
+				changed: false
 			}
 		}
 
@@ -361,7 +364,8 @@ export class RemoteFileSystem {
 				tree,
 				uuids
 			},
-			ignored
+			ignored,
+			changed: true
 		}
 	}
 

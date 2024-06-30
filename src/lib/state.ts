@@ -287,9 +287,12 @@ export class State {
 			return
 		}
 
-		const [localBuffer, remoteBuffer] = await Promise.all([fs.readFile(localPath), fs.readFile(remotePath)])
+		const localBuffer = await fs.readFile(localPath)
 
 		this.sync.previousLocalTree = deserialize(localBuffer)
+
+		const remoteBuffer = await fs.readFile(remotePath)
+
 		this.sync.previousRemoteTree = deserialize(remoteBuffer)
 	}
 
@@ -298,10 +301,9 @@ export class State {
 
 		const localPath = pathModule.join(this.statePath, "previousLocalTree")
 		const remotePath = pathModule.join(this.statePath, "previousRemoteTree")
-		const localSerialized = serialize(this.sync.previousLocalTree)
-		const remoteSerialized = serialize(this.sync.previousRemoteTree)
 
-		await Promise.all([fs.writeFile(localPath, localSerialized), fs.writeFile(remotePath, remoteSerialized)])
+		await fs.writeFile(localPath, serialize(this.sync.previousLocalTree))
+		await fs.writeFile(remotePath, serialize(this.sync.previousRemoteTree))
 	}
 }
 

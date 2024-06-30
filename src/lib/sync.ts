@@ -109,9 +109,13 @@ export class Sync {
 
 				pauseSignal.resume()
 			} else if (message.type === "updateLocalIgnorer" && message.syncPair.uuid === this.syncPair.uuid) {
-				this.localIgnorer.update(message.data?.content).catch(console.error)
+				this.localIgnorer.update(message.data?.content).catch(err => {
+					this.worker.logger.log("error", err, "sync.setupMainThreadListeners")
+				})
 			} else if (message.type === "updateRemoteIgnorer" && message.syncPair.uuid === this.syncPair.uuid) {
-				this.remoteIgnorer.update(message.data?.content).catch(console.error)
+				this.remoteIgnorer.update(message.data?.content).catch(err => {
+					this.worker.logger.log("error", err, "sync.setupMainThreadListeners")
+				})
 			} else if (message.type === "pauseSyncPair" && message.syncPair.uuid === this.syncPair.uuid) {
 				this.paused = true
 			} else if (message.type === "resumeSyncPair" && message.syncPair.uuid === this.syncPair.uuid) {
@@ -201,6 +205,15 @@ export class Sync {
 				this.remoteFileSystem.getDirectoryTree()
 			])
 
+			if (!currentLocalTree.changed && !currentRemoteTree.changed) {
+				postMessageToMain({
+					type: "cycleNoChanges",
+					syncPair: this.syncPair
+				})
+
+				return
+			}
+
 			postMessageToMain({
 				type: "cycleGettingTreesDone",
 				syncPair: this.syncPair
@@ -259,8 +272,6 @@ export class Sync {
 				}
 			})
 
-			console.log({ deltas, localErrors: currentLocalTree.errors })
-
 			this.worker.logger.log("info", { deltas, localErrors: currentLocalTree.errors })
 
 			postMessageToMain({
@@ -269,8 +280,6 @@ export class Sync {
 			})
 
 			const { doneTasks, errors } = await this.tasks.process({ deltas })
-
-			console.log({ doneTasks, errors })
 
 			postMessageToMain({
 				type: "cycleProcessingTasksDone",

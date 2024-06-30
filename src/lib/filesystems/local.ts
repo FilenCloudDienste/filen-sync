@@ -79,21 +79,11 @@ export class LocalFileSystem {
 		this.sync = sync
 	}
 
-	/**
-	 * Get the local directory tree.
-	 *
-	 * @public
-	 * @async
-	 * @returns {Promise<{
-	 * 		result: LocalTree
-	 * 		errors: LocalTreeError[],
-	 * 		ignored:  LocalTreeIgnored[]
-	 * 	}>}
-	 */
 	public async getDirectoryTree(): Promise<{
 		result: LocalTree
 		errors: LocalTreeError[]
 		ignored: LocalTreeIgnored[]
+		changed: boolean
 	}> {
 		if (
 			this.lastDirectoryChangeTimestamp > 0 &&
@@ -106,7 +96,8 @@ export class LocalFileSystem {
 					inodes: this.getDirectoryTreeCache.inodes
 				},
 				errors: [],
-				ignored: []
+				ignored: [],
+				changed: false
 			}
 		}
 
@@ -208,7 +199,8 @@ export class LocalFileSystem {
 				inodes
 			},
 			errors,
-			ignored
+			ignored,
+			changed: true
 		}
 	}
 

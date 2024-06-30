@@ -147,6 +147,9 @@ export type SyncMessage =
 					type: "cycleProcessingDeltasDone"
 			  }
 			| {
+					type: "cycleNoChanges"
+			  }
+			| {
 					type: "cycleProcessingTasksStarted"
 			  }
 			| {

@@ -1,14 +1,9 @@
 import pathModule from "path"
-import fs from "fs-extra"
 import { type RotatingFileStream, createStream } from "rotating-file-stream"
 import { Semaphore } from "../semaphore"
 
 export class Logger {
 	private readonly path: string
-	private readonly debugPath: string
-	private readonly errorPath: string
-	private readonly infoPath: string
-	private readonly warnPath: string
 	private readonly debugStream: RotatingFileStream
 	private readonly infoStream: RotatingFileStream
 	private readonly errorStream: RotatingFileStream
@@ -20,46 +15,41 @@ export class Logger {
 
 	public constructor(dbPath: string) {
 		this.path = pathModule.join(dbPath, "logs")
-		this.debugPath = pathModule.join(this.path, "debug.log")
-		this.errorPath = pathModule.join(this.path, "error.log")
-		this.infoPath = pathModule.join(this.path, "info.log")
-		this.warnPath = pathModule.join(this.path, "warn.log")
 
-		fs.ensureFileSync(this.debugPath)
-		fs.ensureFileSync(this.errorPath)
-		fs.ensureFileSync(this.infoPath)
-		fs.ensureFileSync(this.warnPath)
-
-		this.debugStream = createStream(this.debugPath, {
+		this.debugStream = createStream("debug.log", {
 			size: "10M",
 			interval: "5m",
 			compress: "gzip",
 			maxFiles: 3,
-			encoding: "utf-8"
+			encoding: "utf-8",
+			path: this.path
 		})
 
-		this.infoStream = createStream(this.infoPath, {
+		this.infoStream = createStream("info.log", {
 			size: "10M",
 			interval: "5m",
 			compress: "gzip",
 			maxFiles: 3,
-			encoding: "utf-8"
+			encoding: "utf-8",
+			path: this.path
 		})
 
-		this.warnStream = createStream(this.warnPath, {
+		this.warnStream = createStream("warn.log", {
 			size: "10M",
 			interval: "5m",
 			compress: "gzip",
 			maxFiles: 3,
-			encoding: "utf-8"
+			encoding: "utf-8",
+			path: this.path
 		})
 
-		this.errorStream = createStream(this.errorPath, {
+		this.errorStream = createStream("error.log", {
 			size: "10M",
 			interval: "5m",
 			compress: "gzip",
 			maxFiles: 3,
-			encoding: "utf-8"
+			encoding: "utf-8",
+			path: this.path
 		})
 	}
 

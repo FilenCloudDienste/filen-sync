@@ -65,7 +65,7 @@ export function throttlePostMessageToMain(message: SyncMessage, callback: (messa
  */
 export function postMessageToMain(message: SyncMessage): void {
 	throttlePostMessageToMain(message, throttledMessage => {
-		if (!isMainThread || !parentPort) {
+		if (isMainThread || !parentPort) {
 			if (process.send) {
 				process.send(throttledMessage)
 			}

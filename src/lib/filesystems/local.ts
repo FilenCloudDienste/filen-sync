@@ -321,17 +321,6 @@ export class LocalFileSystem {
 		return await fs.stat(localPath)
 	}
 
-	/**
-	 * Delete a file/directory inside the local sync path.
-	 * @date 3/3/2024 - 10:05:55 PM
-	 *
-	 * @public
-	 * @async
-	 * @param {{ relativePath: string; permanent?: boolean }} param0
-	 * @param {string} param0.relativePath
-	 * @param {boolean} [param0.permanent=false]
-	 * @returns {Promise<void>}
-	 */
 	public async unlink({ relativePath, permanent = false }: { relativePath: string; permanent?: boolean }): Promise<void> {
 		const localPath = pathModule.join(this.sync.syncPair.localPath, relativePath)
 
@@ -355,17 +344,6 @@ export class LocalFileSystem {
 		})
 	}
 
-	/**
-	 * Rename a file/directory inside the local sync path. Recursively creates intermediate directories if needed.
-	 * @date 3/2/2024 - 12:41:15 PM
-	 *
-	 * @public
-	 * @async
-	 * @param {{ fromRelativePath: string; toRelativePath: string }} param0
-	 * @param {string} param0.fromRelativePath
-	 * @param {string} param0.toRelativePath
-	 * @returns {Promise<fs.Stats>}
-	 */
 	public async rename({ fromRelativePath, toRelativePath }: { fromRelativePath: string; toRelativePath: string }): Promise<fs.Stats> {
 		const fromLocalPath = pathModule.join(this.sync.syncPair.localPath, fromRelativePath)
 		const toLocalPath = pathModule.join(this.sync.syncPair.localPath, toRelativePath)
@@ -533,6 +511,26 @@ export class LocalFileSystem {
 		} finally {
 			delete this.sync.pauseSignals[signalKey]
 			delete this.sync.abortControllers[signalKey]
+		}
+	}
+
+	public async isPathWritable(path: string): Promise<boolean> {
+		try {
+			await fs.access(path, fs.constants.W_OK | fs.constants.R_OK)
+
+			return true
+		} catch {
+			return false
+		}
+	}
+
+	public async isPathReadable(path: string): Promise<boolean> {
+		try {
+			await fs.access(path, fs.constants.R_OK)
+
+			return true
+		} catch {
+			return false
 		}
 	}
 }

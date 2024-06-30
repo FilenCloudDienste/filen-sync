@@ -891,6 +891,20 @@ export class RemoteFileSystem {
 			delete this.sync.abortControllers[signalKey]
 		}
 	}
+
+	public async remotePathExisting(): Promise<boolean> {
+		try {
+			const present = await this.sync.sdk.api(3).dir().present({ uuid: this.sync.syncPair.remoteParentUUID })
+
+			if (!present.present || present.trash) {
+				return false
+			}
+
+			return true
+		} catch {
+			return false
+		}
+	}
 }
 
 export default RemoteFileSystem

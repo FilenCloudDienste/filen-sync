@@ -46,6 +46,7 @@ export class Sync {
 	public mode: SyncMode
 	public excludeDotFiles: boolean
 	public readonly worker: SyncWorker
+	public removed: boolean = false
 
 	/**
 	 * Creates an instance of Sync.
@@ -138,7 +139,14 @@ export class Sync {
 		this.isInitialized = true
 
 		try {
-			//local/remote smoke test
+			const [localSmokeTest, remoteSmokeTest] = await Promise.all([
+				this.localFileSystem.isPathWritable(this.syncPair.localPath),
+				this.remoteFileSystem.remotePathExisting()
+			])
+
+			if (!localSmokeTest || !remoteSmokeTest) {
+				throw new Error("Smoke tests failed. Either the local or remote path is not readable/writable")
+			}
 
 			await Promise.all([
 				this.localFileSystem.startDirectoryWatcher(),
@@ -158,6 +166,15 @@ export class Sync {
 	}
 
 	private async run(): Promise<void> {
+		if (this.removed) {
+			postMessageToMain({
+				type: "syncPairRemoved",
+				syncPair: this.syncPair
+			})
+
+			return
+		}
+
 		if (this.paused) {
 			postMessageToMain({
 				type: "cyclePaused",
@@ -180,6 +197,53 @@ export class Sync {
 			type: "cycleStarted",
 			syncPair: this.syncPair
 		})
+
+		const [localSmokeTest, remoteSmokeTest] = await Promise.all([
+			this.localFileSystem.isPathWritable(this.syncPair.localPath),
+			this.remoteFileSystem.remotePathExisting()
+		])
+
+		if (!localSmokeTest) {
+			setTimeout(() => {
+				this.run()
+			}, SYNC_INTERVAL)
+
+			postMessageToMain({
+				type: "cycleLocalSmokeTestFailed",
+				syncPair: this.syncPair,
+				data: {
+					error: serializeError(new Error("Local path is not writable."))
+				}
+			})
+
+			postMessageToMain({
+				type: "cycleRestarting",
+				syncPair: this.syncPair
+			})
+
+			return
+		}
+
+		if (!remoteSmokeTest) {
+			setTimeout(() => {
+				this.run()
+			}, SYNC_INTERVAL)
+
+			postMessageToMain({
+				type: "cycleLocalSmokeTestFailed",
+				syncPair: this.syncPair,
+				data: {
+					error: serializeError(new Error("Remote path is not present or in the trash."))
+				}
+			})
+
+			postMessageToMain({
+				type: "cycleRestarting",
+				syncPair: this.syncPair
+			})
+
+			return
+		}
 
 		try {
 			postMessageToMain({

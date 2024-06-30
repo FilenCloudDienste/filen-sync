@@ -1,9 +1,11 @@
 import type Sync from "./sync"
 import { type Delta } from "./deltas"
-import { promiseAllSettledChunked } from "../utils"
+import { promiseAllSettledChunked, serializeError } from "../utils"
 import { type CloudItem } from "@filen/sdk"
 import fs from "fs-extra"
 import { Semaphore } from "../semaphore"
+import { postMessageToMain } from "./ipc"
+import pathModule from "path"
 
 export type TaskError = {
 	path: string
@@ -109,75 +111,307 @@ export class Tasks {
 	private async processTask({ delta }: { delta: Delta }): Promise<DoneTask> {
 		switch (delta.type) {
 			case "createLocalDirectory": {
-				const stats = await this.sync.localFileSystem.mkdir({ relativePath: delta.path })
+				try {
+					const stats = await this.sync.localFileSystem.mkdir({ relativePath: delta.path })
 
-				return {
-					...delta,
-					stats
+					postMessageToMain({
+						type: "transfer",
+						syncPair: this.sync.syncPair,
+						data: {
+							of: delta.type,
+							type: "success",
+							relativePath: delta.path,
+							localPath: pathModule.join(this.sync.syncPair.localPath, delta.path)
+						}
+					})
+
+					return {
+						...delta,
+						stats
+					}
+				} catch (e) {
+					if (e instanceof Error) {
+						postMessageToMain({
+							type: "transfer",
+							syncPair: this.sync.syncPair,
+							data: {
+								of: delta.type,
+								type: "error",
+								relativePath: delta.path,
+								localPath: pathModule.join(this.sync.syncPair.localPath, delta.path),
+								error: serializeError(e)
+							}
+						})
+					}
+
+					throw e
 				}
 			}
 
 			case "createRemoteDirectory": {
-				const uuid = await this.sync.remoteFileSystem.mkdir({ relativePath: delta.path })
+				try {
+					const uuid = await this.sync.remoteFileSystem.mkdir({ relativePath: delta.path })
 
-				return {
-					...delta,
-					uuid
+					postMessageToMain({
+						type: "transfer",
+						syncPair: this.sync.syncPair,
+						data: {
+							of: delta.type,
+							type: "success",
+							relativePath: delta.path,
+							localPath: pathModule.join(this.sync.syncPair.localPath, delta.path)
+						}
+					})
+
+					return {
+						...delta,
+						uuid
+					}
+				} catch (e) {
+					if (e instanceof Error) {
+						postMessageToMain({
+							type: "transfer",
+							syncPair: this.sync.syncPair,
+							data: {
+								of: delta.type,
+								type: "error",
+								relativePath: delta.path,
+								localPath: pathModule.join(this.sync.syncPair.localPath, delta.path),
+								error: serializeError(e)
+							}
+						})
+					}
+
+					throw e
 				}
 			}
 
 			case "deleteLocalDirectory":
 			case "deleteLocalFile": {
-				await this.sync.localFileSystem.unlink({ relativePath: delta.path })
+				try {
+					await this.sync.localFileSystem.unlink({ relativePath: delta.path })
 
-				return delta
+					postMessageToMain({
+						type: "transfer",
+						syncPair: this.sync.syncPair,
+						data: {
+							of: delta.type,
+							type: "success",
+							relativePath: delta.path,
+							localPath: pathModule.join(this.sync.syncPair.localPath, delta.path)
+						}
+					})
+
+					return delta
+				} catch (e) {
+					if (e instanceof Error) {
+						postMessageToMain({
+							type: "transfer",
+							syncPair: this.sync.syncPair,
+							data: {
+								of: delta.type,
+								type: "error",
+								relativePath: delta.path,
+								localPath: pathModule.join(this.sync.syncPair.localPath, delta.path),
+								error: serializeError(e)
+							}
+						})
+					}
+
+					throw e
+				}
 			}
 
 			case "deleteRemoteDirectory":
 			case "deleteRemoteFile": {
-				await this.sync.remoteFileSystem.unlink({ relativePath: delta.path })
+				try {
+					await this.sync.remoteFileSystem.unlink({ relativePath: delta.path })
 
-				return delta
+					postMessageToMain({
+						type: "transfer",
+						syncPair: this.sync.syncPair,
+						data: {
+							of: delta.type,
+							type: "success",
+							relativePath: delta.path,
+							localPath: pathModule.join(this.sync.syncPair.localPath, delta.path)
+						}
+					})
+
+					return delta
+				} catch (e) {
+					if (e instanceof Error) {
+						postMessageToMain({
+							type: "transfer",
+							syncPair: this.sync.syncPair,
+							data: {
+								of: delta.type,
+								type: "error",
+								relativePath: delta.path,
+								localPath: pathModule.join(this.sync.syncPair.localPath, delta.path),
+								error: serializeError(e)
+							}
+						})
+					}
+
+					throw e
+				}
 			}
 
 			case "renameLocalDirectory":
 			case "renameLocalFile": {
-				const stats = await this.sync.localFileSystem.rename({
-					fromRelativePath: delta.from,
-					toRelativePath: delta.to
-				})
+				try {
+					const stats = await this.sync.localFileSystem.rename({
+						fromRelativePath: delta.from,
+						toRelativePath: delta.to
+					})
 
-				return {
-					...delta,
-					stats
+					postMessageToMain({
+						type: "transfer",
+						syncPair: this.sync.syncPair,
+						data: {
+							of: delta.type,
+							type: "success",
+							relativePath: delta.path,
+							localPath: pathModule.join(this.sync.syncPair.localPath, delta.path)
+						}
+					})
+
+					return {
+						...delta,
+						stats
+					}
+				} catch (e) {
+					if (e instanceof Error) {
+						postMessageToMain({
+							type: "transfer",
+							syncPair: this.sync.syncPair,
+							data: {
+								of: delta.type,
+								type: "error",
+								relativePath: delta.path,
+								localPath: pathModule.join(this.sync.syncPair.localPath, delta.path),
+								error: serializeError(e)
+							}
+						})
+					}
+
+					throw e
 				}
 			}
 
 			case "renameRemoteDirectory":
 			case "renameRemoteFile": {
-				await this.sync.remoteFileSystem.rename({
-					fromRelativePath: delta.from,
-					toRelativePath: delta.to
-				})
+				try {
+					await this.sync.remoteFileSystem.rename({
+						fromRelativePath: delta.from,
+						toRelativePath: delta.to
+					})
 
-				return delta
+					postMessageToMain({
+						type: "transfer",
+						syncPair: this.sync.syncPair,
+						data: {
+							of: delta.type,
+							type: "success",
+							relativePath: delta.path,
+							localPath: pathModule.join(this.sync.syncPair.localPath, delta.path)
+						}
+					})
+
+					return delta
+				} catch (e) {
+					if (e instanceof Error) {
+						postMessageToMain({
+							type: "transfer",
+							syncPair: this.sync.syncPair,
+							data: {
+								of: delta.type,
+								type: "error",
+								relativePath: delta.path,
+								localPath: pathModule.join(this.sync.syncPair.localPath, delta.path),
+								error: serializeError(e)
+							}
+						})
+					}
+
+					throw e
+				}
 			}
 
 			case "downloadFile": {
-				const stats = await this.sync.remoteFileSystem.download({ relativePath: delta.path })
+				try {
+					const stats = await this.sync.remoteFileSystem.download({ relativePath: delta.path })
 
-				return {
-					...delta,
-					stats
+					postMessageToMain({
+						type: "transfer",
+						syncPair: this.sync.syncPair,
+						data: {
+							of: delta.type,
+							type: "success",
+							relativePath: delta.path,
+							localPath: pathModule.join(this.sync.syncPair.localPath, delta.path)
+						}
+					})
+
+					return {
+						...delta,
+						stats
+					}
+				} catch (e) {
+					if (e instanceof Error) {
+						postMessageToMain({
+							type: "transfer",
+							syncPair: this.sync.syncPair,
+							data: {
+								of: delta.type,
+								type: "error",
+								relativePath: delta.path,
+								localPath: pathModule.join(this.sync.syncPair.localPath, delta.path),
+								error: serializeError(e)
+							}
+						})
+					}
+
+					throw e
 				}
 			}
 
 			case "uploadFile": {
-				const item = await this.sync.localFileSystem.upload({ relativePath: delta.path })
+				try {
+					const item = await this.sync.localFileSystem.upload({ relativePath: delta.path })
 
-				return {
-					...delta,
-					item
+					postMessageToMain({
+						type: "transfer",
+						syncPair: this.sync.syncPair,
+						data: {
+							of: delta.type,
+							type: "success",
+							relativePath: delta.path,
+							localPath: pathModule.join(this.sync.syncPair.localPath, delta.path)
+						}
+					})
+
+					return {
+						...delta,
+						item
+					}
+				} catch (e) {
+					if (e instanceof Error) {
+						postMessageToMain({
+							type: "transfer",
+							syncPair: this.sync.syncPair,
+							data: {
+								of: delta.type,
+								type: "error",
+								relativePath: delta.path,
+								localPath: pathModule.join(this.sync.syncPair.localPath, delta.path),
+								error: serializeError(e)
+							}
+						})
+					}
+
+					throw e
 				}
 			}
 		}

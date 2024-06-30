@@ -7,6 +7,7 @@ import { type SerializedError } from "./utils"
 export type SyncMode = "twoWay" | "localToCloud" | "localBackup" | "cloudToLocal" | "cloudBackup"
 
 export type SyncPair = {
+	name: string
 	uuid: string
 	localPath: string
 	remotePath: string
@@ -81,6 +82,162 @@ export type SyncMessage =
 								localPath: string
 								error: SerializedError
 						  }
+						| {
+								of: "createLocalDirectory"
+								type: "error"
+								relativePath: string
+								localPath: string
+								error: SerializedError
+						  }
+						| {
+								of: "createLocalDirectory"
+								type: "success"
+								relativePath: string
+								localPath: string
+						  }
+						| {
+								of: "createRemoteDirectory"
+								type: "error"
+								relativePath: string
+								localPath: string
+								error: SerializedError
+						  }
+						| {
+								of: "createRemoteDirectory"
+								type: "success"
+								relativePath: string
+								localPath: string
+						  }
+						| {
+								of: "deleteLocalFile"
+								type: "error"
+								relativePath: string
+								localPath: string
+								error: SerializedError
+						  }
+						| {
+								of: "deleteLocalFile"
+								type: "success"
+								relativePath: string
+								localPath: string
+						  }
+						| {
+								of: "deleteLocalDirectory"
+								type: "error"
+								relativePath: string
+								localPath: string
+								error: SerializedError
+						  }
+						| {
+								of: "deleteLocalDirectory"
+								type: "success"
+								relativePath: string
+								localPath: string
+						  }
+						| {
+								of: "deleteRemoteFile"
+								type: "error"
+								relativePath: string
+								localPath: string
+								error: SerializedError
+						  }
+						| {
+								of: "deleteRemoteFile"
+								type: "success"
+								relativePath: string
+								localPath: string
+						  }
+						| {
+								of: "deleteRemoteDirectory"
+								type: "error"
+								relativePath: string
+								localPath: string
+								error: SerializedError
+						  }
+						| {
+								of: "deleteRemoteDirectory"
+								type: "success"
+								relativePath: string
+								localPath: string
+						  }
+						| {
+								of: "renameLocalFile"
+								type: "error"
+								relativePath: string
+								localPath: string
+								error: SerializedError
+						  }
+						| {
+								of: "renameLocalFile"
+								type: "success"
+								relativePath: string
+								localPath: string
+						  }
+						| {
+								of: "renameLocalDirectory"
+								type: "error"
+								relativePath: string
+								localPath: string
+								error: SerializedError
+						  }
+						| {
+								of: "renameLocalDirectory"
+								type: "success"
+								relativePath: string
+								localPath: string
+						  }
+						| {
+								of: "renameRemoteDirectory"
+								type: "error"
+								relativePath: string
+								localPath: string
+								error: SerializedError
+						  }
+						| {
+								of: "renameRemoteDirectory"
+								type: "success"
+								relativePath: string
+								localPath: string
+						  }
+						| {
+								of: "renameRemoteFile"
+								type: "error"
+								relativePath: string
+								localPath: string
+								error: SerializedError
+						  }
+						| {
+								of: "renameRemoteFile"
+								type: "success"
+								relativePath: string
+								localPath: string
+						  }
+						| {
+								of: "downloadFile"
+								type: "error"
+								relativePath: string
+								localPath: string
+								error: SerializedError
+						  }
+						| {
+								of: "downloadFile"
+								type: "success"
+								relativePath: string
+								localPath: string
+						  }
+						| {
+								of: "uploadFile"
+								type: "error"
+								relativePath: string
+								localPath: string
+								error: SerializedError
+						  }
+						| {
+								of: "uploadFile"
+								type: "success"
+								relativePath: string
+								localPath: string
+						  }
 			  }
 			| {
 					type: "localTreeErrors"
@@ -145,6 +302,18 @@ export type SyncMessage =
 			  }
 			| {
 					type: "cycleProcessingDeltasDone"
+			  }
+			| {
+					type: "cycleLocalSmokeTestFailed"
+					data: {
+						error: SerializedError
+					}
+			  }
+			| {
+					type: "cycleRemoteSmokeTestFailed"
+					data: {
+						error: SerializedError
+					}
 			  }
 			| {
 					type: "cycleNoChanges"
@@ -249,5 +418,9 @@ export type SyncMessage =
 	  }
 	| {
 			type: "syncPairIncludeDotFiles"
+			syncPair: SyncPair
+	  }
+	| {
+			type: "syncPairRemoved"
 			syncPair: SyncPair
 	  }

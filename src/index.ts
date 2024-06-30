@@ -120,6 +120,9 @@ export class SyncWorker {
 	private async initSyncPairs(pairs: SyncPair[]): Promise<void> {
 		await this.initSyncPairsMutex.acquire()
 
+		const currentSyncPairsUUIDs = this.syncPairs.map(pair => pair.uuid)
+		const newSyncPairsUUIDs = pairs.map(pair => pair.uuid)
+
 		try {
 			const promises: Promise<void>[] = []
 
@@ -135,6 +138,12 @@ export class SyncWorker {
 			}
 
 			await Promise.all(promises)
+
+			for (const uuid of currentSyncPairsUUIDs) {
+				if (!newSyncPairsUUIDs.includes(uuid) && this.syncs[uuid]) {
+					this.syncs[uuid]!.removed = true
+				}
+			}
 		} catch (e) {
 			this.logger.log("error", e, "index.initSyncPairs")
 

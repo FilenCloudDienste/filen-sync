@@ -23,18 +23,26 @@ export class SyncWorker {
 	public readonly initSyncPairsMutex = new Semaphore(1)
 	public readonly sdk: FilenSDK
 	public readonly logger: Logger
+	public readonly runOnce: boolean
 
-	/**
-	 * Creates an instance of SyncWorker.
-	 *
-	 * @constructor
-	 * @public
-	 * @param {{ syncPairs: SyncPair[]; dbPath: string; sdkConfig: FilenSDKConfig }} param0
-	 * @param {{}} param0.syncPairs
-	 * @param {string} param0.dbPath
-	 * @param {FilenSDKConfig} param0.sdkConfig
-	 */
-	public constructor({ syncPairs, dbPath, sdkConfig }: { syncPairs: SyncPair[]; dbPath: string; sdkConfig: FilenSDKConfig }) {
+	public constructor({
+		syncPairs,
+		dbPath,
+		sdkConfig,
+		onMessage,
+		runOnce = false
+	}: {
+		syncPairs: SyncPair[]
+		dbPath: string
+		sdkConfig: FilenSDKConfig
+		onMessage?: (message: SyncMessage) => void
+		runOnce?: boolean
+	}) {
+		if (onMessage) {
+			process.onMessage = onMessage
+		}
+
+		this.runOnce = runOnce
 		this.syncPairs = syncPairs
 		this.dbPath = dbPath
 		this.logger = new Logger(dbPath)

@@ -83,6 +83,16 @@ export class State {
 						}
 					}
 
+					for (const oldPath in this.sync.localFileHashes) {
+						if (oldPath.startsWith(task.from + "/") || oldPath === task.from) {
+							const newPath = oldPath.split(task.from).join(task.to)
+
+							this.sync.localFileHashes[newPath] = this.sync.localFileHashes[oldPath]!
+
+							delete this.sync.localFileHashes[oldPath]
+						}
+					}
+
 					break
 				}
 
@@ -124,6 +134,16 @@ export class State {
 							}
 
 							currentLocalTree.inodes[inode] = item
+						}
+					}
+
+					for (const oldPath in this.sync.localFileHashes) {
+						if (oldPath.startsWith(task.from + "/") || oldPath === task.from) {
+							const newPath = oldPath.split(task.from).join(task.to)
+
+							this.sync.localFileHashes[newPath] = this.sync.localFileHashes[oldPath]!
+
+							delete this.sync.localFileHashes[oldPath]
 						}
 					}
 

@@ -47,6 +47,7 @@ export class Sync {
 	public excludeDotFiles: boolean
 	public readonly worker: SyncWorker
 	public removed: boolean = false
+	public saveStateOnNoChanges = true
 
 	/**
 	 * Creates an instance of Sync.
@@ -165,6 +166,17 @@ export class Sync {
 		}
 	}
 
+	public async cleanup(): Promise<void> {
+		await this.localFileSystem.stopDirectoryWatcher()
+
+		this.isInitialized = false
+
+		postMessageToMain({
+			type: "cycleExited",
+			syncPair: this.syncPair
+		})
+	}
+
 	private async run(): Promise<void> {
 		if (this.removed) {
 			postMessageToMain({
@@ -176,14 +188,20 @@ export class Sync {
 		}
 
 		if (this.paused) {
-			postMessageToMain({
-				type: "cyclePaused",
-				syncPair: this.syncPair
-			})
+			if (this.worker.runOnce) {
+				await this.cleanup()
+
+				return
+			}
 
 			setTimeout(() => {
 				this.run()
 			}, SYNC_INTERVAL)
+
+			postMessageToMain({
+				type: "cyclePaused",
+				syncPair: this.syncPair
+			})
 
 			postMessageToMain({
 				type: "cycleRestarting",
@@ -204,6 +222,12 @@ export class Sync {
 		])
 
 		if (!localSmokeTest) {
+			if (this.worker.runOnce) {
+				await this.cleanup()
+
+				return
+			}
+
 			setTimeout(() => {
 				this.run()
 			}, SYNC_INTERVAL)
@@ -225,6 +249,12 @@ export class Sync {
 		}
 
 		if (!remoteSmokeTest) {
+			if (this.worker.runOnce) {
+				await this.cleanup()
+
+				return
+			}
+
 			setTimeout(() => {
 				this.run()
 			}, SYNC_INTERVAL)
@@ -270,6 +300,27 @@ export class Sync {
 			])
 
 			if (!currentLocalTree.changed && !currentRemoteTree.changed) {
+				postMessageToMain({
+					type: "cycleSavingStateStarted",
+					syncPair: this.syncPair
+				})
+
+				this.previousLocalTree = currentLocalTree.result
+				this.previousRemoteTree = currentRemoteTree.result
+
+				// We only save the state once if there are no changes.
+				// This helps reducing the cpu and disk footprint when there are continuously no changes.
+				if (this.saveStateOnNoChanges) {
+					this.saveStateOnNoChanges = false
+
+					await this.state.save()
+				}
+
+				postMessageToMain({
+					type: "cycleSavingStateDone",
+					syncPair: this.syncPair
+				})
+
 				postMessageToMain({
 					type: "cycleNoChanges",
 					syncPair: this.syncPair
@@ -394,6 +445,7 @@ export class Sync {
 
 			this.previousLocalTree = currentLocalTree.result
 			this.previousRemoteTree = currentRemoteTree.result
+			this.saveStateOnNoChanges = true
 
 			await this.state.save()
 
@@ -419,19 +471,23 @@ export class Sync {
 				})
 			}
 		} finally {
-			postMessageToMain({
-				type: "cycleFinished",
-				syncPair: this.syncPair
-			})
+			if (this.worker.runOnce) {
+				await this.cleanup()
+			} else {
+				setTimeout(() => {
+					this.run()
+				}, SYNC_INTERVAL)
 
-			setTimeout(() => {
-				this.run()
-			}, SYNC_INTERVAL)
+				postMessageToMain({
+					type: "cycleFinished",
+					syncPair: this.syncPair
+				})
 
-			postMessageToMain({
-				type: "cycleRestarting",
-				syncPair: this.syncPair
-			})
+				postMessageToMain({
+					type: "cycleRestarting",
+					syncPair: this.syncPair
+				})
+			}
 		}
 	}
 }

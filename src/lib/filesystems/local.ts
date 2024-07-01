@@ -218,7 +218,7 @@ export class LocalFileSystem {
 		}
 
 		this.watcherInstance = await watcher.subscribe(this.sync.syncPair.localPath, (err, events) => {
-			if (!err && events) {
+			if (!err && events && events.length > 0) {
 				this.lastDirectoryChangeTimestamp = Date.now()
 			}
 		})
@@ -378,6 +378,7 @@ export class LocalFileSystem {
 	public async upload({ relativePath }: { relativePath: string }): Promise<CloudItem> {
 		const localPath = pathModule.join(this.sync.syncPair.localPath, relativePath)
 		const signalKey = `upload:${relativePath}`
+		const stats = await fs.stat(localPath)
 
 		if (!this.sync.pauseSignals[signalKey]) {
 			this.sync.pauseSignals[signalKey] = new PauseSignal()
@@ -394,7 +395,8 @@ export class LocalFileSystem {
 				of: "upload",
 				type: "queued",
 				relativePath,
-				localPath
+				localPath,
+				size: stats.size
 			}
 		})
 
@@ -433,7 +435,8 @@ export class LocalFileSystem {
 							type: "error",
 							relativePath,
 							localPath,
-							error: serializeError(err)
+							error: serializeError(err),
+							size: stats.size
 						}
 					})
 				},
@@ -446,7 +449,8 @@ export class LocalFileSystem {
 							type: "progress",
 							relativePath,
 							localPath,
-							bytes
+							bytes,
+							size: stats.size
 						}
 					})
 				},
@@ -458,7 +462,8 @@ export class LocalFileSystem {
 							of: "upload",
 							type: "started",
 							relativePath,
-							localPath
+							localPath,
+							size: stats.size
 						}
 					})
 				}
@@ -485,7 +490,8 @@ export class LocalFileSystem {
 					of: "upload",
 					type: "finished",
 					relativePath,
-					localPath
+					localPath,
+					size: stats.size
 				}
 			})
 
@@ -502,7 +508,8 @@ export class LocalFileSystem {
 						type: "error",
 						relativePath,
 						localPath,
-						error: serializeError(e)
+						error: serializeError(e),
+						size: stats.size
 					}
 				})
 			}

@@ -111,6 +111,14 @@ export class Deltas {
 			erroredLocalPaths[error.relativePath] = true
 		}
 
+		// The order of delta processing:
+		// 1. Local directory/file move/rename
+		// 2. Remote directory/file move/rename
+		// 3. Local deletions
+		// 4. Remote deletions
+		// 5. Local additions/filemodifications
+		// 6. Remote additions/filemodifications
+
 		// Local file/directory move/rename
 
 		for (const inode in currentLocalTree.inodes) {
@@ -183,6 +191,7 @@ export class Deltas {
 				})
 
 				pathsAdded[path] = true
+				pathsAdded[previousLocalItem.path] = true
 			}
 		}
 
@@ -203,6 +212,7 @@ export class Deltas {
 				})
 
 				pathsAdded[path] = true
+				pathsAdded[previousRemoteItem.path] = true
 			}
 		}
 
@@ -227,22 +237,22 @@ export class Deltas {
 				continue
 			}
 
-			if (currentRemoteItem && currentRemoteItem.type === "file") {
-				if (currentLocalItem && currentLocalItem.lastModified > currentRemoteItem.lastModified) {
-					if (
-						(await this.sync.localFileSystem.createFileHash({
-							relativePath: path,
-							algorithm: "md5"
-						})) !== this.sync.localFileHashes[currentLocalItem.path]
-					) {
-						deltas.push({
-							type: "uploadFile",
-							path
-						})
+			if (
+				currentRemoteItem &&
+				currentRemoteItem.type === "file" &&
+				currentLocalItem &&
+				currentLocalItem.lastModified > currentRemoteItem.lastModified &&
+				(await this.sync.localFileSystem.createFileHash({
+					relativePath: path,
+					algorithm: "md5"
+				})) !== this.sync.localFileHashes[currentLocalItem.path]
+			) {
+				deltas.push({
+					type: "uploadFile",
+					path
+				})
 
-						pathsAdded[path] = true
-					}
-				}
+				pathsAdded[path] = true
 			}
 		}
 
@@ -267,15 +277,18 @@ export class Deltas {
 				continue
 			}
 
-			if (currentRemoteItem && currentRemoteItem.type === "file") {
-				if (currentLocalItem && currentRemoteItem.lastModified > currentLocalItem.lastModified) {
-					deltas.push({
-						type: "downloadFile",
-						path
-					})
+			if (
+				currentRemoteItem &&
+				currentRemoteItem.type === "file" &&
+				currentLocalItem &&
+				currentRemoteItem.lastModified > currentLocalItem.lastModified
+			) {
+				deltas.push({
+					type: "downloadFile",
+					path
+				})
 
-					pathsAdded[path] = true
-				}
+				pathsAdded[path] = true
 			}
 		}
 

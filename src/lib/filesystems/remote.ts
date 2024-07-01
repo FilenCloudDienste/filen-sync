@@ -595,6 +595,11 @@ export class RemoteFileSystem {
 		await this.mutex.acquire()
 
 		try {
+			// We most likely already moved the file/directory
+			if (!this.getDirectoryTreeCache.tree[fromRelativePath] && this.getDirectoryTreeCache.tree[toRelativePath]) {
+				return
+			}
+
 			if (fromRelativePath === "/" || fromRelativePath === toRelativePath) {
 				return
 			}
@@ -765,6 +770,16 @@ export class RemoteFileSystem {
 		const localPath = pathModule.posix.join(this.sync.syncPair.localPath, relativePath)
 		const tmpLocalPath = pathModule.join(this.sync.syncPair.localPath, LOCAL_TRASH_NAME, uuidv4())
 		const signalKey = `upload:${relativePath}`
+		const uuid = await this.pathToItemUUID({ relativePath })
+		const item = this.getDirectoryTreeCache.tree[relativePath]
+
+		if (!uuid || !item) {
+			throw new Error(`Could not download ${relativePath}: File not found.`)
+		}
+
+		if (item.type === "directory") {
+			throw new Error(`Could not download ${relativePath}: Not a file.`)
+		}
 
 		if (!this.sync.pauseSignals[signalKey]) {
 			this.sync.pauseSignals[signalKey] = new PauseSignal()
@@ -781,22 +796,12 @@ export class RemoteFileSystem {
 				of: "download",
 				type: "queued",
 				relativePath,
-				localPath
+				localPath,
+				size: item.size
 			}
 		})
 
 		try {
-			const uuid = await this.pathToItemUUID({ relativePath })
-			const item = this.getDirectoryTreeCache.tree[relativePath]
-
-			if (!uuid || !item) {
-				throw new Error(`Could not download ${relativePath}: File not found.`)
-			}
-
-			if (item.type === "directory") {
-				throw new Error(`Could not download ${relativePath}: Not a file.`)
-			}
-
 			await this.sync.sdk.cloud().downloadFileToLocal({
 				uuid,
 				bucket: item.bucket,
@@ -819,7 +824,8 @@ export class RemoteFileSystem {
 							type: "error",
 							relativePath,
 							localPath,
-							error: serializeError(err)
+							error: serializeError(err),
+							size: item.size
 						}
 					})
 				},
@@ -832,7 +838,8 @@ export class RemoteFileSystem {
 							type: "progress",
 							relativePath,
 							localPath,
-							bytes
+							bytes,
+							size: item.size
 						}
 					})
 				},
@@ -844,7 +851,8 @@ export class RemoteFileSystem {
 							of: "download",
 							type: "started",
 							relativePath,
-							localPath
+							localPath,
+							size: item.size
 						}
 					})
 				}
@@ -863,7 +871,8 @@ export class RemoteFileSystem {
 					of: "download",
 					type: "finished",
 					relativePath,
-					localPath
+					localPath,
+					size: item.size
 				}
 			})
 
@@ -880,7 +889,8 @@ export class RemoteFileSystem {
 						type: "error",
 						relativePath,
 						localPath,
-						error: serializeError(e)
+						error: serializeError(e),
+						size: item.size
 					}
 				})
 			}

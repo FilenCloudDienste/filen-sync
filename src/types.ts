@@ -44,200 +44,211 @@ export type CycleState =
 	| "cycleSavingStateDone"
 	| "cycleRestarting"
 	| "cyclePaused"
+	| "cycleLocalSmokeTestFailed"
+	| "cycleNoChanges"
+	| "cycleRemoteSmokeTestFailed"
+	| "cycleExited"
+
+export type TransferData =
+	| {
+			of: "upload" | "download"
+			type: "progress"
+			relativePath: string
+			localPath: string
+			bytes: number
+			size: number
+	  }
+	| {
+			of: "upload" | "download"
+			type: "queued"
+			relativePath: string
+			localPath: string
+			size: number
+	  }
+	| {
+			of: "upload" | "download"
+			type: "started"
+			relativePath: string
+			localPath: string
+			size: number
+	  }
+	| {
+			of: "upload" | "download"
+			type: "finished"
+			relativePath: string
+			localPath: string
+			size: number
+	  }
+	| {
+			of: "upload" | "download"
+			type: "error"
+			relativePath: string
+			localPath: string
+			error: SerializedError
+			size: number
+	  }
+	| {
+			of: "createLocalDirectory"
+			type: "error"
+			relativePath: string
+			localPath: string
+			error: SerializedError
+	  }
+	| {
+			of: "createLocalDirectory"
+			type: "success"
+			relativePath: string
+			localPath: string
+	  }
+	| {
+			of: "createRemoteDirectory"
+			type: "error"
+			relativePath: string
+			localPath: string
+			error: SerializedError
+	  }
+	| {
+			of: "createRemoteDirectory"
+			type: "success"
+			relativePath: string
+			localPath: string
+	  }
+	| {
+			of: "deleteLocalFile"
+			type: "error"
+			relativePath: string
+			localPath: string
+			error: SerializedError
+	  }
+	| {
+			of: "deleteLocalFile"
+			type: "success"
+			relativePath: string
+			localPath: string
+	  }
+	| {
+			of: "deleteLocalDirectory"
+			type: "error"
+			relativePath: string
+			localPath: string
+			error: SerializedError
+	  }
+	| {
+			of: "deleteLocalDirectory"
+			type: "success"
+			relativePath: string
+			localPath: string
+	  }
+	| {
+			of: "deleteRemoteFile"
+			type: "error"
+			relativePath: string
+			localPath: string
+			error: SerializedError
+	  }
+	| {
+			of: "deleteRemoteFile"
+			type: "success"
+			relativePath: string
+			localPath: string
+	  }
+	| {
+			of: "deleteRemoteDirectory"
+			type: "error"
+			relativePath: string
+			localPath: string
+			error: SerializedError
+	  }
+	| {
+			of: "deleteRemoteDirectory"
+			type: "success"
+			relativePath: string
+			localPath: string
+	  }
+	| {
+			of: "renameLocalFile"
+			type: "error"
+			relativePath: string
+			localPath: string
+			error: SerializedError
+	  }
+	| {
+			of: "renameLocalFile"
+			type: "success"
+			relativePath: string
+			localPath: string
+	  }
+	| {
+			of: "renameLocalDirectory"
+			type: "error"
+			relativePath: string
+			localPath: string
+			error: SerializedError
+	  }
+	| {
+			of: "renameLocalDirectory"
+			type: "success"
+			relativePath: string
+			localPath: string
+	  }
+	| {
+			of: "renameRemoteDirectory"
+			type: "error"
+			relativePath: string
+			localPath: string
+			error: SerializedError
+	  }
+	| {
+			of: "renameRemoteDirectory"
+			type: "success"
+			relativePath: string
+			localPath: string
+	  }
+	| {
+			of: "renameRemoteFile"
+			type: "error"
+			relativePath: string
+			localPath: string
+			error: SerializedError
+	  }
+	| {
+			of: "renameRemoteFile"
+			type: "success"
+			relativePath: string
+			localPath: string
+	  }
+	| {
+			of: "downloadFile"
+			type: "error"
+			relativePath: string
+			localPath: string
+			error: SerializedError
+	  }
+	| {
+			of: "downloadFile"
+			type: "success"
+			relativePath: string
+			localPath: string
+	  }
+	| {
+			of: "uploadFile"
+			type: "error"
+			relativePath: string
+			localPath: string
+			error: SerializedError
+	  }
+	| {
+			of: "uploadFile"
+			type: "success"
+			relativePath: string
+			localPath: string
+	  }
 
 export type SyncMessage =
 	| ({ syncPair: SyncPair } & (
 			| {
 					type: "transfer"
-					data:
-						| {
-								of: "upload" | "download"
-								type: "progress"
-								relativePath: string
-								localPath: string
-								bytes: number
-						  }
-						| {
-								of: "upload" | "download"
-								type: "queued"
-								relativePath: string
-								localPath: string
-						  }
-						| {
-								of: "upload" | "download"
-								type: "started"
-								relativePath: string
-								localPath: string
-						  }
-						| {
-								of: "upload" | "download"
-								type: "finished"
-								relativePath: string
-								localPath: string
-						  }
-						| {
-								of: "upload" | "download"
-								type: "error"
-								relativePath: string
-								localPath: string
-								error: SerializedError
-						  }
-						| {
-								of: "createLocalDirectory"
-								type: "error"
-								relativePath: string
-								localPath: string
-								error: SerializedError
-						  }
-						| {
-								of: "createLocalDirectory"
-								type: "success"
-								relativePath: string
-								localPath: string
-						  }
-						| {
-								of: "createRemoteDirectory"
-								type: "error"
-								relativePath: string
-								localPath: string
-								error: SerializedError
-						  }
-						| {
-								of: "createRemoteDirectory"
-								type: "success"
-								relativePath: string
-								localPath: string
-						  }
-						| {
-								of: "deleteLocalFile"
-								type: "error"
-								relativePath: string
-								localPath: string
-								error: SerializedError
-						  }
-						| {
-								of: "deleteLocalFile"
-								type: "success"
-								relativePath: string
-								localPath: string
-						  }
-						| {
-								of: "deleteLocalDirectory"
-								type: "error"
-								relativePath: string
-								localPath: string
-								error: SerializedError
-						  }
-						| {
-								of: "deleteLocalDirectory"
-								type: "success"
-								relativePath: string
-								localPath: string
-						  }
-						| {
-								of: "deleteRemoteFile"
-								type: "error"
-								relativePath: string
-								localPath: string
-								error: SerializedError
-						  }
-						| {
-								of: "deleteRemoteFile"
-								type: "success"
-								relativePath: string
-								localPath: string
-						  }
-						| {
-								of: "deleteRemoteDirectory"
-								type: "error"
-								relativePath: string
-								localPath: string
-								error: SerializedError
-						  }
-						| {
-								of: "deleteRemoteDirectory"
-								type: "success"
-								relativePath: string
-								localPath: string
-						  }
-						| {
-								of: "renameLocalFile"
-								type: "error"
-								relativePath: string
-								localPath: string
-								error: SerializedError
-						  }
-						| {
-								of: "renameLocalFile"
-								type: "success"
-								relativePath: string
-								localPath: string
-						  }
-						| {
-								of: "renameLocalDirectory"
-								type: "error"
-								relativePath: string
-								localPath: string
-								error: SerializedError
-						  }
-						| {
-								of: "renameLocalDirectory"
-								type: "success"
-								relativePath: string
-								localPath: string
-						  }
-						| {
-								of: "renameRemoteDirectory"
-								type: "error"
-								relativePath: string
-								localPath: string
-								error: SerializedError
-						  }
-						| {
-								of: "renameRemoteDirectory"
-								type: "success"
-								relativePath: string
-								localPath: string
-						  }
-						| {
-								of: "renameRemoteFile"
-								type: "error"
-								relativePath: string
-								localPath: string
-								error: SerializedError
-						  }
-						| {
-								of: "renameRemoteFile"
-								type: "success"
-								relativePath: string
-								localPath: string
-						  }
-						| {
-								of: "downloadFile"
-								type: "error"
-								relativePath: string
-								localPath: string
-								error: SerializedError
-						  }
-						| {
-								of: "downloadFile"
-								type: "success"
-								relativePath: string
-								localPath: string
-						  }
-						| {
-								of: "uploadFile"
-								type: "error"
-								relativePath: string
-								localPath: string
-								error: SerializedError
-						  }
-						| {
-								of: "uploadFile"
-								type: "success"
-								relativePath: string
-								localPath: string
-						  }
+					data: TransferData
 			  }
 			| {
 					type: "localTreeErrors"
@@ -284,6 +295,9 @@ export type SyncMessage =
 			  }
 			| {
 					type: "cycleSuccess"
+			  }
+			| {
+					type: "cycleExited"
 			  }
 			| {
 					type: "cycleWaitingForLocalDirectoryChangesStarted"

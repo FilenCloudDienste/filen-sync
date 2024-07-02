@@ -30,21 +30,25 @@ export type Delta = { path: string } & (
 	| {
 			type: "renameLocalFile"
 			from: string
+			fromBefore: string
 			to: string
 	  }
 	| {
 			type: "renameRemoteFile"
 			from: string
+			fromBefore: string
 			to: string
 	  }
 	| {
 			type: "renameRemoteDirectory"
 			from: string
+			fromBefore: string
 			to: string
 	  }
 	| {
 			type: "renameLocalDirectory"
 			from: string
+			fromBefore: string
 			to: string
 	  }
 )
@@ -142,6 +146,7 @@ export class Deltas {
 					type: currentItem.type === "directory" ? "renameRemoteDirectory" : "renameRemoteFile",
 					path: currentItem.path,
 					from: previousItem.path,
+					fromBefore: previousItem.path,
 					to: currentItem.path
 				})
 
@@ -154,7 +159,7 @@ export class Deltas {
 
 		for (const uuid in currentRemoteTree.uuids) {
 			const currentItem = currentRemoteTree.uuids[uuid]
-			const previousItem = currentRemoteTree.uuids[uuid]
+			const previousItem = previousRemoteTree.uuids[uuid]
 
 			if (!currentItem || !previousItem || pathsAdded[currentItem.path] || pathsAdded[previousItem.path]) {
 				continue
@@ -163,9 +168,10 @@ export class Deltas {
 			// Path from current item changed, it was either renamed or moved
 			if (currentItem.path !== previousItem.path) {
 				deltas.push({
-					type: currentItem.type === "directory" ? "renameRemoteDirectory" : "renameRemoteFile",
+					type: currentItem.type === "directory" ? "renameLocalDirectory" : "renameLocalFile",
 					path: currentItem.path,
 					from: previousItem.path,
+					fromBefore: previousItem.path,
 					to: currentItem.path
 				})
 

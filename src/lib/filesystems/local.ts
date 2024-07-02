@@ -350,7 +350,9 @@ export class LocalFileSystem {
 		const fromLocalPathParentPath = pathModule.dirname(fromLocalPath)
 		const toLocalPathParentPath = pathModule.dirname(toLocalPath)
 
-		await fs.ensureDir(toLocalPathParentPath)
+		if (!(await fs.exists(toLocalPathParentPath))) {
+			throw new Error(`Could not rename ${fromLocalPath} to ${toLocalPath}: Parent directory missing.`)
+		}
 
 		if (fromLocalPathParentPath === toLocalPathParentPath) {
 			await fs.rename(fromLocalPath, toLocalPath)

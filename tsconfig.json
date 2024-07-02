@@ -20,5 +20,5 @@
 		"files": true
 	},
 	"include": ["src", "index.d.ts"],
-	"exclude": ["node_modules", "dist", "__tests__", "docs", ".github", "dev", ".vscode"]
+	"exclude": ["node_modules", "dist", "tests", "docs", ".github", "dev", ".vscode"]
 }

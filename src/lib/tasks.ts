@@ -1,7 +1,7 @@
 import type Sync from "./sync"
 import { type Delta } from "./deltas"
-import { promiseAllChunked, serializeError } from "../utils"
-import { type CloudItem } from "@filen/sdk"
+import { promiseAllChunked, serializeError, replacePathStartWithFromAndTo } from "../utils"
+import { type RemoteItem } from "./filesystems/remote"
 import fs from "fs-extra"
 import { postMessageToMain } from "./ipc"
 import pathModule from "path"
@@ -25,14 +25,20 @@ export type TaskError = {
 }
 
 export type DoneTask = { path: string } & (
-	| { type: "uploadFile"; item: CloudItem }
+	| {
+			type: "uploadFile"
+			item: RemoteItem
+			stats: fs.Stats
+	  }
 	| {
 			type: "createRemoteDirectory"
-			uuid: string
+			item: RemoteItem
+			stats: fs.Stats
 	  }
 	| {
 			type: "createLocalDirectory"
 			stats: fs.Stats
+			item: RemoteItem
 	  }
 	| {
 			type: "deleteLocalFile"
@@ -49,25 +55,30 @@ export type DoneTask = { path: string } & (
 	| {
 			type: "downloadFile"
 			stats: fs.Stats
+			item: RemoteItem
 	  }
 	| {
 			type: "renameLocalFile"
+			fromBefore: string
 			from: string
 			to: string
 			stats: fs.Stats
 	  }
 	| {
 			type: "renameRemoteFile"
+			fromBefore: string
 			from: string
 			to: string
 	  }
 	| {
 			type: "renameRemoteDirectory"
+			fromBefore: string
 			from: string
 			to: string
 	  }
 	| {
 			type: "renameLocalDirectory"
+			fromBefore: string
 			from: string
 			to: string
 			stats: fs.Stats
@@ -109,6 +120,11 @@ export class Tasks {
 			case "createLocalDirectory": {
 				try {
 					const stats = await this.sync.localFileSystem.mkdir({ relativePath: delta.path })
+					const item = this.sync.remoteFileSystem.getDirectoryTreeCache.tree[delta.path]
+
+					if (!item) {
+						throw new Error("createLocalDirectory: remoteItem not found in getDirectoryTreeCache.")
+					}
 
 					postMessageToMain({
 						type: "transfer",
@@ -123,7 +139,8 @@ export class Tasks {
 
 					return {
 						...delta,
-						stats
+						stats,
+						item
 					}
 				} catch (e) {
 					if (e instanceof Error) {
@@ -146,7 +163,15 @@ export class Tasks {
 
 			case "createRemoteDirectory": {
 				try {
-					const uuid = await this.sync.remoteFileSystem.mkdir({ relativePath: delta.path })
+					const [, stats] = await Promise.all([
+						this.sync.remoteFileSystem.mkdir({ relativePath: delta.path }),
+						fs.stat(pathModule.join(this.sync.syncPair.localPath, delta.path))
+					])
+					const item = this.sync.remoteFileSystem.getDirectoryTreeCache.tree[delta.path]
+
+					if (!item) {
+						throw new Error("createLocalDirectory: remoteItem not found in getDirectoryTreeCache.")
+					}
 
 					postMessageToMain({
 						type: "transfer",
@@ -161,7 +186,8 @@ export class Tasks {
 
 					return {
 						...delta,
-						uuid
+						item,
+						stats
 					}
 				} catch (e) {
 					if (e instanceof Error) {
@@ -338,6 +364,11 @@ export class Tasks {
 			case "downloadFile": {
 				try {
 					const stats = await this.sync.remoteFileSystem.download({ relativePath: delta.path })
+					const item = this.sync.remoteFileSystem.getDirectoryTreeCache.tree[delta.path]
+
+					if (!item) {
+						throw new Error("createLocalDirectory: remoteItem not found in getDirectoryTreeCache.")
+					}
 
 					postMessageToMain({
 						type: "transfer",
@@ -352,7 +383,8 @@ export class Tasks {
 
 					return {
 						...delta,
-						stats
+						stats,
+						item
 					}
 				} catch (e) {
 					if (e instanceof Error) {
@@ -375,7 +407,16 @@ export class Tasks {
 
 			case "uploadFile": {
 				try {
-					const item = await this.sync.localFileSystem.upload({ relativePath: delta.path })
+					const [, stats] = await Promise.all([
+						this.sync.localFileSystem.upload({ relativePath: delta.path }),
+						fs.stat(pathModule.join(this.sync.syncPair.localPath, delta.path))
+					])
+
+					const item = this.sync.remoteFileSystem.getDirectoryTreeCache.tree[delta.path]
+
+					if (!item) {
+						throw new Error("createLocalDirectory: remoteItem not found in getDirectoryTreeCache.")
+					}
 
 					postMessageToMain({
 						type: "transfer",
@@ -390,7 +431,8 @@ export class Tasks {
 
 					return {
 						...delta,
-						item
+						item,
+						stats
 					}
 				} catch (e) {
 					if (e instanceof Error) {
@@ -476,23 +518,13 @@ export class Tasks {
 
 		const process = async (delta: Delta): Promise<void> => {
 			try {
-				if (
-					(delta.type === "renameLocalFile" ||
-						delta.type === "renameLocalDirectory" ||
-						delta.type === "renameRemoteDirectory" ||
-						delta.type === "renameRemoteFile") &&
-					delta.from === delta.to
-				) {
-					return
-				}
-
 				const doneTask = await this.processTask(delta)
 
 				// Here we apply the done task to the delta state.
 				// E.g. when the user renames/moves a directory from "/sync/dir" to "/sync/dir2"
 				// we'll get all the rename/move deltas for the directory children aswell.
 				// This is pretty unecessary, hence we filter them here.
-				// Same for deletions. We only every need to rename/move/delete the parent directory if the children did not change.
+				// Same for deletions. We only ever need to rename/move/delete the parent directory if the children did not change.
 				// This saves a lot of disk usage and API requests. This also saves time applying all done tasks to the overall state,
 				// since we need to loop through less doneTasks.
 
@@ -500,16 +532,19 @@ export class Tasks {
 					for (let i = 0; i < renameLocalDirectoryDeltas.length; i++) {
 						const delta = renameLocalDirectoryDeltas[i]!
 
-						if (
-							delta.type === "renameLocalDirectory" &&
-							(delta.from.startsWith(doneTask.from + "/") || delta.from === doneTask.from)
-						) {
-							const newPath = delta.from.split(doneTask.from).join(doneTask.to)
+						if (delta.type === "renameLocalDirectory" && delta.from.startsWith(doneTask.from + "/")) {
+							const newFromPath = replacePathStartWithFromAndTo(delta.from, doneTask.from, doneTask.to)
 
-							if (newPath === delta.to) {
+							if (newFromPath === delta.to) {
 								renameLocalDirectoryDeltas.splice(i, 1)
 
 								i--
+							} else {
+								renameLocalDirectoryDeltas.splice(i, 1, {
+									...delta,
+									from: newFromPath,
+									fromBefore: delta.from
+								})
 							}
 						}
 					}
@@ -517,16 +552,19 @@ export class Tasks {
 					for (let i = 0; i < renameLocalFileDeltas.length; i++) {
 						const delta = renameLocalFileDeltas[i]!
 
-						if (
-							delta.type === "renameLocalFile" &&
-							(delta.from.startsWith(doneTask.from + "/") || delta.from === doneTask.from)
-						) {
-							const newPath = delta.from.split(doneTask.from).join(doneTask.to)
+						if (delta.type === "renameLocalFile" && delta.from.startsWith(doneTask.from + "/")) {
+							const newFromPath = replacePathStartWithFromAndTo(delta.from, doneTask.from, doneTask.to)
 
-							if (newPath === delta.to) {
+							if (newFromPath === delta.to) {
 								renameLocalFileDeltas.splice(i, 1)
 
 								i--
+							} else {
+								renameLocalFileDeltas.splice(i, 1, {
+									...delta,
+									from: newFromPath,
+									fromBefore: delta.from
+								})
 							}
 						}
 					}
@@ -536,16 +574,19 @@ export class Tasks {
 					for (let i = 0; i < renameRemoteDirectoryDeltas.length; i++) {
 						const delta = renameRemoteDirectoryDeltas[i]!
 
-						if (
-							delta.type === "renameRemoteDirectory" &&
-							(delta.from.startsWith(doneTask.from + "/") || delta.from === doneTask.from)
-						) {
-							const newPath = delta.from.split(doneTask.from).join(doneTask.to)
+						if (delta.type === "renameRemoteDirectory" && delta.from.startsWith(doneTask.from + "/")) {
+							const newFromPath = replacePathStartWithFromAndTo(delta.from, doneTask.from, doneTask.to)
 
-							if (newPath === delta.to) {
+							if (newFromPath === delta.to) {
 								renameRemoteDirectoryDeltas.splice(i, 1)
 
 								i--
+							} else {
+								renameRemoteDirectoryDeltas.splice(i, 1, {
+									...delta,
+									from: newFromPath,
+									fromBefore: delta.from
+								})
 							}
 						}
 					}
@@ -553,16 +594,19 @@ export class Tasks {
 					for (let i = 0; i < renameRemoteFileDeltas.length; i++) {
 						const delta = renameRemoteFileDeltas[i]!
 
-						if (
-							delta.type === "renameRemoteFile" &&
-							(delta.from.startsWith(doneTask.from + "/") || delta.from === doneTask.from)
-						) {
-							const newPath = delta.from.split(doneTask.from).join(doneTask.to)
+						if (delta.type === "renameRemoteFile" && delta.from.startsWith(doneTask.from + "/")) {
+							const newFromPath = replacePathStartWithFromAndTo(delta.from, doneTask.from, doneTask.to)
 
-							if (newPath === delta.to) {
+							if (newFromPath === delta.to) {
 								renameRemoteFileDeltas.splice(i, 1)
 
 								i--
+							} else {
+								renameRemoteFileDeltas.splice(i, 1, {
+									...delta,
+									from: newFromPath,
+									fromBefore: delta.from
+								})
 							}
 						}
 					}
@@ -572,10 +616,7 @@ export class Tasks {
 					for (let i = 0; i < deleteLocalDirectoryDeltas.length; i++) {
 						const delta = deleteLocalDirectoryDeltas[i]!
 
-						if (
-							delta.type === "deleteLocalDirectory" &&
-							(delta.path.startsWith(doneTask.path + "/") || delta.path === doneTask.path)
-						) {
+						if (delta.type === "deleteLocalDirectory" && delta.path.startsWith(doneTask.path + "/")) {
 							deleteLocalDirectoryDeltas.splice(i, 1)
 
 							i--
@@ -585,10 +626,7 @@ export class Tasks {
 					for (let i = 0; i < deleteLocalFileDeltas.length; i++) {
 						const delta = deleteLocalFileDeltas[i]!
 
-						if (
-							delta.type === "deleteLocalFile" &&
-							(delta.path.startsWith(doneTask.path + "/") || delta.path === doneTask.path)
-						) {
+						if (delta.type === "deleteLocalFile" && delta.path.startsWith(doneTask.path + "/")) {
 							deleteLocalFileDeltas.splice(i, 1)
 
 							i--
@@ -600,10 +638,7 @@ export class Tasks {
 					for (let i = 0; i < deleteRemoteDirectoryDeltas.length; i++) {
 						const delta = deleteRemoteDirectoryDeltas[i]!
 
-						if (
-							delta.type === "deleteRemoteDirectory" &&
-							(delta.path.startsWith(doneTask.path + "/") || delta.path === doneTask.path)
-						) {
+						if (delta.type === "deleteRemoteDirectory" && delta.path.startsWith(doneTask.path + "/")) {
 							deleteRemoteDirectoryDeltas.splice(i, 1)
 
 							i--
@@ -613,10 +648,7 @@ export class Tasks {
 					for (let i = 0; i < deleteRemoteFileDeltas.length; i++) {
 						const delta = deleteRemoteFileDeltas[i]!
 
-						if (
-							delta.type === "deleteRemoteFile" &&
-							(delta.path.startsWith(doneTask.path + "/") || delta.path === doneTask.path)
-						) {
+						if (delta.type === "deleteRemoteFile" && delta.path.startsWith(doneTask.path + "/")) {
 							deleteRemoteFileDeltas.splice(i, 1)
 
 							i--
@@ -627,6 +659,8 @@ export class Tasks {
 				executed.push(doneTask)
 			} catch (e) {
 				this.sync.worker.logger.log("error", e, "tasks.process")
+
+				console.error(e)
 
 				if (e instanceof Error) {
 					errors.push({

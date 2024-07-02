@@ -5,6 +5,7 @@ import { serialize, deserialize } from "v8"
 import { type RemoteTree, type RemoteItem } from "./filesystems/remote"
 import { type LocalTree, type LocalItem } from "./filesystems/local"
 import { type DoneTask } from "./tasks"
+import { replacePathStartWithFromAndTo } from "../utils"
 
 const STATE_VERSION = 1
 
@@ -40,67 +41,33 @@ export class State {
 
 		for (const task of tasks) {
 			switch (task.type) {
-				case "renameRemoteDirectory":
-				case "renameRemoteFile": {
-					for (const oldPath in currentRemoteTree.tree) {
-						if (oldPath.startsWith(task.from + "/") || oldPath === task.from) {
-							const newPath = oldPath.split(task.from).join(task.to)
-							const oldItem = currentRemoteTree.tree[oldPath]
-
-							if (oldItem) {
-								const item: RemoteItem = {
-									...oldItem,
-									path: newPath,
-									name: pathModule.posix.basename(newPath)
-								}
-
-								currentRemoteTree.tree[newPath] = item
-
-								delete currentRemoteTree.tree[oldPath]
-							}
-						}
-					}
-
-					for (const uuid in currentRemoteTree.uuids) {
-						const currentItem = currentRemoteTree.uuids[uuid]
-
-						if (!currentItem) {
-							continue
-						}
-
-						const oldPath = currentItem.path
-
-						if (oldPath.startsWith(task.from + "/") || oldPath === task.from) {
-							const newPath = oldPath.split(task.from).join(task.to)
-
-							const item: RemoteItem = {
-								...currentItem,
-								path: newPath,
-								name: pathModule.posix.basename(newPath)
-							}
-
-							currentRemoteTree.uuids[uuid] = item
-						}
-					}
-
-					for (const oldPath in this.sync.localFileHashes) {
-						if (oldPath.startsWith(task.from + "/") || oldPath === task.from) {
-							const newPath = oldPath.split(task.from).join(task.to)
-
-							this.sync.localFileHashes[newPath] = this.sync.localFileHashes[oldPath]!
-
-							delete this.sync.localFileHashes[oldPath]
-						}
-					}
-
-					break
-				}
-
 				case "renameLocalDirectory":
 				case "renameLocalFile": {
+					if (this.sync.localFileHashes[task.fromBefore]) {
+						this.sync.localFileHashes[task.to] = this.sync.localFileHashes[task.fromBefore]!
+
+						delete this.sync.localFileHashes[task.fromBefore]
+					}
+
+					const oldItem = currentLocalTree.tree[task.fromBefore]
+
+					if (oldItem) {
+						currentLocalTree.tree[task.to] = {
+							...oldItem,
+							path: task.to
+						}
+
+						currentLocalTree.inodes[oldItem.inode] = {
+							...oldItem,
+							path: task.to
+						}
+					}
+
+					delete currentLocalTree.tree[task.fromBefore]
+
 					for (const oldPath in currentLocalTree.tree) {
-						if (oldPath.startsWith(task.from + "/") || oldPath === task.from) {
-							const newPath = oldPath.split(task.from).join(task.to)
+						if (oldPath.startsWith(task.fromBefore + "/") && oldPath !== task.fromBefore) {
+							const newPath = replacePathStartWithFromAndTo(oldPath, task.fromBefore, task.to)
 							const oldItem = currentLocalTree.tree[oldPath]
 
 							if (oldItem) {
@@ -112,38 +79,87 @@ export class State {
 								currentLocalTree.tree[newPath] = item
 
 								delete currentLocalTree.tree[oldPath]
+
+								const oldItemINode = currentLocalTree.inodes[oldItem.inode]
+
+								if (oldItemINode) {
+									currentLocalTree.inodes[oldItem.inode] = {
+										...oldItemINode,
+										path: newPath
+									}
+								}
+							}
+
+							const oldItemHash = this.sync.localFileHashes[oldPath]
+
+							if (oldItemHash) {
+								this.sync.localFileHashes[newPath] = oldItemHash
+
+								delete this.sync.localFileHashes[oldPath]
 							}
 						}
 					}
 
-					for (const inode in currentLocalTree.inodes) {
-						const currentItem = currentLocalTree.inodes[inode]
+					break
+				}
 
-						if (!currentItem) {
-							continue
-						}
+				case "renameRemoteDirectory":
+				case "renameRemoteFile": {
+					if (this.sync.localFileHashes[task.fromBefore]) {
+						this.sync.localFileHashes[task.to] = this.sync.localFileHashes[task.fromBefore]!
 
-						const oldPath = currentItem.path
-
-						if (oldPath.startsWith(task.from + "/") || oldPath === task.from) {
-							const newPath = oldPath.split(task.from).join(task.to)
-
-							const item: LocalItem = {
-								...currentItem,
-								path: newPath
-							}
-
-							currentLocalTree.inodes[inode] = item
-						}
+						delete this.sync.localFileHashes[task.fromBefore]
 					}
 
-					for (const oldPath in this.sync.localFileHashes) {
-						if (oldPath.startsWith(task.from + "/") || oldPath === task.from) {
-							const newPath = oldPath.split(task.from).join(task.to)
+					const oldItem = currentRemoteTree.tree[task.fromBefore]
 
-							this.sync.localFileHashes[newPath] = this.sync.localFileHashes[oldPath]!
+					if (oldItem) {
+						const newItem: RemoteItem = {
+							...oldItem,
+							path: task.to,
+							name: pathModule.posix.basename(task.to)
+						}
 
-							delete this.sync.localFileHashes[oldPath]
+						currentRemoteTree.tree[task.to] = newItem
+						currentRemoteTree.uuids[oldItem.uuid] = newItem
+					}
+
+					delete currentRemoteTree.tree[task.fromBefore]
+
+					for (const oldPath in currentRemoteTree.tree) {
+						if (oldPath.startsWith(task.fromBefore + "/") && oldPath !== task.fromBefore) {
+							const newPath = replacePathStartWithFromAndTo(oldPath, task.fromBefore, task.to)
+							const oldItem = currentRemoteTree.tree[oldPath]
+
+							if (oldItem) {
+								const newItem: RemoteItem = {
+									...oldItem,
+									path: newPath,
+									name: pathModule.posix.basename(newPath)
+								}
+
+								currentRemoteTree.tree[newPath] = newItem
+
+								delete currentRemoteTree.tree[oldPath]
+
+								const oldItemUUID = currentRemoteTree.uuids[oldItem.uuid]
+
+								if (oldItemUUID) {
+									currentRemoteTree.uuids[oldItemUUID.uuid] = {
+										...oldItemUUID,
+										path: newPath,
+										name: pathModule.posix.basename(newPath)
+									}
+								}
+							}
+
+							const oldItemHash = this.sync.localFileHashes[oldPath]
+
+							if (oldItemHash) {
+								this.sync.localFileHashes[newPath] = oldItemHash
+
+								delete this.sync.localFileHashes[oldPath]
+							}
 						}
 					}
 
@@ -154,6 +170,16 @@ export class State {
 				case "deleteLocalFile":
 				case "deleteRemoteDirectory":
 				case "deleteRemoteFile": {
+					delete this.sync.localFileHashes[task.path]
+					delete currentLocalTree.tree[task.path]
+					delete currentRemoteTree.tree[task.path]
+
+					for (const path in this.sync.localFileHashes) {
+						if (path.startsWith(task.path + "/") || path === task.path) {
+							delete this.sync.localFileHashes[path]
+						}
+					}
+
 					for (const path in currentLocalTree.tree) {
 						if (path.startsWith(task.path + "/") || path === task.path) {
 							delete currentLocalTree.tree[path]
@@ -194,40 +220,47 @@ export class State {
 						}
 					}
 
-					delete this.sync.localFileHashes[task.path]
-
 					break
 				}
 
 				case "createRemoteDirectory": {
-					const item: RemoteItem = {
-						name: pathModule.posix.basename(task.path),
+					const localItem: LocalItem = {
+						lastModified: parseInt(task.stats.mtimeMs as unknown as string), // Sometimes comes as a float, but we need an int
 						type: "directory",
-						uuid: task.uuid,
+						path: task.path,
 						size: 0,
-						path: task.path
+						creation: parseInt(task.stats.mtimeMs as unknown as string), // Sometimes comes as a float, but we need an int
+						inode: task.stats.ino
 					}
 
-					currentRemoteTree.tree[task.path] = item
-					currentRemoteTree.uuids[item.uuid] = item
+					currentRemoteTree.tree[task.item.path] = task.item
+					currentRemoteTree.uuids[task.item.uuid] = task.item
+					currentLocalTree.tree[task.path] = localItem
+					currentLocalTree.inodes[localItem.inode] = localItem
 
 					break
 				}
 
 				case "uploadFile": {
-					const item: RemoteItem = {
-						...task.item,
-						path: task.path
+					const localItem: LocalItem = {
+						lastModified: parseInt(task.stats.mtimeMs as unknown as string), // Sometimes comes as a float, but we need an int
+						type: "file",
+						path: task.path,
+						size: task.stats.size,
+						creation: parseInt(task.stats.mtimeMs as unknown as string), // Sometimes comes as a float, but we need an int
+						inode: task.stats.ino
 					}
 
-					currentRemoteTree.tree[task.path] = item
-					currentRemoteTree.uuids[item.uuid] = item
+					currentRemoteTree.tree[task.item.path] = task.item
+					currentRemoteTree.uuids[task.item.uuid] = task.item
+					currentLocalTree.tree[task.path] = localItem
+					currentLocalTree.inodes[localItem.inode] = localItem
 
 					break
 				}
 
 				case "createLocalDirectory": {
-					const item: LocalItem = {
+					const localItem: LocalItem = {
 						lastModified: parseInt(task.stats.mtimeMs as unknown as string), // Sometimes comes as a float, but we need an int
 						type: "directory",
 						path: task.path,
@@ -236,8 +269,10 @@ export class State {
 						inode: task.stats.ino
 					}
 
-					currentLocalTree.tree[task.path] = item
-					currentLocalTree.inodes[item.inode] = item
+					currentLocalTree.tree[task.path] = localItem
+					currentLocalTree.inodes[localItem.inode] = localItem
+					currentRemoteTree.tree[task.item.path] = task.item
+					currentRemoteTree.uuids[task.item.uuid] = task.item
 
 					break
 				}
@@ -254,6 +289,8 @@ export class State {
 
 					currentLocalTree.tree[task.path] = item
 					currentLocalTree.inodes[item.inode] = item
+					currentRemoteTree.tree[task.item.path] = task.item
+					currentRemoteTree.uuids[task.item.uuid] = task.item
 
 					break
 				}

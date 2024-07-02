@@ -13,7 +13,8 @@ import {
 	isValidPath,
 	isDirectoryPathIgnoredByDefault,
 	isRelativePathIgnoredByDefault,
-	serializeError
+	serializeError,
+	replacePathStartWithFromAndTo
 } from "../../utils"
 import { v4 as uuidv4 } from "uuid"
 import { LOCAL_TRASH_NAME } from "../../constants"
@@ -595,11 +596,6 @@ export class RemoteFileSystem {
 		await this.mutex.acquire()
 
 		try {
-			// We most likely already moved the file/directory
-			if (!this.getDirectoryTreeCache.tree[fromRelativePath] && this.getDirectoryTreeCache.tree[toRelativePath]) {
-				return
-			}
-
 			if (fromRelativePath === "/" || fromRelativePath === toRelativePath) {
 				return
 			}
@@ -705,52 +701,52 @@ export class RemoteFileSystem {
 						})
 					}
 				}
+			}
 
-				await this.itemsMutex.acquire()
+			await this.itemsMutex.acquire()
 
-				this.getDirectoryTreeCache.tree[toRelativePath] = {
-					...item,
-					name: pathModule.basename(toRelativePath),
-					path: toRelativePath
-				}
+			this.getDirectoryTreeCache.tree[toRelativePath] = {
+				...item,
+				name: pathModule.basename(toRelativePath),
+				path: toRelativePath
+			}
 
-				this.getDirectoryTreeCache.uuids[item.uuid] = {
-					...item,
-					name: pathModule.basename(toRelativePath),
-					path: toRelativePath
-				}
+			this.getDirectoryTreeCache.uuids[item.uuid] = {
+				...item,
+				name: pathModule.basename(toRelativePath),
+				path: toRelativePath
+			}
 
-				delete this.getDirectoryTreeCache.tree[fromRelativePath]
+			delete this.getDirectoryTreeCache.tree[fromRelativePath]
 
-				for (const oldPath in this.getDirectoryTreeCache.tree) {
-					if (oldPath.startsWith(fromRelativePath + "/") && oldPath !== fromRelativePath) {
-						const newPath = oldPath.split(fromRelativePath).join(toRelativePath)
-						const oldItem = this.getDirectoryTreeCache.tree[oldPath]
+			for (const oldPath in this.getDirectoryTreeCache.tree) {
+				if (oldPath.startsWith(fromRelativePath + "/") && oldPath !== fromRelativePath) {
+					const newPath = replacePathStartWithFromAndTo(oldPath, fromRelativePath, toRelativePath)
+					const oldItem = this.getDirectoryTreeCache.tree[oldPath]
 
-						if (oldItem) {
-							this.getDirectoryTreeCache.tree[newPath] = {
-								...oldItem,
+					if (oldItem) {
+						this.getDirectoryTreeCache.tree[newPath] = {
+							...oldItem,
+							name: pathModule.basename(newPath),
+							path: newPath
+						}
+
+						delete this.getDirectoryTreeCache.tree[oldPath]
+
+						const oldItemUUID = this.getDirectoryTreeCache.uuids[oldItem.uuid]
+
+						if (oldItemUUID) {
+							this.getDirectoryTreeCache.uuids[oldItem.uuid] = {
+								...oldItemUUID,
 								name: pathModule.basename(newPath),
 								path: newPath
-							}
-
-							delete this.getDirectoryTreeCache.tree[oldPath]
-
-							const oldItemUUID = this.getDirectoryTreeCache.uuids[oldItem.uuid]
-
-							if (oldItemUUID) {
-								this.getDirectoryTreeCache.uuids[oldItem.uuid] = {
-									...oldItemUUID,
-									name: pathModule.basename(newPath),
-									path: newPath
-								}
 							}
 						}
 					}
 				}
-
-				this.itemsMutex.release()
 			}
+
+			this.itemsMutex.release()
 		} finally {
 			this.mutex.release()
 		}

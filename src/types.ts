@@ -48,6 +48,10 @@ export type CycleState =
 	| "cycleNoChanges"
 	| "cycleRemoteSmokeTestFailed"
 	| "cycleExited"
+	| "cycleAcquiringLockStarted"
+	| "cycleAcquiringLockDone"
+	| "cycleReleasingLockStarted"
+	| "cycleReleasingLockDone"
 
 export type TransferData =
 	| {
@@ -352,6 +356,18 @@ export type SyncMessage =
 			  }
 			| {
 					type: "cycleRestarting"
+			  }
+			| {
+					type: "cycleAcquiringLockStarted"
+			  }
+			| {
+					type: "cycleAcquiringLockDone"
+			  }
+			| {
+					type: "cycleReleasingLockStarted"
+			  }
+			| {
+					type: "cycleReleasingLockDone"
 			  }
 			| {
 					type: "cyclePaused"

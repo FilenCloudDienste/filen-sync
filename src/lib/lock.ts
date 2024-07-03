@@ -27,7 +27,27 @@ export class Lock {
 				tryTimeout: 1000
 			})
 
-			this.lockRefreshInterval = setInterval(this.refresh, 5000)
+			this.lockRefreshInterval = setInterval(async () => {
+				await this.mutex.acquire()
+
+				try {
+					if (!this.lockAcquired) {
+						return
+					}
+
+					await this.sync.sdk.user().refreshResourceLock({
+						resource: this.resource,
+						lockUUID: this.lockUUID
+					})
+
+					this.lockAcquired = true
+				} catch {
+					await this.release().catch(() => {})
+				} finally {
+					this.mutex.release()
+				}
+			}, 5000)
+
 			this.lockAcquired = true
 		} finally {
 			this.mutex.release()
@@ -52,27 +72,6 @@ export class Lock {
 			this.lockAcquired = false
 		} catch {
 			this.lockAcquired = false
-		} finally {
-			this.mutex.release()
-		}
-	}
-
-	private async refresh(): Promise<void> {
-		await this.mutex.acquire()
-
-		try {
-			if (!this.lockAcquired) {
-				return
-			}
-
-			await this.sync.sdk.user().refreshResourceLock({
-				resource: this.resource,
-				lockUUID: this.lockUUID
-			})
-
-			this.lockAcquired = true
-		} catch {
-			await this.release().catch(() => {})
 		} finally {
 			this.mutex.release()
 		}

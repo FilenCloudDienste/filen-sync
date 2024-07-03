@@ -5,7 +5,9 @@ import {
 	isRelativePathIgnoredByDefault,
 	isDirectoryPathIgnoredByDefault,
 	isSystemPathIgnoredByDefault,
-	serializeError
+	serializeError,
+	replacePathStartWithFromAndTo,
+	pathIncludesDotFile
 } from "../../utils"
 import pathModule from "path"
 import process from "process"
@@ -16,6 +18,7 @@ import { pipeline } from "stream"
 import { promisify } from "util"
 import { type CloudItem, PauseSignal } from "@filen/sdk"
 import { postMessageToMain } from "../ipc"
+import { Semaphore } from "../../semaphore"
 
 const pipelineAsync = promisify(pipeline)
 
@@ -42,7 +45,7 @@ export type LocalTreeError = {
 export type LocalTreeIgnored = {
 	localPath: string
 	relativePath: string
-	reason: "dotFile" | "localIgnore" | "defaultIgnore"
+	reason: "dotFile" | "localIgnore" | "defaultIgnore" | "empty" | "symlink" | "invalidType"
 }
 
 /**
@@ -67,6 +70,9 @@ export class LocalFileSystem {
 	}
 	public watcherRunning = false
 	private watcherInstance: watcher.AsyncSubscription | null = null
+	public readonly itemsMutex = new Semaphore(1)
+	public readonly mutex = new Semaphore(1)
+	public readonly mkdirMutex = new Semaphore(1)
 
 	/**
 	 * Creates an instance of LocalFileSystem.
@@ -129,9 +135,11 @@ export class LocalFileSystem {
 					return
 				}
 
+				const entryPath = `/${isWindows ? entry.replace(/\\/g, "/") : entry}`
+
 				if (
-					isDirectoryPathIgnoredByDefault(entry) ||
-					isRelativePathIgnoredByDefault(entry) ||
+					isDirectoryPathIgnoredByDefault(entryPath) ||
+					isRelativePathIgnoredByDefault(entryPath) ||
 					isSystemPathIgnoredByDefault(itemPath)
 				) {
 					ignored.push({
@@ -143,14 +151,13 @@ export class LocalFileSystem {
 					return
 				}
 
-				const entryPath = `/${isWindows ? entry.replace(/\\/g, "/") : entry}`
 				const itemName = pathModule.posix.basename(entryPath)
 
 				if (itemName.startsWith(LOCAL_TRASH_NAME)) {
 					return
 				}
 
-				if (this.sync.excludeDotFiles && itemName.startsWith(".")) {
+				if (this.sync.excludeDotFiles && pathIncludesDotFile(entryPath)) {
 					ignored.push({
 						localPath: itemPath,
 						relativePath: entry,
@@ -161,18 +168,49 @@ export class LocalFileSystem {
 				}
 
 				try {
-					const stats = await fs.stat(itemPath)
+					const stats = await fs.lstat(itemPath)
+
+					if (stats.isBlockDevice() || stats.isCharacterDevice() || stats.isFIFO() || stats.isSocket()) {
+						ignored.push({
+							localPath: itemPath,
+							relativePath: entry,
+							reason: "invalidType"
+						})
+
+						return
+					}
+
+					if (stats.isSymbolicLink()) {
+						ignored.push({
+							localPath: itemPath,
+							relativePath: entry,
+							reason: "symlink"
+						})
+
+						return
+					}
+
+					if (stats.isFile() && stats.size <= 0) {
+						ignored.push({
+							localPath: itemPath,
+							relativePath: entry,
+							reason: "empty"
+						})
+
+						return
+					}
+
 					const item: LocalItem = {
 						lastModified: parseInt(stats.mtimeMs as unknown as string), // Sometimes comes as a float, but we need an int
 						type: stats.isDirectory() ? "directory" : "file",
 						path: entryPath,
 						creation: parseInt(stats.birthtimeMs as unknown as string), // Sometimes comes as a float, but we need an int
-						size: stats.size,
-						inode: stats.ino
+						size: parseInt(stats.size as unknown as string), // Sometimes comes as a float, but we need an int
+						inode: parseInt(stats.ino as unknown as string) // Sometimes comes as a float, but we need an int
 					}
 
 					tree[entryPath] = item
-					inodes[stats.ino] = item
+					inodes[item.inode] = item
 				} catch (e) {
 					this.sync.worker.logger.log("error", e, "filesystems.local.getDirectoryTree")
 
@@ -195,8 +233,8 @@ export class LocalFileSystem {
 
 		return {
 			result: {
-				tree,
-				inodes
+				tree: this.getDirectoryTreeCache.tree,
+				inodes: this.getDirectoryTreeCache.inodes
 			},
 			errors,
 			ignored,
@@ -314,57 +352,181 @@ export class LocalFileSystem {
 	 * @returns {Promise<fs.Stats>}
 	 */
 	public async mkdir({ relativePath }: { relativePath: string }): Promise<fs.Stats> {
-		const localPath = pathModule.join(this.sync.syncPair.localPath, relativePath)
+		await this.mkdirMutex.acquire()
 
-		await fs.ensureDir(localPath)
+		try {
+			const localPath = pathModule.join(this.sync.syncPair.localPath, relativePath)
 
-		return await fs.stat(localPath)
+			await fs.ensureDir(localPath)
+
+			const stats = await fs.stat(localPath)
+
+			await this.itemsMutex.acquire()
+
+			const item: LocalItem = {
+				type: "directory",
+				inode: parseInt(stats.ino as unknown as string), // Sometimes comes as a float, but we need an int
+				lastModified: parseInt(stats.mtimeMs as unknown as string), // Sometimes comes as a float, but we need an int
+				creation: parseInt(stats.birthtimeMs as unknown as string), // Sometimes comes as a float, but we need an int
+				size: 0,
+				path: relativePath
+			}
+
+			this.getDirectoryTreeCache.tree[relativePath] = item
+			this.getDirectoryTreeCache.inodes[item.inode] = item
+
+			this.itemsMutex.release()
+
+			return stats
+		} finally {
+			this.mkdirMutex.release()
+		}
 	}
 
 	public async unlink({ relativePath, permanent = false }: { relativePath: string; permanent?: boolean }): Promise<void> {
-		const localPath = pathModule.join(this.sync.syncPair.localPath, relativePath)
+		await this.mutex.acquire()
 
-		if (!permanent) {
-			const localTrashPath = pathModule.join(this.sync.syncPair.localPath, LOCAL_TRASH_NAME)
+		try {
+			const item = this.getDirectoryTreeCache.tree[relativePath]
 
-			await fs.ensureDir(localTrashPath)
+			if (!item) {
+				return
+			}
 
-			await fs.move(localPath, pathModule.join(localTrashPath, pathModule.posix.basename(relativePath)), {
-				overwrite: true
-			})
+			const localPath = pathModule.join(this.sync.syncPair.localPath, relativePath)
 
-			return
+			if (!permanent) {
+				const localTrashPath = pathModule.join(this.sync.syncPair.localPath, LOCAL_TRASH_NAME)
+
+				await fs.ensureDir(localTrashPath)
+				await fs.move(localPath, pathModule.join(localTrashPath, pathModule.posix.basename(relativePath)), {
+					overwrite: true
+				})
+			} else {
+				await fs.rm(localPath, {
+					force: true,
+					maxRetries: 60 * 10,
+					recursive: true,
+					retryDelay: 100
+				})
+			}
+
+			await this.itemsMutex.acquire()
+
+			delete this.getDirectoryTreeCache.tree[relativePath]
+			delete this.getDirectoryTreeCache.inodes[item.inode]
+			delete this.sync.localFileHashes[relativePath]
+
+			for (const entry in this.getDirectoryTreeCache.tree) {
+				if (entry.startsWith(relativePath + "/") || entry === relativePath) {
+					const entryItem = this.getDirectoryTreeCache.tree[entry]
+
+					if (entryItem) {
+						delete this.getDirectoryTreeCache.inodes[entryItem.inode]
+					}
+
+					delete this.sync.localFileHashes[entry]
+					delete this.getDirectoryTreeCache.tree[entry]
+				}
+			}
+
+			this.itemsMutex.release()
+		} finally {
+			this.mutex.release()
 		}
-
-		await fs.rm(localPath, {
-			force: true,
-			maxRetries: 60 * 10,
-			recursive: true,
-			retryDelay: 100
-		})
 	}
 
 	public async rename({ fromRelativePath, toRelativePath }: { fromRelativePath: string; toRelativePath: string }): Promise<fs.Stats> {
-		const fromLocalPath = pathModule.join(this.sync.syncPair.localPath, fromRelativePath)
-		const toLocalPath = pathModule.join(this.sync.syncPair.localPath, toRelativePath)
-		const fromLocalPathParentPath = pathModule.dirname(fromLocalPath)
-		const toLocalPathParentPath = pathModule.dirname(toLocalPath)
+		await this.mutex.acquire()
 
-		if (!(await fs.exists(toLocalPathParentPath))) {
-			throw new Error(`Could not rename ${fromLocalPath} to ${toLocalPath}: Parent directory missing.`)
+		try {
+			if (fromRelativePath === "/" || toRelativePath === "/") {
+				throw new Error("Invalid paths.")
+			}
+
+			const item = this.getDirectoryTreeCache.tree[fromRelativePath]
+
+			if (!item) {
+				throw new Error(`Could not rename ${fromRelativePath} to ${toRelativePath}: Path not found.`)
+			}
+
+			const fromLocalPath = pathModule.join(this.sync.syncPair.localPath, fromRelativePath)
+			const toLocalPath = pathModule.join(this.sync.syncPair.localPath, toRelativePath)
+			const fromLocalPathParentPath = pathModule.dirname(fromLocalPath)
+			const toLocalPathParentPath = pathModule.dirname(toLocalPath)
+
+			if (!(await fs.exists(toLocalPathParentPath))) {
+				throw new Error(`Could not rename ${fromLocalPath} to ${toLocalPath}: Parent directory missing.`)
+			}
+
+			if (fromLocalPathParentPath === toLocalPathParentPath) {
+				await fs.rename(fromLocalPath, toLocalPath)
+			} else {
+				if (toRelativePath.startsWith(fromRelativePath)) {
+					throw new Error("Invalid paths.")
+				}
+
+				await fs.move(fromLocalPath, toLocalPath, {
+					overwrite: true
+				})
+			}
+
+			const stats = await fs.stat(toLocalPath)
+
+			await this.itemsMutex.acquire()
+
+			this.getDirectoryTreeCache.tree[toRelativePath] = {
+				...item,
+				path: toRelativePath
+			}
+
+			this.getDirectoryTreeCache.inodes[item.inode] = {
+				...item,
+				path: toRelativePath
+			}
+
+			delete this.getDirectoryTreeCache.tree[fromRelativePath]
+			delete this.sync.localFileHashes[fromRelativePath]
+
+			for (const oldPath in this.getDirectoryTreeCache.tree) {
+				if (oldPath.startsWith(fromRelativePath + "/") && oldPath !== fromRelativePath) {
+					const newPath = replacePathStartWithFromAndTo(oldPath, fromRelativePath, toRelativePath)
+					const oldItem = this.getDirectoryTreeCache.tree[oldPath]
+
+					if (oldItem) {
+						this.getDirectoryTreeCache.tree[newPath] = {
+							...oldItem,
+							path: newPath
+						}
+
+						delete this.getDirectoryTreeCache.tree[oldPath]
+
+						const oldItemInode = this.getDirectoryTreeCache.inodes[oldItem.inode]
+
+						if (oldItemInode) {
+							this.getDirectoryTreeCache.inodes[oldItem.inode] = {
+								...oldItemInode,
+								path: newPath
+							}
+						}
+					}
+
+					const oldItemHash = this.sync.localFileHashes[oldPath]
+
+					if (oldItemHash) {
+						this.sync.localFileHashes[newPath] = oldItemHash
+
+						delete this.sync.localFileHashes[oldPath]
+					}
+				}
+			}
+
+			this.itemsMutex.release()
+
+			return stats
+		} finally {
+			this.mutex.release()
 		}
-
-		if (fromLocalPathParentPath === toLocalPathParentPath) {
-			await fs.rename(fromLocalPath, toLocalPath)
-
-			return await fs.stat(toLocalPath)
-		}
-
-		await fs.move(fromLocalPath, toLocalPath, {
-			overwrite: true
-		})
-
-		return await fs.stat(toLocalPath)
 	}
 
 	/**
@@ -375,7 +537,7 @@ export class LocalFileSystem {
 	 * @async
 	 * @param {{ relativePath: string }} param0
 	 * @param {string} param0.relativePath
-	 * @returns {Promise<void>}
+	 * @returns {Promise<CloudItem>}
 	 */
 	public async upload({ relativePath }: { relativePath: string }): Promise<CloudItem> {
 		const localPath = pathModule.join(this.sync.syncPair.localPath, relativePath)
@@ -398,7 +560,7 @@ export class LocalFileSystem {
 				type: "queued",
 				relativePath,
 				localPath,
-				size: stats.size
+				size: parseInt(stats.size as unknown as string) // Sometimes comes as a float, but we need an int
 			}
 		})
 
@@ -438,7 +600,7 @@ export class LocalFileSystem {
 							relativePath,
 							localPath,
 							error: serializeError(err),
-							size: stats.size
+							size: parseInt(stats.size as unknown as string) // Sometimes comes as a float, but we need an int
 						}
 					})
 				},
@@ -452,7 +614,7 @@ export class LocalFileSystem {
 							relativePath,
 							localPath,
 							bytes,
-							size: stats.size
+							size: parseInt(stats.size as unknown as string) // Sometimes comes as a float, but we need an int
 						}
 					})
 				},
@@ -465,7 +627,7 @@ export class LocalFileSystem {
 							type: "started",
 							relativePath,
 							localPath,
-							size: stats.size
+							size: parseInt(stats.size as unknown as string) // Sometimes comes as a float, but we need an int
 						}
 					})
 				}
@@ -493,7 +655,7 @@ export class LocalFileSystem {
 					type: "finished",
 					relativePath,
 					localPath,
-					size: stats.size
+					size: parseInt(stats.size as unknown as string) // Sometimes comes as a float, but we need an int
 				}
 			})
 
@@ -511,7 +673,7 @@ export class LocalFileSystem {
 						relativePath,
 						localPath,
 						error: serializeError(e),
-						size: stats.size
+						size: parseInt(stats.size as unknown as string) // Sometimes comes as a float, but we need an int
 					}
 				})
 			}
@@ -538,6 +700,14 @@ export class LocalFileSystem {
 			await fs.access(path, fs.constants.R_OK)
 
 			return true
+		} catch {
+			return false
+		}
+	}
+
+	public async pathExists(path: string): Promise<boolean> {
+		try {
+			return await fs.exists(path)
 		} catch {
 			return false
 		}

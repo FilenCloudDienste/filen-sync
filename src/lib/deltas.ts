@@ -1,6 +1,7 @@
 import type Sync from "./sync"
 import { type LocalTree, type LocalTreeError } from "./filesystems/local"
 import { type RemoteTree } from "./filesystems/remote"
+import { replacePathStartWithFromAndTo } from "../utils"
 
 export type Delta = { path: string } & (
 	| {
@@ -30,25 +31,21 @@ export type Delta = { path: string } & (
 	| {
 			type: "renameLocalFile"
 			from: string
-			fromBefore: string
 			to: string
 	  }
 	| {
 			type: "renameRemoteFile"
 			from: string
-			fromBefore: string
 			to: string
 	  }
 	| {
 			type: "renameRemoteDirectory"
 			from: string
-			fromBefore: string
 			to: string
 	  }
 	| {
 			type: "renameLocalDirectory"
 			from: string
-			fromBefore: string
 			to: string
 	  }
 )
@@ -110,6 +107,10 @@ export class Deltas {
 		let deltas: Delta[] = []
 		const pathsAdded: Record<string, boolean> = {}
 		const erroredLocalPaths: Record<string, boolean> = {}
+		const renamedRemoteDirectories: Delta[] = []
+		const renamedLocalDirectories: Delta[] = []
+		const deletedRemoteDirectories: Delta[] = []
+		const deletedLocalDirectories: Delta[] = []
 
 		for (const error of currentLocalTreeErrors) {
 			erroredLocalPaths[error.relativePath] = true
@@ -140,15 +141,20 @@ export class Deltas {
 				continue
 			}
 
-			// Path from current item changed, it was either renamed or moved
-			if (currentItem.path !== previousItem.path) {
-				deltas.push({
+			// Path from current item changed, it was either renamed or moved (same type)
+			if (currentItem.path !== previousItem.path && currentItem.type === previousItem.type) {
+				const delta: Delta = {
 					type: currentItem.type === "directory" ? "renameRemoteDirectory" : "renameRemoteFile",
 					path: currentItem.path,
 					from: previousItem.path,
-					fromBefore: previousItem.path,
 					to: currentItem.path
-				})
+				}
+
+				deltas.push(delta)
+
+				if (currentItem.type === "directory") {
+					renamedRemoteDirectories.push(delta)
+				}
 
 				pathsAdded[currentItem.path] = true
 				pathsAdded[previousItem.path] = true
@@ -165,15 +171,20 @@ export class Deltas {
 				continue
 			}
 
-			// Path from current item changed, it was either renamed or moved
-			if (currentItem.path !== previousItem.path) {
-				deltas.push({
+			// Path from current item changed, it was either renamed or moved (same type)
+			if (currentItem.path !== previousItem.path && currentItem.type === previousItem.type) {
+				const delta: Delta = {
 					type: currentItem.type === "directory" ? "renameLocalDirectory" : "renameLocalFile",
 					path: currentItem.path,
 					from: previousItem.path,
-					fromBefore: previousItem.path,
 					to: currentItem.path
-				})
+				}
+
+				deltas.push(delta)
+
+				if (currentItem.type === "directory") {
+					renamedLocalDirectories.push(delta)
+				}
 
 				pathsAdded[currentItem.path] = true
 				pathsAdded[previousItem.path] = true
@@ -190,11 +201,19 @@ export class Deltas {
 			const previousLocalItem = previousLocalTree.tree[path]
 			const currentLocalItem = currentLocalTree.tree[path]
 
-			if (!currentLocalItem && previousLocalItem) {
-				deltas.push({
+			// If the item does not exist in the current tree but does in the previous one, it has been deleted.
+			// We also check if the previous inode does not exist in the current tree.
+			if (!currentLocalItem && previousLocalItem && !currentLocalTree.inodes[previousLocalItem.inode]) {
+				const delta: Delta = {
 					type: previousLocalItem.type === "directory" ? "deleteRemoteDirectory" : "deleteRemoteFile",
 					path
-				})
+				}
+
+				deltas.push(delta)
+
+				if (previousLocalItem.type === "directory") {
+					deletedRemoteDirectories.push(delta)
+				}
 
 				pathsAdded[path] = true
 				pathsAdded[previousLocalItem.path] = true
@@ -211,11 +230,19 @@ export class Deltas {
 			const previousRemoteItem = previousRemoteTree.tree[path]
 			const currentRemoteItem = currentRemoteTree.tree[path]
 
-			if (!currentRemoteItem && previousRemoteItem) {
-				deltas.push({
+			// If the item does not exist in the current tree but does in the previous one, it has been deleted.
+			// We also check if the previous UUID does not exist in the current tree.
+			if (!currentRemoteItem && previousRemoteItem && !currentRemoteTree.uuids[previousRemoteItem.uuid]) {
+				const delta: Delta = {
 					type: previousRemoteItem.type === "directory" ? "deleteLocalDirectory" : "deleteLocalFile",
 					path
-				})
+				}
+
+				deltas.push(delta)
+
+				if (previousRemoteItem.type === "directory") {
+					deletedLocalDirectories.push(delta)
+				}
 
 				pathsAdded[path] = true
 				pathsAdded[previousRemoteItem.path] = true
@@ -232,7 +259,9 @@ export class Deltas {
 			const currentLocalItem = currentLocalTree.tree[path]
 			const currentRemoteItem = currentRemoteTree.tree[path]
 
-			if (!currentRemoteItem && currentLocalItem) {
+			// If the item does not exist in the current remote tree, but does in the local one, it should be uploaded.
+			// We also check if it in fact has existed before (the inode), if so, we skip it.
+			if (!currentRemoteItem && currentLocalItem && !previousLocalTree.inodes[currentLocalItem.inode]) {
 				deltas.push({
 					type: currentLocalItem.type === "directory" ? "createRemoteDirectory" : "uploadFile",
 					path
@@ -243,6 +272,7 @@ export class Deltas {
 				continue
 			}
 
+			// If the item exists in both trees and has a different mod time + hash, we upload it again.
 			if (
 				currentRemoteItem &&
 				currentRemoteItem.type === "file" &&
@@ -272,7 +302,9 @@ export class Deltas {
 			const currentLocalItem = currentLocalTree.tree[path]
 			const currentRemoteItem = currentRemoteTree.tree[path]
 
-			if (!currentLocalItem && currentRemoteItem) {
+			// If the item does not exist in the current local tree, but does in the remote one, it should be download.
+			// We also check if it in fact has existed before (the UUID), if so, we skip it.
+			if (!currentLocalItem && currentRemoteItem && !previousRemoteTree.uuids[currentRemoteItem.uuid]) {
 				deltas.push({
 					type: currentRemoteItem.type === "directory" ? "createLocalDirectory" : "downloadFile",
 					path
@@ -283,6 +315,7 @@ export class Deltas {
 				continue
 			}
 
+			// If the item exists in both trees and the mod time changed, we download it.
 			if (
 				currentRemoteItem &&
 				currentRemoteItem.type === "file" &&
@@ -343,7 +376,79 @@ export class Deltas {
 			)
 		}
 
-		return deltas
+		// Work on deltas from "left to right" (ascending order, path length).
+		const deltasSorted = deltas.sort((a, b) => a.path.split("/").length - b.path.split("/").length)
+
+		// Here we apply the done task to the delta state.
+		// E.g. when the user renames/moves a directory from "/sync/dir" to "/sync/dir2"
+		// we'll get all the rename/move deltas for the directory children aswell.
+		// This is pretty unecessary, hence we filter them here.
+		// Same for deletions. We only ever need to rename/move/delete the parent directory if the children did not change.
+		// This saves a lot of disk usage and API requests. This also saves time applying all done tasks to the overall state,
+		// since we need to loop through less doneTasks.
+
+		for (let i = 0; i < deltasSorted.length; i++) {
+			const delta = deltasSorted[i]!
+			let moveUp = false
+
+			if (delta.type === "renameLocalDirectory" || delta.type === "renameLocalFile") {
+				for (const directoryDelta of renamedLocalDirectories) {
+					if (directoryDelta.type === "renameLocalDirectory" && delta.from.startsWith(directoryDelta.from + "/")) {
+						const newFromPath = replacePathStartWithFromAndTo(delta.from, directoryDelta.from, directoryDelta.to)
+
+						if (newFromPath === delta.to) {
+							deltasSorted.splice(i, 1)
+
+							moveUp = true
+						} else {
+							deltasSorted.splice(i, 1, {
+								...delta,
+								from: newFromPath
+							})
+						}
+					}
+				}
+			} else if (delta.type === "renameRemoteDirectory" || delta.type === "renameRemoteFile") {
+				for (const directoryDelta of renamedRemoteDirectories) {
+					if (directoryDelta.type === "renameRemoteDirectory" && delta.from.startsWith(directoryDelta.from + "/")) {
+						const newFromPath = replacePathStartWithFromAndTo(delta.from, directoryDelta.from, directoryDelta.to)
+
+						if (newFromPath === delta.to) {
+							deltasSorted.splice(i, 1)
+
+							moveUp = true
+						} else {
+							deltasSorted.splice(i, 1, {
+								...delta,
+								from: newFromPath
+							})
+						}
+					}
+				}
+			} else if (delta.type === "deleteLocalDirectory" || delta.type === "deleteLocalFile") {
+				for (const directoryDelta of deletedLocalDirectories) {
+					if (directoryDelta.type === "deleteLocalDirectory" && delta.path.startsWith(directoryDelta.path + "/")) {
+						deltasSorted.splice(i, 1)
+
+						moveUp = true
+					}
+				}
+			} else if (delta.type === "deleteRemoteDirectory" || delta.type === "deleteRemoteFile") {
+				for (const directoryDelta of deletedLocalDirectories) {
+					if (directoryDelta.type === "deleteRemoteDirectory" && delta.path.startsWith(directoryDelta.path + "/")) {
+						deltasSorted.splice(i, 1)
+
+						moveUp = true
+					}
+				}
+			}
+
+			if (moveUp) {
+				i--
+			}
+		}
+
+		return deltasSorted
 	}
 }
 

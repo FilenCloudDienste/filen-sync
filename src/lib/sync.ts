@@ -4,7 +4,7 @@ import { SYNC_INTERVAL } from "../constants"
 import { LocalFileSystem, LocalTree } from "./filesystems/local"
 import { RemoteFileSystem, RemoteTree } from "./filesystems/remote"
 import Deltas from "./deltas"
-import Tasks from "./tasks"
+import Tasks, { type TaskError } from "./tasks"
 import State from "./state"
 import { postMessageToMain } from "./ipc"
 import { isMainThread, parentPort } from "worker_threads"
@@ -50,6 +50,7 @@ export class Sync {
 	public removed: boolean = false
 	public saveStateOnNoChanges = true
 	public readonly lock: Lock
+	public taskErrors: TaskError[] = []
 
 	/**
 	 * Creates an instance of Sync.
@@ -145,7 +146,7 @@ export class Sync {
 		try {
 			const [localSmokeTest, remoteSmokeTest] = await Promise.all([
 				this.localFileSystem.isPathWritable(this.syncPair.localPath),
-				this.remoteFileSystem.remotePathExisting()
+				this.remoteFileSystem.remoteDirPathExisting()
 			])
 
 			if (!localSmokeTest || !remoteSmokeTest) {
@@ -181,10 +182,30 @@ export class Sync {
 	}
 
 	private async run(): Promise<void> {
+		if (this.removed) {
+			postMessageToMain({
+				type: "syncPairRemoved",
+				syncPair: this.syncPair
+			})
+
+			return
+		}
+
 		try {
-			if (this.removed) {
+			if (this.taskErrors.length > 0) {
+				if (this.worker.runOnce) {
+					await this.cleanup()
+
+					return
+				}
+
 				postMessageToMain({
-					type: "syncPairRemoved",
+					type: "cyclePaused",
+					syncPair: this.syncPair
+				})
+
+				postMessageToMain({
+					type: "cycleRestarting",
 					syncPair: this.syncPair
 				})
 
@@ -197,10 +218,6 @@ export class Sync {
 
 					return
 				}
-
-				setTimeout(() => {
-					this.run()
-				}, SYNC_INTERVAL)
 
 				postMessageToMain({
 					type: "cyclePaused",
@@ -222,7 +239,7 @@ export class Sync {
 
 			const [localSmokeTest, remoteSmokeTest] = await Promise.all([
 				this.localFileSystem.isPathWritable(this.syncPair.localPath),
-				this.remoteFileSystem.remotePathExisting()
+				this.remoteFileSystem.remoteDirPathExisting()
 			])
 
 			if (!localSmokeTest) {
@@ -231,10 +248,6 @@ export class Sync {
 
 					return
 				}
-
-				setTimeout(() => {
-					this.run()
-				}, SYNC_INTERVAL)
 
 				postMessageToMain({
 					type: "cycleLocalSmokeTestFailed",
@@ -259,10 +272,6 @@ export class Sync {
 					return
 				}
 
-				setTimeout(() => {
-					this.run()
-				}, SYNC_INTERVAL)
-
 				postMessageToMain({
 					type: "cycleLocalSmokeTestFailed",
 					syncPair: this.syncPair,
@@ -279,43 +288,31 @@ export class Sync {
 				return
 			}
 
-			try {
-				postMessageToMain({
-					type: "cycleWaitingForLocalDirectoryChangesStarted",
-					syncPair: this.syncPair
-				})
+			postMessageToMain({
+				type: "cycleWaitingForLocalDirectoryChangesStarted",
+				syncPair: this.syncPair
+			})
 
-				await this.localFileSystem.waitForLocalDirectoryChanges()
+			await this.localFileSystem.waitForLocalDirectoryChanges()
 
-				postMessageToMain({
-					type: "cycleWaitingForLocalDirectoryChangesDone",
-					syncPair: this.syncPair
-				})
+			postMessageToMain({
+				type: "cycleWaitingForLocalDirectoryChangesDone",
+				syncPair: this.syncPair
+			})
 
-				postMessageToMain({
-					type: "cycleAcquiringLockStarted",
-					syncPair: this.syncPair
-				})
+			postMessageToMain({
+				type: "cycleGettingTreesStarted",
+				syncPair: this.syncPair
+			})
 
-				await this.lock.acquire()
+			// eslint-disable-next-line prefer-const
+			let [currentLocalTree, currentRemoteTree] = await Promise.all([
+				this.localFileSystem.getDirectoryTree(),
+				this.remoteFileSystem.getDirectoryTree()
+			])
 
-				postMessageToMain({
-					type: "cycleAcquiringLockDone",
-					syncPair: this.syncPair
-				})
-
-				postMessageToMain({
-					type: "cycleGettingTreesStarted",
-					syncPair: this.syncPair
-				})
-
-				// eslint-disable-next-line prefer-const
-				let [currentLocalTree, currentRemoteTree] = await Promise.all([
-					this.localFileSystem.getDirectoryTree(),
-					this.remoteFileSystem.getDirectoryTree()
-				])
-
-				if (!currentLocalTree.changed && !currentRemoteTree.changed) {
+			if (!currentLocalTree.changed && !currentRemoteTree.changed) {
+				if (this.taskErrors.length === 0) {
 					postMessageToMain({
 						type: "cycleSavingStateStarted",
 						syncPair: this.syncPair
@@ -336,103 +333,105 @@ export class Sync {
 						type: "cycleSavingStateDone",
 						syncPair: this.syncPair
 					})
-
-					postMessageToMain({
-						type: "cycleNoChanges",
-						syncPair: this.syncPair
-					})
-
-					return
 				}
 
 				postMessageToMain({
-					type: "cycleGettingTreesDone",
+					type: "cycleNoChanges",
 					syncPair: this.syncPair
 				})
 
-				postMessageToMain({
-					type: "localTreeErrors",
-					syncPair: this.syncPair,
-					data: {
-						errors: currentLocalTree.errors.map(e => ({
-							...e,
-							error: serializeError(e.error)
-						}))
-					}
-				})
+				return
+			}
 
-				postMessageToMain({
-					type: "localTreeIgnored",
-					syncPair: this.syncPair,
-					data: {
-						ignored: currentLocalTree.ignored
-					}
-				})
+			postMessageToMain({
+				type: "cycleGettingTreesDone",
+				syncPair: this.syncPair
+			})
 
-				postMessageToMain({
-					type: "remoteTreeIgnored",
-					syncPair: this.syncPair,
-					data: {
-						ignored: currentRemoteTree.ignored
-					}
-				})
+			postMessageToMain({
+				type: "localTreeErrors",
+				syncPair: this.syncPair,
+				data: {
+					errors: currentLocalTree.errors.map(e => ({
+						...e,
+						error: serializeError(e.error)
+					}))
+				}
+			})
 
-				postMessageToMain({
-					type: "cycleProcessingDeltasStarted",
-					syncPair: this.syncPair
-				})
+			postMessageToMain({
+				type: "localTreeIgnored",
+				syncPair: this.syncPair,
+				data: {
+					ignored: currentLocalTree.ignored
+				}
+			})
 
-				const deltas = await this.deltas.process({
-					currentLocalTree: currentLocalTree.result,
-					currentRemoteTree: currentRemoteTree.result,
-					previousLocalTree: this.previousLocalTree,
-					previousRemoteTree: this.previousRemoteTree,
-					currentLocalTreeErrors: currentLocalTree.errors
-				})
+			postMessageToMain({
+				type: "remoteTreeIgnored",
+				syncPair: this.syncPair,
+				data: {
+					ignored: currentRemoteTree.ignored
+				}
+			})
 
-				postMessageToMain({
-					type: "cycleProcessingDeltasDone",
-					syncPair: this.syncPair
-				})
+			postMessageToMain({
+				type: "cycleProcessingDeltasStarted",
+				syncPair: this.syncPair
+			})
 
-				postMessageToMain({
-					type: "deltas",
-					syncPair: this.syncPair,
-					data: {
-						deltas
-					}
-				})
+			const deltas = await this.deltas.process({
+				currentLocalTree: currentLocalTree.result,
+				currentRemoteTree: currentRemoteTree.result,
+				previousLocalTree: this.previousLocalTree,
+				previousRemoteTree: this.previousRemoteTree,
+				currentLocalTreeErrors: currentLocalTree.errors
+			})
 
-				this.worker.logger.log("info", { deltas, localErrors: currentLocalTree.errors })
+			postMessageToMain({
+				type: "cycleProcessingDeltasDone",
+				syncPair: this.syncPair
+			})
 
-				postMessageToMain({
-					type: "cycleProcessingTasksStarted",
-					syncPair: this.syncPair
-				})
+			postMessageToMain({
+				type: "deltas",
+				syncPair: this.syncPair,
+				data: {
+					deltas
+				}
+			})
 
-				const { doneTasks, errors } = await this.tasks.process({ deltas })
+			this.worker.logger.log("info", { deltas, localErrors: currentLocalTree.errors })
 
-				postMessageToMain({
-					type: "cycleProcessingTasksDone",
-					syncPair: this.syncPair
-				})
+			postMessageToMain({
+				type: "cycleProcessingTasksStarted",
+				syncPair: this.syncPair
+			})
 
-				postMessageToMain({
-					type: "doneTasks",
-					syncPair: this.syncPair,
-					data: {
-						tasks: doneTasks.map(task => ({
-							path: task.path,
-							type: task.type,
-							...(task.type === "uploadFile" ? { item: task.item } : {})
-						})),
-						errors: errors.map(e => ({
-							...e,
-							error: serializeError(e.error)
-						}))
-					}
-				})
+			const { doneTasks, errors } = await this.tasks.process({ deltas })
 
+			postMessageToMain({
+				type: "cycleProcessingTasksDone",
+				syncPair: this.syncPair
+			})
+
+			postMessageToMain({
+				type: "doneTasks",
+				syncPair: this.syncPair,
+				data: {
+					tasks: doneTasks.map(task => ({
+						path: task.path,
+						type: task.type,
+						...(task.type === "uploadFile" ? { item: task.item } : {})
+					})),
+					errors: errors.map(e => ({
+						...e,
+						error: serializeError(e.error)
+					}))
+				}
+			})
+
+			if (errors.length === 0) {
 				if (doneTasks.length > 0) {
 					postMessageToMain({
 						type: "cycleApplyingStateStarted",
@@ -469,56 +468,44 @@ export class Sync {
 					type: "cycleSavingStateDone",
 					syncPair: this.syncPair
 				})
-
-				postMessageToMain({
-					type: "cycleSuccess",
-					syncPair: this.syncPair
-				})
-			} catch (e) {
-				this.worker.logger.log("error", e, "sync.run")
-
-				if (e instanceof Error) {
-					postMessageToMain({
-						type: "cycleError",
-						syncPair: this.syncPair,
-						data: {
-							error: serializeError(e)
-						}
-					})
-				}
-			} finally {
-				postMessageToMain({
-					type: "cycleReleasingLockStarted",
-					syncPair: this.syncPair
-				})
-
-				await this.lock.release()
-
-				postMessageToMain({
-					type: "cycleReleasingLockDone",
-					syncPair: this.syncPair
-				})
-
-				if (this.worker.runOnce) {
-					await this.cleanup()
-				} else {
-					setTimeout(() => {
-						this.run()
-					}, SYNC_INTERVAL)
-
-					postMessageToMain({
-						type: "cycleFinished",
-						syncPair: this.syncPair
-					})
-
-					postMessageToMain({
-						type: "cycleRestarting",
-						syncPair: this.syncPair
-					})
-				}
+			} else {
+				this.taskErrors = errors
 			}
+
+			postMessageToMain({
+				type: "cycleSuccess",
+				syncPair: this.syncPair
+			})
 		} catch (e) {
 			this.worker.logger.log("error", e, "sync.run")
+
+			if (e instanceof Error) {
+				postMessageToMain({
+					type: "cycleError",
+					syncPair: this.syncPair,
+					data: {
+						error: serializeError(e)
+					}
+				})
+			}
+		} finally {
+			if (this.worker.runOnce || this.removed) {
+				await this.cleanup()
+			} else {
+				postMessageToMain({
+					type: "cycleFinished",
+					syncPair: this.syncPair
+				})
+
+				postMessageToMain({
+					type: "cycleRestarting",
+					syncPair: this.syncPair
+				})
+
+				setTimeout(() => {
+					this.run()
+				}, SYNC_INTERVAL)
+			}
 		}
 	}
 }

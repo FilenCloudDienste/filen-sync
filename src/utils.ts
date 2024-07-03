@@ -150,19 +150,7 @@ export const isRelativePathIgnoredByDefault = memoize((path: string): boolean =>
 		return true
 	}
 
-	const ex = path.split("/")
-
-	for (const part of ex) {
-		if (part.length === 0) {
-			continue
-		}
-
-		if (isNameIgnoredByDefault(part)) {
-			return true
-		}
-	}
-
-	return false
+	return path.split("/").some(part => part.length > 0 && isNameIgnoredByDefault(part))
 })
 
 export const isSystemPathIgnoredByDefault = memoize((path: string): boolean => {
@@ -246,3 +234,14 @@ export function replacePathStartWithFromAndTo(path: string, from: string, to: st
 
 	return `${to}${path.slice(from.length)}`
 }
+
+/**
+ * Check if a path includes a dot file.
+ *
+ * @export
+ * @param {string} path
+ * @returns {boolean}
+ */
+export const pathIncludesDotFile = memoize((path: string): boolean => {
+	return path.split("/").some(part => part.length > 0 && part.trimStart().startsWith("."))
+})

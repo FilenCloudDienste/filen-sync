@@ -43,13 +43,13 @@ export class State {
 			switch (task.type) {
 				case "renameLocalDirectory":
 				case "renameLocalFile": {
-					if (this.sync.localFileHashes[task.fromBefore]) {
-						this.sync.localFileHashes[task.to] = this.sync.localFileHashes[task.fromBefore]!
-
-						delete this.sync.localFileHashes[task.fromBefore]
+					if (this.sync.localFileHashes[task.from]) {
+						this.sync.localFileHashes[task.to] = this.sync.localFileHashes[task.from]!
 					}
 
-					const oldItem = currentLocalTree.tree[task.fromBefore]
+					delete this.sync.localFileHashes[task.from]
+
+					const oldItem = currentLocalTree.tree[task.from]
 
 					if (oldItem) {
 						currentLocalTree.tree[task.to] = {
@@ -63,11 +63,11 @@ export class State {
 						}
 					}
 
-					delete currentLocalTree.tree[task.fromBefore]
+					delete currentLocalTree.tree[task.from]
 
 					for (const oldPath in currentLocalTree.tree) {
-						if (oldPath.startsWith(task.fromBefore + "/") && oldPath !== task.fromBefore) {
-							const newPath = replacePathStartWithFromAndTo(oldPath, task.fromBefore, task.to)
+						if (oldPath.startsWith(task.from + "/") && oldPath !== task.from) {
+							const newPath = replacePathStartWithFromAndTo(oldPath, task.from, task.to)
 							const oldItem = currentLocalTree.tree[oldPath]
 
 							if (oldItem) {
@@ -105,13 +105,7 @@ export class State {
 
 				case "renameRemoteDirectory":
 				case "renameRemoteFile": {
-					if (this.sync.localFileHashes[task.fromBefore]) {
-						this.sync.localFileHashes[task.to] = this.sync.localFileHashes[task.fromBefore]!
-
-						delete this.sync.localFileHashes[task.fromBefore]
-					}
-
-					const oldItem = currentRemoteTree.tree[task.fromBefore]
+					const oldItem = currentRemoteTree.tree[task.from]
 
 					if (oldItem) {
 						const newItem: RemoteItem = {
@@ -124,11 +118,11 @@ export class State {
 						currentRemoteTree.uuids[oldItem.uuid] = newItem
 					}
 
-					delete currentRemoteTree.tree[task.fromBefore]
+					delete currentRemoteTree.tree[task.from]
 
 					for (const oldPath in currentRemoteTree.tree) {
-						if (oldPath.startsWith(task.fromBefore + "/") && oldPath !== task.fromBefore) {
-							const newPath = replacePathStartWithFromAndTo(oldPath, task.fromBefore, task.to)
+						if (oldPath.startsWith(task.from + "/") && oldPath !== task.from) {
+							const newPath = replacePathStartWithFromAndTo(oldPath, task.from, task.to)
 							const oldItem = currentRemoteTree.tree[oldPath]
 
 							if (oldItem) {
@@ -152,14 +146,6 @@ export class State {
 									}
 								}
 							}
-
-							const oldItemHash = this.sync.localFileHashes[oldPath]
-
-							if (oldItemHash) {
-								this.sync.localFileHashes[newPath] = oldItemHash
-
-								delete this.sync.localFileHashes[oldPath]
-							}
 						}
 					}
 
@@ -167,12 +153,9 @@ export class State {
 				}
 
 				case "deleteLocalDirectory":
-				case "deleteLocalFile":
-				case "deleteRemoteDirectory":
-				case "deleteRemoteFile": {
+				case "deleteLocalFile": {
 					delete this.sync.localFileHashes[task.path]
 					delete currentLocalTree.tree[task.path]
-					delete currentRemoteTree.tree[task.path]
 
 					for (const path in this.sync.localFileHashes) {
 						if (path.startsWith(task.path + "/") || path === task.path) {
@@ -199,6 +182,13 @@ export class State {
 							delete currentLocalTree.inodes[inode]
 						}
 					}
+
+					break
+				}
+
+				case "deleteRemoteDirectory":
+				case "deleteRemoteFile": {
+					delete currentRemoteTree.tree[task.path]
 
 					for (const path in currentRemoteTree.tree) {
 						if (path.startsWith(task.path + "/") || path === task.path) {
@@ -230,7 +220,7 @@ export class State {
 						path: task.path,
 						size: 0,
 						creation: parseInt(task.stats.mtimeMs as unknown as string), // Sometimes comes as a float, but we need an int
-						inode: task.stats.ino
+						inode: parseInt(task.stats.ino as unknown as string) // Sometimes comes as a float, but we need an int
 					}
 
 					currentRemoteTree.tree[task.item.path] = task.item
@@ -246,9 +236,9 @@ export class State {
 						lastModified: parseInt(task.stats.mtimeMs as unknown as string), // Sometimes comes as a float, but we need an int
 						type: "file",
 						path: task.path,
-						size: task.stats.size,
+						size: parseInt(task.stats.size as unknown as string), // Sometimes comes as a float, but we need an int
 						creation: parseInt(task.stats.mtimeMs as unknown as string), // Sometimes comes as a float, but we need an int
-						inode: task.stats.ino
+						inode: parseInt(task.stats.ino as unknown as string) // Sometimes comes as a float, but we need an int
 					}
 
 					currentRemoteTree.tree[task.item.path] = task.item
@@ -265,8 +255,8 @@ export class State {
 						type: "directory",
 						path: task.path,
 						creation: parseInt(task.stats.birthtimeMs as unknown as string), // Sometimes comes as a float, but we need an int
-						size: task.stats.size,
-						inode: task.stats.ino
+						size: parseInt(task.stats.size as unknown as string), // Sometimes comes as a float, but we need an int
+						inode: parseInt(task.stats.ino as unknown as string) // Sometimes comes as a float, but we need an int
 					}
 
 					currentLocalTree.tree[task.path] = localItem
@@ -283,8 +273,8 @@ export class State {
 						type: "file",
 						path: task.path,
 						creation: parseInt(task.stats.birthtimeMs as unknown as string), // Sometimes comes as a float, but we need an int
-						size: task.stats.size,
-						inode: task.stats.ino
+						size: parseInt(task.stats.size as unknown as string), // Sometimes comes as a float, but we need an int
+						inode: parseInt(task.stats.ino as unknown as string) // Sometimes comes as a float, but we need an int
 					}
 
 					currentLocalTree.tree[task.path] = item

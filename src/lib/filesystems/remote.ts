@@ -1,5 +1,5 @@
 import type Sync from "../sync"
-import { type CloudItemTree, type FSItemType, type FileMetadata, type FolderMetadata, PauseSignal } from "@filen/sdk"
+import { type CloudItemTree, type FSItemType, type FileMetadata, type FolderMetadata, PauseSignal, APIError } from "@filen/sdk"
 import pathModule from "path"
 import { Semaphore } from "../../semaphore"
 import fs from "fs-extra"
@@ -14,10 +14,12 @@ import {
 	isDirectoryPathIgnoredByDefault,
 	isRelativePathIgnoredByDefault,
 	serializeError,
-	replacePathStartWithFromAndTo
+	replacePathStartWithFromAndTo,
+	pathIncludesDotFile
 } from "../../utils"
 import { v4 as uuidv4 } from "uuid"
 import { LOCAL_TRASH_NAME } from "../../constants"
+import { type LocalItem } from "./local"
 
 export type RemoteItem = Prettify<DistributiveOmit<CloudItemTree, "parent"> & { path: string }>
 export type RemoteDirectoryTree = Record<string, RemoteItem>
@@ -29,7 +31,7 @@ export type RemoteTree = {
 export type RemoteTreeIgnored = {
 	localPath: string
 	relativePath: string
-	reason: "dotFile" | "invalidPath" | "remoteIgnore" | "pathLength" | "nameLength" | "defaultIgnore"
+	reason: "dotFile" | "invalidPath" | "remoteIgnore" | "pathLength" | "nameLength" | "defaultIgnore" | "empty"
 }
 
 export class RemoteFileSystem {
@@ -166,7 +168,7 @@ export class RemoteFileSystem {
 					continue
 				}
 
-				if (this.sync.excludeDotFiles && decrypted.name.startsWith(".")) {
+				if (this.sync.excludeDotFiles && pathIncludesDotFile(folderPath)) {
 					ignored.push({
 						localPath,
 						relativePath: folderPath,
@@ -260,6 +262,16 @@ export class RemoteFileSystem {
 						return
 					}
 
+					if (decrypted.size <= 0) {
+						ignored.push({
+							localPath,
+							relativePath: filePath,
+							reason: "empty"
+						})
+
+						return
+					}
+
 					if (this.sync.remoteIgnorer.ignores(filePath)) {
 						ignored.push({
 							localPath,
@@ -270,7 +282,7 @@ export class RemoteFileSystem {
 						return
 					}
 
-					if (this.sync.excludeDotFiles && decrypted.name.startsWith(".")) {
+					if (this.sync.excludeDotFiles && pathIncludesDotFile(filePath)) {
 						ignored.push({
 							localPath,
 							relativePath: filePath,
@@ -362,8 +374,8 @@ export class RemoteFileSystem {
 
 		return {
 			result: {
-				tree,
-				uuids
+				tree: this.getDirectoryTreeCache.tree,
+				uuids: this.getDirectoryTreeCache.uuids
 			},
 			ignored,
 			changed: true
@@ -528,10 +540,37 @@ export class RemoteFileSystem {
 		type?: FSItemType
 		permanent?: boolean
 	}): Promise<void> {
+		let uuid: string | null = null
+
+		const cleanItemEntry = async () => {
+			if (!uuid) {
+				return
+			}
+
+			await this.itemsMutex.acquire()
+
+			delete this.getDirectoryTreeCache.tree[relativePath]
+			delete this.getDirectoryTreeCache.uuids[uuid]
+
+			for (const entry in this.getDirectoryTreeCache.tree) {
+				if (entry.startsWith(relativePath + "/") || entry === relativePath) {
+					const entryItem = this.getDirectoryTreeCache.tree[entry]
+
+					if (entryItem) {
+						delete this.getDirectoryTreeCache.uuids[entryItem.uuid]
+					}
+
+					delete this.getDirectoryTreeCache.tree[entry]
+				}
+			}
+
+			this.itemsMutex.release()
+		}
+
 		await this.mutex.acquire()
 
 		try {
-			const uuid = await this.pathToItemUUID({ relativePath })
+			uuid = await this.pathToItemUUID({ relativePath })
 			const item = this.getDirectoryTreeCache.tree[relativePath]
 
 			if (!uuid || !item) {
@@ -558,24 +597,13 @@ export class RemoteFileSystem {
 				}
 			}
 
-			await this.itemsMutex.acquire()
-
-			delete this.getDirectoryTreeCache.tree[relativePath]
-			delete this.getDirectoryTreeCache.uuids[uuid]
-
-			for (const entry in this.getDirectoryTreeCache.tree) {
-				if (entry.startsWith(relativePath + "/") || entry === relativePath) {
-					const entryItem = this.getDirectoryTreeCache.tree[entry]
-
-					if (entryItem) {
-						delete this.getDirectoryTreeCache.uuids[entryItem.uuid]
-					}
-
-					delete this.getDirectoryTreeCache.tree[entry]
-				}
+			await cleanItemEntry()
+		} catch (e) {
+			if (e instanceof APIError && (e.code === "file_not_found" || e.code === "folder_not_found")) {
+				await cleanItemEntry()
+			} else {
+				throw e
 			}
-
-			this.itemsMutex.release()
 		} finally {
 			this.mutex.release()
 		}
@@ -597,7 +625,7 @@ export class RemoteFileSystem {
 
 		try {
 			if (fromRelativePath === "/" || fromRelativePath === toRelativePath) {
-				return
+				throw new Error("Invalid paths.")
 			}
 
 			const uuid = await this.pathToItemUUID({ relativePath: fromRelativePath })
@@ -629,7 +657,7 @@ export class RemoteFileSystem {
 
 			if (newParentPath === currentParentPath) {
 				if (toRelativePath === "/" || newBasename.length <= 0) {
-					return
+					throw new Error("Invalid paths.")
 				}
 
 				if (item.type === "directory") {
@@ -646,7 +674,7 @@ export class RemoteFileSystem {
 				}
 			} else {
 				if (toRelativePath.startsWith(fromRelativePath)) {
-					return
+					throw new Error("Invalid paths.")
 				}
 
 				if (oldBasename !== newBasename) {
@@ -855,10 +883,26 @@ export class RemoteFileSystem {
 			})
 
 			await fs.utimes(tmpLocalPath, new Date(), new Date(convertTimestampToMs(item.lastModified)))
-
 			await fs.move(tmpLocalPath, localPath, {
 				overwrite: true
 			})
+
+			const stats = await fs.stat(localPath)
+			const localItem: LocalItem = {
+				type: "file",
+				inode: parseInt(stats.ino as unknown as string), // Sometimes comes as a float, but we need an int
+				lastModified: parseInt(stats.mtimeMs as unknown as string), // Sometimes comes as a float, but we need an int
+				creation: parseInt(stats.birthtimeMs as unknown as string), // Sometimes comes as a float, but we need an int
+				size: parseInt(stats.size as unknown as string), // Sometimes comes as a float, but we need an int
+				path: relativePath
+			}
+
+			await this.sync.localFileSystem.itemsMutex.acquire()
+
+			this.sync.localFileSystem.getDirectoryTreeCache.tree[relativePath] = localItem
+			this.sync.localFileSystem.getDirectoryTreeCache.inodes[localItem.inode] = localItem
+
+			this.sync.localFileSystem.itemsMutex.release()
 
 			postMessageToMain({
 				type: "transfer",
@@ -872,7 +916,7 @@ export class RemoteFileSystem {
 				}
 			})
 
-			return await fs.stat(localPath)
+			return stats
 		} catch (e) {
 			this.sync.worker.logger.log("error", e, "filesystems.remote.download")
 
@@ -898,11 +942,55 @@ export class RemoteFileSystem {
 		}
 	}
 
-	public async remotePathExisting(): Promise<boolean> {
+	public async remoteDirPathExisting(): Promise<boolean> {
 		try {
 			const present = await this.sync.sdk.api(3).dir().present({ uuid: this.sync.syncPair.remoteParentUUID })
 
 			if (!present.present || present.trash) {
+				return false
+			}
+
+			return true
+		} catch {
+			return false
+		}
+	}
+
+	public async directoryExists(relativePath: string): Promise<boolean> {
+		try {
+			const item = this.getDirectoryTreeCache.tree[relativePath]
+
+			if (!item) {
+				return false
+			}
+
+			const present = await this.sync.sdk.api(3).dir().present({ uuid: item.uuid })
+
+			if (!present.present || present.trash) {
+				return false
+			}
+
+			return true
+		} catch {
+			return false
+		}
+	}
+
+	public async fileExists(relativePath: string): Promise<boolean> {
+		try {
+			const item = this.getDirectoryTreeCache.tree[relativePath]
+			const parent = this.getDirectoryTreeCache.tree[pathModule.posix.dirname(relativePath)]
+
+			if (!item || !parent) {
+				return false
+			}
+
+			const { exists, existsUUID } = await this.sync.sdk.api(3).file().exists({
+				name: item.name,
+				parent: parent.uuid
+			})
+
+			if (!exists || existsUUID !== item.uuid) {
 				return false
 			}
 

@@ -200,8 +200,15 @@ export class Sync {
 				}
 
 				postMessageToMain({
-					type: "cyclePaused",
-					syncPair: this.syncPair
+					type: "doneTasks",
+					syncPair: this.syncPair,
+					data: {
+						tasks: [],
+						errors: this.taskErrors.map(e => ({
+							...e,
+							error: serializeError(e.error)
+						}))
+					}
 				})
 
 				postMessageToMain({
@@ -410,6 +417,8 @@ export class Sync {
 
 			const { doneTasks, errors } = await this.tasks.process({ deltas })
 
+			this.taskErrors = errors
+
 			postMessageToMain({
 				type: "cycleProcessingTasksDone",
 				syncPair: this.syncPair
@@ -424,14 +433,14 @@ export class Sync {
 						type: task.type,
 						...(task.type === "uploadFile" ? { item: task.item } : {})
 					})),
-					errors: errors.map(e => ({
+					errors: this.taskErrors.map(e => ({
 						...e,
 						error: serializeError(e.error)
 					}))
 				}
 			})
 
-			if (errors.length === 0) {
+			if (this.taskErrors.length === 0) {
 				if (doneTasks.length > 0) {
 					postMessageToMain({
 						type: "cycleApplyingStateStarted",
@@ -468,8 +477,6 @@ export class Sync {
 					type: "cycleSavingStateDone",
 					syncPair: this.syncPair
 				})
-			} else {
-				this.taskErrors = errors
 			}
 
 			postMessageToMain({

@@ -434,7 +434,7 @@ export class Deltas {
 					}
 				}
 			} else if (delta.type === "deleteRemoteDirectory" || delta.type === "deleteRemoteFile") {
-				for (const directoryDelta of deletedLocalDirectories) {
+				for (const directoryDelta of deletedRemoteDirectories) {
 					if (directoryDelta.type === "deleteRemoteDirectory" && delta.path.startsWith(directoryDelta.path + "/")) {
 						deltasSorted.splice(i, 1)
 

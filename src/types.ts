@@ -25,6 +25,10 @@ export type Prettify<T> = {
 	// eslint-disable-next-line @typescript-eslint/ban-types
 } & {}
 
+export type IPCDoneTask = Prettify<Omit<DoneTask, "stats">>
+export type IPCTaskError = Prettify<Omit<TaskError, "error"> & { error: SerializedError }>
+export type IPCLocalTreeError = Prettify<Omit<LocalTreeError, "error"> & { error: SerializedError }>
+
 export type CycleState =
 	| "cycleStarted"
 	| "cycleFinished"
@@ -257,7 +261,7 @@ export type SyncMessage =
 			| {
 					type: "localTreeErrors"
 					data: {
-						errors: Prettify<Omit<LocalTreeError, "error"> & { error: SerializedError }>[]
+						errors: IPCLocalTreeError[]
 					}
 			  }
 			| {
@@ -281,8 +285,8 @@ export type SyncMessage =
 			| {
 					type: "doneTasks"
 					data: {
-						tasks: Prettify<Omit<DoneTask, "stats">>[]
-						errors: Prettify<Omit<TaskError, "error"> & { error: SerializedError }>[]
+						tasks: IPCDoneTask[]
+						errors: IPCTaskError[]
 					}
 			  }
 			| {

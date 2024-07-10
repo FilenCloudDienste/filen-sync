@@ -42,10 +42,11 @@ export type LocalTreeError = {
 	relativePath: string
 	error: Error
 }
+export type LocalTreeIgnoredReason = "dotFile" | "localIgnore" | "defaultIgnore" | "empty" | "symlink" | "invalidType"
 export type LocalTreeIgnored = {
 	localPath: string
 	relativePath: string
-	reason: "dotFile" | "localIgnore" | "defaultIgnore" | "empty" | "symlink" | "invalidType"
+	reason: LocalTreeIgnoredReason
 }
 
 /**
@@ -63,10 +64,14 @@ export class LocalFileSystem {
 		timestamp: number
 		tree: LocalDirectoryTree
 		inodes: LocalDirectoryINodes
+		ignored: LocalTreeIgnored[]
+		errors: LocalTreeError[]
 	} = {
 		timestamp: 0,
 		tree: {},
-		inodes: {}
+		inodes: {},
+		ignored: [],
+		errors: []
 	}
 	public watcherRunning = false
 	private watcherInstance: watcher.AsyncSubscription | null = null
@@ -101,8 +106,8 @@ export class LocalFileSystem {
 					tree: this.getDirectoryTreeCache.tree,
 					inodes: this.getDirectoryTreeCache.inodes
 				},
-				errors: [],
-				ignored: [],
+				errors: this.getDirectoryTreeCache.errors,
+				ignored: this.getDirectoryTreeCache.ignored,
 				changed: false
 			}
 		}
@@ -119,23 +124,14 @@ export class LocalFileSystem {
 
 		await promiseAllSettledChunked(
 			dir.map(async entry => {
-				if (entry.startsWith(LOCAL_TRASH_NAME)) {
+				const entryPath = `/${isWindows ? entry.replace(/\\/g, "/") : entry}`
+				const itemName = pathModule.posix.basename(entryPath)
+
+				if (itemName.startsWith(LOCAL_TRASH_NAME)) {
 					return
 				}
 
 				const itemPath = pathModule.join(this.sync.syncPair.localPath, entry)
-
-				if (this.sync.localIgnorer.ignores(entry)) {
-					ignored.push({
-						localPath: itemPath,
-						relativePath: entry,
-						reason: "localIgnore"
-					})
-
-					return
-				}
-
-				const entryPath = `/${isWindows ? entry.replace(/\\/g, "/") : entry}`
 
 				if (
 					isDirectoryPathIgnoredByDefault(entryPath) ||
@@ -151,17 +147,21 @@ export class LocalFileSystem {
 					return
 				}
 
-				const itemName = pathModule.posix.basename(entryPath)
-
-				if (itemName.startsWith(LOCAL_TRASH_NAME)) {
-					return
-				}
-
 				if (this.sync.excludeDotFiles && pathIncludesDotFile(entryPath)) {
 					ignored.push({
 						localPath: itemPath,
 						relativePath: entry,
 						reason: "dotFile"
+					})
+
+					return
+				}
+
+				if (this.sync.localIgnorer.ignores(entry)) {
+					ignored.push({
+						localPath: itemPath,
+						relativePath: entry,
+						reason: "localIgnore"
 					})
 
 					return
@@ -228,7 +228,9 @@ export class LocalFileSystem {
 		this.getDirectoryTreeCache = {
 			timestamp: Date.now(),
 			tree,
-			inodes
+			inodes,
+			errors,
+			ignored
 		}
 
 		return {

@@ -105,14 +105,17 @@ export class SyncWorker {
 			sync.localFileSystem.getDirectoryTreeCache = {
 				timestamp: 0,
 				tree: {},
-				inodes: {}
+				inodes: {},
+				ignored: [],
+				errors: []
 			}
 
 			sync.remoteFileSystem.previousTreeRawResponse = ""
 			sync.remoteFileSystem.getDirectoryTreeCache = {
 				timestamp: 0,
 				tree: {},
-				uuids: {}
+				uuids: {},
+				ignored: []
 			}
 		}
 	}

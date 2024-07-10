@@ -28,10 +28,11 @@ export type RemoteTree = {
 	tree: RemoteDirectoryTree
 	uuids: RemoteDirectoryUUIDs
 }
+export type RemoteTreeIgnoredReason = "dotFile" | "invalidPath" | "remoteIgnore" | "pathLength" | "nameLength" | "defaultIgnore" | "empty"
 export type RemoteTreeIgnored = {
 	localPath: string
 	relativePath: string
-	reason: "dotFile" | "invalidPath" | "remoteIgnore" | "pathLength" | "nameLength" | "defaultIgnore" | "empty"
+	reason: RemoteTreeIgnoredReason
 }
 
 export class RemoteFileSystem {
@@ -40,10 +41,12 @@ export class RemoteFileSystem {
 		timestamp: number
 		tree: RemoteDirectoryTree
 		uuids: RemoteDirectoryUUIDs
+		ignored: RemoteTreeIgnored[]
 	} = {
 		timestamp: 0,
 		tree: {},
-		uuids: {}
+		uuids: {},
+		ignored: []
 	}
 	public previousTreeRawResponse: string = ""
 	private readonly mutex = new Semaphore(1)
@@ -105,7 +108,7 @@ export class RemoteFileSystem {
 
 			return {
 				result: this.getDirectoryTreeCache,
-				ignored: [],
+				ignored: this.getDirectoryTreeCache.ignored,
 				changed: false
 			}
 		}
@@ -117,7 +120,7 @@ export class RemoteFileSystem {
 		if (rawEx.length === 2 && this.previousTreeRawResponse === rawEx[0] && this.getDirectoryTreeCache.timestamp !== 0) {
 			return {
 				result: this.getDirectoryTreeCache,
-				ignored: [],
+				ignored: this.getDirectoryTreeCache.ignored,
 				changed: false
 			}
 		}
@@ -143,38 +146,17 @@ export class RemoteFileSystem {
 		for (const folder of dir.folders) {
 			try {
 				const decrypted = await this.sync.sdk.crypto().decrypt().folderMetadata({ metadata: folder[1] })
-
-				if (folder[2] !== "base" && decrypted.name.length === 0) {
-					continue
-				}
-
 				const parentPath = folder[2] === "base" ? "" : `${folderNames[folder[2]]}/`
 				const folderPath = folder[2] === "base" ? "" : `${parentPath}${decrypted.name}`
 				const localPath = pathModule.join(this.sync.syncPair.localPath, folderPath)
 
 				folderNames[folder[0]] = folderPath
 
-				if (folderPath.startsWith(LOCAL_TRASH_NAME) || decrypted.name.startsWith(LOCAL_TRASH_NAME)) {
-					continue
-				}
-
-				if (this.sync.remoteIgnorer.ignores(folderPath)) {
-					ignored.push({
-						localPath,
-						relativePath: folderPath,
-						reason: "remoteIgnore"
-					})
-
-					continue
-				}
-
-				if (this.sync.excludeDotFiles && pathIncludesDotFile(folderPath)) {
-					ignored.push({
-						localPath,
-						relativePath: folderPath,
-						reason: "dotFile"
-					})
-
+				if (
+					folderPath.startsWith(LOCAL_TRASH_NAME) ||
+					decrypted.name.startsWith(LOCAL_TRASH_NAME) ||
+					(folder[2] !== "base" && decrypted.name.length === 0)
+				) {
 					continue
 				}
 
@@ -218,6 +200,26 @@ export class RemoteFileSystem {
 					continue
 				}
 
+				if (this.sync.remoteIgnorer.ignores(folderPath)) {
+					ignored.push({
+						localPath,
+						relativePath: folderPath,
+						reason: "remoteIgnore"
+					})
+
+					continue
+				}
+
+				if (this.sync.excludeDotFiles && pathIncludesDotFile(folderPath)) {
+					ignored.push({
+						localPath,
+						relativePath: folderPath,
+						reason: "dotFile"
+					})
+
+					continue
+				}
+
 				const lowercasePath = folderPath.toLowerCase()
 
 				if (pathsAdded[lowercasePath]) {
@@ -225,6 +227,10 @@ export class RemoteFileSystem {
 				}
 
 				pathsAdded[lowercasePath] = true
+
+				if (folderPath.length === 0) {
+					continue
+				}
 
 				const item: RemoteItem = {
 					type: "directory",
@@ -258,7 +264,7 @@ export class RemoteFileSystem {
 					const filePath = `${parentPath}/${decrypted.name}`
 					const localPath = pathModule.join(this.sync.syncPair.localPath, filePath)
 
-					if (filePath.startsWith(LOCAL_TRASH_NAME) || decrypted.name.startsWith(LOCAL_TRASH_NAME)) {
+					if (filePath.startsWith(LOCAL_TRASH_NAME) || decrypted.name.startsWith(LOCAL_TRASH_NAME) || filePath.length === 0) {
 						return
 					}
 
@@ -267,26 +273,6 @@ export class RemoteFileSystem {
 							localPath,
 							relativePath: filePath,
 							reason: "empty"
-						})
-
-						return
-					}
-
-					if (this.sync.remoteIgnorer.ignores(filePath)) {
-						ignored.push({
-							localPath,
-							relativePath: filePath,
-							reason: "remoteIgnore"
-						})
-
-						return
-					}
-
-					if (this.sync.excludeDotFiles && pathIncludesDotFile(filePath)) {
-						ignored.push({
-							localPath,
-							relativePath: filePath,
-							reason: "dotFile"
 						})
 
 						return
@@ -332,6 +318,26 @@ export class RemoteFileSystem {
 						return
 					}
 
+					if (this.sync.remoteIgnorer.ignores(filePath)) {
+						ignored.push({
+							localPath,
+							relativePath: filePath,
+							reason: "remoteIgnore"
+						})
+
+						return
+					}
+
+					if (this.sync.excludeDotFiles && pathIncludesDotFile(filePath)) {
+						ignored.push({
+							localPath,
+							relativePath: filePath,
+							reason: "dotFile"
+						})
+
+						return
+					}
+
 					const lowercasePath = filePath.toLowerCase()
 
 					if (pathsAdded[lowercasePath]) {
@@ -369,7 +375,8 @@ export class RemoteFileSystem {
 		this.getDirectoryTreeCache = {
 			timestamp: Date.now(),
 			tree,
-			uuids
+			uuids,
+			ignored
 		}
 
 		return {

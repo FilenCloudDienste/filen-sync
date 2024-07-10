@@ -146,10 +146,6 @@ export const isNameIgnoredByDefault = memoize((name: string): boolean => {
 })
 
 export const isRelativePathIgnoredByDefault = memoize((path: string): boolean => {
-	if (isNameIgnoredByDefault(pathModule.basename(path))) {
-		return true
-	}
-
 	return path.split("/").some(part => part.length > 0 && isNameIgnoredByDefault(part))
 })
 

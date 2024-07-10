@@ -384,8 +384,19 @@ export class Tasks {
 					const item = this.sync.remoteFileSystem.getDirectoryTreeCache.tree[delta.path]
 
 					if (!item) {
-						throw new Error("createLocalDirectory: remoteItem not found in getDirectoryTreeCache.")
+						throw new Error("downloadFile: remoteItem not found in getDirectoryTreeCache.")
 					}
+
+					postMessageToMain({
+						type: "transfer",
+						syncPair: this.sync.syncPair,
+						data: {
+							of: delta.type,
+							type: "success",
+							relativePath: delta.path,
+							localPath: pathModule.join(this.sync.syncPair.localPath, delta.path)
+						}
+					})
 
 					return {
 						...delta,
@@ -398,6 +409,20 @@ export class Tasks {
 						return null
 					}
 
+					if (e instanceof Error) {
+						postMessageToMain({
+							type: "transfer",
+							syncPair: this.sync.syncPair,
+							data: {
+								of: delta.type,
+								type: "error",
+								relativePath: delta.path,
+								localPath: pathModule.join(this.sync.syncPair.localPath, delta.path),
+								error: serializeError(e)
+							}
+						})
+					}
+
 					throw e
 				}
 			}
@@ -408,12 +433,22 @@ export class Tasks {
 						this.sync.localFileSystem.upload({ relativePath: delta.path }),
 						fs.stat(pathModule.join(this.sync.syncPair.localPath, delta.path))
 					])
-
 					const item = this.sync.remoteFileSystem.getDirectoryTreeCache.tree[delta.path]
 
 					if (!item) {
-						throw new Error("createLocalDirectory: remoteItem not found in getDirectoryTreeCache.")
+						throw new Error("uploadFile: remoteItem not found in getDirectoryTreeCache.")
 					}
+
+					postMessageToMain({
+						type: "transfer",
+						syncPair: this.sync.syncPair,
+						data: {
+							of: delta.type,
+							type: "success",
+							relativePath: delta.path,
+							localPath: pathModule.join(this.sync.syncPair.localPath, delta.path)
+						}
+					})
 
 					return {
 						...delta,
@@ -424,6 +459,20 @@ export class Tasks {
 					// Don't throw if the file does not exist anymore, simply skip it.
 					if (!(await this.sync.localFileSystem.pathExists(pathModule.join(this.sync.syncPair.localPath, delta.path)))) {
 						return null
+					}
+
+					if (e instanceof Error) {
+						postMessageToMain({
+							type: "transfer",
+							syncPair: this.sync.syncPair,
+							data: {
+								of: delta.type,
+								type: "error",
+								relativePath: delta.path,
+								localPath: pathModule.join(this.sync.syncPair.localPath, delta.path),
+								error: serializeError(e)
+							}
+						})
 					}
 
 					throw e

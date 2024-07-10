@@ -136,6 +136,38 @@ export class Sync {
 		})
 	}
 
+	public async smokeTest(): Promise<void> {
+		if (this.removed) {
+			throw new Error("Aborted")
+		}
+
+		const localSmokeTest = await this.localFileSystem.isPathWritable(this.syncPair.localPath)
+
+		if (!localSmokeTest) {
+			postMessageToMain({
+				type: "cycleLocalSmokeTestFailed",
+				syncPair: this.syncPair
+			})
+
+			await new Promise<void>(resolve => setTimeout(resolve, SYNC_INTERVAL))
+
+			return await this.smokeTest()
+		}
+
+		const remoteSmokeTest = await this.remoteFileSystem.remoteDirPathExisting()
+
+		if (!remoteSmokeTest) {
+			postMessageToMain({
+				type: "cycleRemoteSmokeTestFailed",
+				syncPair: this.syncPair
+			})
+
+			await new Promise<void>(resolve => setTimeout(resolve, SYNC_INTERVAL))
+
+			return await this.smokeTest()
+		}
+	}
+
 	public async initialize(): Promise<void> {
 		if (this.isInitialized) {
 			return
@@ -144,14 +176,7 @@ export class Sync {
 		this.isInitialized = true
 
 		try {
-			const [localSmokeTest, remoteSmokeTest] = await Promise.all([
-				this.localFileSystem.isPathWritable(this.syncPair.localPath),
-				this.remoteFileSystem.remoteDirPathExisting()
-			])
-
-			if (!localSmokeTest || !remoteSmokeTest) {
-				throw new Error("Smoke tests failed. Either the local or remote path is not readable/writable")
-			}
+			await this.smokeTest()
 
 			await Promise.all([
 				this.localFileSystem.startDirectoryWatcher(),
@@ -200,10 +225,9 @@ export class Sync {
 				}
 
 				postMessageToMain({
-					type: "doneTasks",
+					type: "taskErrors",
 					syncPair: this.syncPair,
 					data: {
-						tasks: [],
 						errors: this.taskErrors.map(e => ({
 							...e,
 							error: serializeError(e.error)
@@ -244,56 +268,7 @@ export class Sync {
 				syncPair: this.syncPair
 			})
 
-			const [localSmokeTest, remoteSmokeTest] = await Promise.all([
-				this.localFileSystem.isPathWritable(this.syncPair.localPath),
-				this.remoteFileSystem.remoteDirPathExisting()
-			])
-
-			if (!localSmokeTest) {
-				if (this.worker.runOnce) {
-					await this.cleanup()
-
-					return
-				}
-
-				postMessageToMain({
-					type: "cycleLocalSmokeTestFailed",
-					syncPair: this.syncPair,
-					data: {
-						error: serializeError(new Error("Local path is not writable."))
-					}
-				})
-
-				postMessageToMain({
-					type: "cycleRestarting",
-					syncPair: this.syncPair
-				})
-
-				return
-			}
-
-			if (!remoteSmokeTest) {
-				if (this.worker.runOnce) {
-					await this.cleanup()
-
-					return
-				}
-
-				postMessageToMain({
-					type: "cycleLocalSmokeTestFailed",
-					syncPair: this.syncPair,
-					data: {
-						error: serializeError(new Error("Remote path is not present or in the trash."))
-					}
-				})
-
-				postMessageToMain({
-					type: "cycleRestarting",
-					syncPair: this.syncPair
-				})
-
-				return
-			}
+			await this.smokeTest()
 
 			postMessageToMain({
 				type: "cycleWaitingForLocalDirectoryChangesStarted",
@@ -317,6 +292,30 @@ export class Sync {
 				this.localFileSystem.getDirectoryTree(),
 				this.remoteFileSystem.getDirectoryTree()
 			])
+
+			postMessageToMain({
+				type: "cycleGettingTreesDone",
+				syncPair: this.syncPair
+			})
+
+			postMessageToMain({
+				type: "localTreeErrors",
+				syncPair: this.syncPair,
+				data: {
+					errors: currentLocalTree.errors.map(e => ({
+						...e,
+						error: serializeError(e.error)
+					}))
+				}
+			})
+
+			postMessageToMain({
+				type: "localTreeIgnored",
+				syncPair: this.syncPair,
+				data: {
+					ignored: currentLocalTree.ignored
+				}
+			})
 
 			if (!currentLocalTree.changed && !currentRemoteTree.changed) {
 				if (this.taskErrors.length === 0) {
@@ -351,30 +350,6 @@ export class Sync {
 			}
 
 			postMessageToMain({
-				type: "cycleGettingTreesDone",
-				syncPair: this.syncPair
-			})
-
-			postMessageToMain({
-				type: "localTreeErrors",
-				syncPair: this.syncPair,
-				data: {
-					errors: currentLocalTree.errors.map(e => ({
-						...e,
-						error: serializeError(e.error)
-					}))
-				}
-			})
-
-			postMessageToMain({
-				type: "localTreeIgnored",
-				syncPair: this.syncPair,
-				data: {
-					ignored: currentLocalTree.ignored
-				}
-			})
-
-			postMessageToMain({
 				type: "remoteTreeIgnored",
 				syncPair: this.syncPair,
 				data: {
@@ -400,14 +375,6 @@ export class Sync {
 				syncPair: this.syncPair
 			})
 
-			postMessageToMain({
-				type: "deltas",
-				syncPair: this.syncPair,
-				data: {
-					deltas
-				}
-			})
-
 			this.worker.logger.log("info", { deltas, localErrors: currentLocalTree.errors })
 
 			postMessageToMain({
@@ -425,15 +392,10 @@ export class Sync {
 			})
 
 			postMessageToMain({
-				type: "doneTasks",
+				type: "taskErrors",
 				syncPair: this.syncPair,
 				data: {
-					tasks: doneTasks.map(task => ({
-						path: task.path,
-						type: task.type,
-						...(task.type === "uploadFile" ? { item: task.item } : {})
-					})),
-					errors: this.taskErrors.map(e => ({
+					errors: errors.map(e => ({
 						...e,
 						error: serializeError(e.error)
 					}))
@@ -499,11 +461,6 @@ export class Sync {
 			if (this.worker.runOnce || this.removed) {
 				await this.cleanup()
 			} else {
-				postMessageToMain({
-					type: "cycleFinished",
-					syncPair: this.syncPair
-				})
-
 				postMessageToMain({
 					type: "cycleRestarting",
 					syncPair: this.syncPair

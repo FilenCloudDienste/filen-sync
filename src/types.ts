@@ -1,5 +1,4 @@
 import { type LocalTreeError, type LocalTreeIgnored } from "./lib/filesystems/local"
-import { type Delta } from "./lib/deltas"
 import { type DoneTask, type TaskError } from "./lib/tasks"
 import { type RemoteTreeIgnored } from "./lib/filesystems/remote"
 import { type SerializedError } from "./utils"
@@ -31,7 +30,6 @@ export type IPCLocalTreeError = Prettify<Omit<LocalTreeError, "error"> & { error
 
 export type CycleState =
 	| "cycleStarted"
-	| "cycleFinished"
 	| "cycleError"
 	| "cycleSuccess"
 	| "cycleWaitingForLocalDirectoryChangesStarted"
@@ -56,6 +54,8 @@ export type CycleState =
 	| "cycleAcquiringLockDone"
 	| "cycleReleasingLockStarted"
 	| "cycleReleasingLockDone"
+	| "cycleLocalSmokeTestFailed"
+	| "cycleRemoteSmokeTestFailed"
 
 export type TransferData =
 	| {
@@ -277,23 +277,13 @@ export type SyncMessage =
 					}
 			  }
 			| {
-					type: "deltas"
+					type: "taskErrors"
 					data: {
-						deltas: Delta[]
-					}
-			  }
-			| {
-					type: "doneTasks"
-					data: {
-						tasks: IPCDoneTask[]
 						errors: IPCTaskError[]
 					}
 			  }
 			| {
 					type: "cycleStarted"
-			  }
-			| {
-					type: "cycleFinished"
 			  }
 			| {
 					type: "cycleError"
@@ -303,6 +293,12 @@ export type SyncMessage =
 			  }
 			| {
 					type: "cycleSuccess"
+			  }
+			| {
+					type: "cycleLocalSmokeTestFailed"
+			  }
+			| {
+					type: "cycleRemoteSmokeTestFailed"
 			  }
 			| {
 					type: "cycleExited"

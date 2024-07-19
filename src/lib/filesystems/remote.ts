@@ -28,7 +28,15 @@ export type RemoteTree = {
 	tree: RemoteDirectoryTree
 	uuids: RemoteDirectoryUUIDs
 }
-export type RemoteTreeIgnoredReason = "dotFile" | "invalidPath" | "remoteIgnore" | "pathLength" | "nameLength" | "defaultIgnore" | "empty"
+export type RemoteTreeIgnoredReason =
+	| "dotFile"
+	| "invalidPath"
+	| "remoteIgnore"
+	| "pathLength"
+	| "nameLength"
+	| "defaultIgnore"
+	| "empty"
+	| "duplicate"
 export type RemoteTreeIgnored = {
 	localPath: string
 	relativePath: string
@@ -200,7 +208,7 @@ export class RemoteFileSystem {
 					continue
 				}
 
-				if (this.sync.remoteIgnorer.ignores(folderPath)) {
+				if (this.sync.ignorer.ignores(folderPath)) {
 					ignored.push({
 						localPath,
 						relativePath: folderPath,
@@ -223,6 +231,12 @@ export class RemoteFileSystem {
 				const lowercasePath = folderPath.toLowerCase()
 
 				if (pathsAdded[lowercasePath]) {
+					ignored.push({
+						localPath,
+						relativePath: folderPath,
+						reason: "duplicate"
+					})
+
 					continue
 				}
 
@@ -318,7 +332,7 @@ export class RemoteFileSystem {
 						return
 					}
 
-					if (this.sync.remoteIgnorer.ignores(filePath)) {
+					if (this.sync.ignorer.ignores(filePath)) {
 						ignored.push({
 							localPath,
 							relativePath: filePath,
@@ -341,6 +355,12 @@ export class RemoteFileSystem {
 					const lowercasePath = filePath.toLowerCase()
 
 					if (pathsAdded[lowercasePath]) {
+						ignored.push({
+							localPath,
+							relativePath: filePath,
+							reason: "duplicate"
+						})
+
 						return
 					}
 
@@ -800,7 +820,7 @@ export class RemoteFileSystem {
 	public async download({ relativePath }: { relativePath: string }): Promise<fs.Stats> {
 		const localPath = pathModule.posix.join(this.sync.syncPair.localPath, relativePath)
 		const tmpLocalPath = pathModule.join(this.sync.syncPair.localPath, LOCAL_TRASH_NAME, uuidv4())
-		const signalKey = `upload:${relativePath}`
+		const signalKey = `download:${relativePath}`
 		const uuid = await this.pathToItemUUID({ relativePath })
 		const item = this.getDirectoryTreeCache.tree[relativePath]
 

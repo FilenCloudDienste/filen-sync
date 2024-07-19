@@ -1,11 +1,8 @@
-import { type SyncPair, type SyncMessage } from "./types"
+import { type SyncPair, type SyncMessage, type SyncMode } from "./types"
 import Sync from "./lib/sync"
 import FilenSDK, { type FilenSDKConfig } from "@filen/sdk"
-import { isMainThread, parentPort } from "worker_threads"
-import { postMessageToMain } from "./lib/ipc"
 import { Semaphore } from "./semaphore"
 import { SYNC_INTERVAL } from "./constants"
-import { serializeError } from "./utils"
 import Logger from "./lib/logger"
 
 /**
@@ -20,7 +17,7 @@ export class SyncWorker {
 	public readonly syncPairs: SyncPair[]
 	public readonly syncs: Record<string, Sync> = {}
 	public readonly dbPath: string
-	public readonly initSyncPairsMutex = new Semaphore(1)
+	public readonly updateSyncPairsMutex = new Semaphore(1)
 	public readonly sdk: FilenSDK
 	public readonly logger: Logger
 	public readonly runOnce: boolean
@@ -30,13 +27,15 @@ export class SyncWorker {
 		dbPath,
 		sdkConfig,
 		onMessage,
-		runOnce = false
+		runOnce = false,
+		sdk
 	}: {
 		syncPairs: SyncPair[]
 		dbPath: string
-		sdkConfig: FilenSDKConfig
+		sdkConfig?: FilenSDKConfig
 		onMessage?: (message: SyncMessage) => void
 		runOnce?: boolean
+		sdk?: FilenSDK
 	}) {
 		if (onMessage) {
 			process.onMessage = onMessage
@@ -46,58 +45,20 @@ export class SyncWorker {
 		this.syncPairs = syncPairs
 		this.dbPath = dbPath
 		this.logger = new Logger(dbPath)
-		this.sdk = new FilenSDK({
-			...sdkConfig,
-			connectToSocket: true,
-			metadataCache: true
-		})
-
-		this.setupMainThreadListeners()
+		this.sdk = sdk
+			? sdk
+			: new FilenSDK({
+					...sdkConfig,
+					connectToSocket: true,
+					metadataCache: true
+			  })
 	}
 
-	/**
-	 * Sets up receiving message from the main thread.
-	 *
-	 * @private
-	 */
-	private setupMainThreadListeners(): void {
-		const receiver = !isMainThread && parentPort ? parentPort : process
-
-		receiver.on("message", async (message: SyncMessage) => {
-			if (message.type === "updateSyncPairs") {
-				try {
-					await this.initSyncPairs(message.data.pairs)
-
-					if (message.data.resetCache) {
-						this.resetSyncPairsCache()
-					}
-
-					postMessageToMain({
-						type: "syncPairsUpdated"
-					})
-				} catch (e) {
-					this.logger.log("error", e, "index.setupMainThreadListeners")
-
-					if (e instanceof Error) {
-						postMessageToMain({
-							type: "error",
-							data: {
-								error: serializeError(e)
-							}
-						})
-					}
-				}
-			} else if (message.type === "resetSyncPairCache") {
-				this.resetSyncPairsCache()
-			}
-		})
-	}
-
-	private resetSyncPairsCache(): void {
+	public resetCache(uuid: string): void {
 		for (const pair of this.syncPairs) {
 			const sync = this.syncs[pair.uuid]
 
-			if (!sync) {
+			if (!sync || pair.uuid !== uuid) {
 				continue
 			}
 
@@ -121,18 +82,15 @@ export class SyncWorker {
 	}
 
 	/**
-	 * Initialize sync pairs.
+	 * Update sync pairs.
 	 *
-	 * @private
+	 * @public
 	 * @async
 	 * @param {SyncPair[]} pairs
 	 * @returns {Promise<void>}
 	 */
-	private async initSyncPairs(pairs: SyncPair[]): Promise<void> {
-		await this.initSyncPairsMutex.acquire()
-
-		const currentSyncPairsUUIDs = this.syncPairs.map(pair => pair.uuid)
-		const newSyncPairsUUIDs = pairs.map(pair => pair.uuid)
+	public async updateSyncPairs(pairs: SyncPair[]): Promise<void> {
+		await this.updateSyncPairsMutex.acquire()
 
 		try {
 			const promises: Promise<void>[] = []
@@ -149,18 +107,148 @@ export class SyncWorker {
 			}
 
 			await Promise.all(promises)
-
-			for (const uuid of currentSyncPairsUUIDs) {
-				if (!newSyncPairsUUIDs.includes(uuid) && this.syncs[uuid]) {
-					this.syncs[uuid]!.removed = true
-				}
-			}
 		} catch (e) {
-			this.logger.log("error", e, "index.initSyncPairs")
+			this.logger.log("error", e, "index.updateSyncPairs")
 
 			throw e
 		} finally {
-			this.initSyncPairsMutex.release()
+			this.updateSyncPairsMutex.release()
+		}
+	}
+
+	public updatePaused(uuid: string, paused: boolean): void {
+		for (const syncUUID in this.syncs) {
+			if (syncUUID === uuid) {
+				this.syncs[syncUUID]!.paused = paused
+
+				const pauseSignals = this.syncs[syncUUID]!.pauseSignals
+
+				for (const signal in pauseSignals) {
+					const pauseSignal = pauseSignals[signal]!
+
+					if (paused) {
+						if (!pauseSignal.isPaused()) {
+							pauseSignal.pause()
+						}
+					} else {
+						if (pauseSignal.isPaused()) {
+							pauseSignal.resume()
+						}
+					}
+				}
+
+				break
+			}
+		}
+	}
+
+	public updateRemoved(uuid: string, removed: boolean): void {
+		for (const syncUUID in this.syncs) {
+			if (syncUUID === uuid) {
+				this.syncs[syncUUID]!.removed = removed
+
+				const abortControllers = this.syncs[syncUUID]!.abortControllers
+
+				for (const controller in abortControllers) {
+					const abortController = abortControllers[controller]!
+
+					if (removed) {
+						if (!abortController.signal.aborted) {
+							abortController.abort()
+						}
+					}
+				}
+
+				break
+			}
+		}
+	}
+
+	public updateExcludeDotFiles(uuid: string, excludeDotFiles: boolean): void {
+		for (const syncUUID in this.syncs) {
+			if (syncUUID === uuid) {
+				this.syncs[syncUUID]!.excludeDotFiles = excludeDotFiles
+
+				break
+			}
+		}
+	}
+
+	public updateMode(uuid: string, mode: SyncMode): void {
+		for (const syncUUID in this.syncs) {
+			if (syncUUID === uuid) {
+				this.syncs[syncUUID]!.mode = mode
+
+				break
+			}
+		}
+	}
+
+	public updateIgnorerContent(uuid: string, content?: string): void {
+		for (const syncUUID in this.syncs) {
+			if (syncUUID === uuid) {
+				this.syncs[syncUUID]!.ignorer.update(content)
+
+				break
+			}
+		}
+	}
+
+	public async fetchIgnorerContent(uuid: string): Promise<string> {
+		for (const syncUUID in this.syncs) {
+			if (syncUUID === uuid) {
+				return await this.syncs[syncUUID]!.ignorer.fetch()
+			}
+		}
+
+		return ""
+	}
+
+	public stopTransfer(uuid: string, type: "download" | "upload", relativePath: string): void {
+		for (const syncUUID in this.syncs) {
+			if (syncUUID === uuid) {
+				const abortControllers = this.syncs[syncUUID]!.abortControllers
+				const signalKey = `${type}:${relativePath}`
+				const abortController = abortControllers[signalKey]
+
+				if (abortController && !abortController.signal.aborted) {
+					abortController.abort()
+				}
+
+				break
+			}
+		}
+	}
+
+	public pauseTransfer(uuid: string, type: "download" | "upload", relativePath: string): void {
+		for (const syncUUID in this.syncs) {
+			if (syncUUID === uuid) {
+				const pauseSignals = this.syncs[syncUUID]!.pauseSignals
+				const signalKey = `${type}:${relativePath}`
+				const pauseSignal = pauseSignals[signalKey]
+
+				if (pauseSignal && !pauseSignal.isPaused()) {
+					pauseSignal.pause()
+				}
+
+				break
+			}
+		}
+	}
+
+	public resumeTransfer(uuid: string, type: "download" | "upload", relativePath: string): void {
+		for (const syncUUID in this.syncs) {
+			if (syncUUID === uuid) {
+				const pauseSignals = this.syncs[syncUUID]!.pauseSignals
+				const signalKey = `${type}:${relativePath}`
+				const pauseSignal = pauseSignals[signalKey]
+
+				if (pauseSignal && pauseSignal.isPaused()) {
+					pauseSignal.resume()
+				}
+
+				break
+			}
 		}
 	}
 
@@ -173,7 +261,7 @@ export class SyncWorker {
 	 * @returns {Promise<void>}
 	 */
 	public async initialize(): Promise<void> {
-		await this.initSyncPairs(this.syncPairs)
+		await this.updateSyncPairs(this.syncPairs)
 	}
 }
 

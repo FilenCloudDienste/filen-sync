@@ -42,7 +42,15 @@ export type LocalTreeError = {
 	relativePath: string
 	error: Error
 }
-export type LocalTreeIgnoredReason = "dotFile" | "localIgnore" | "defaultIgnore" | "empty" | "symlink" | "invalidType"
+export type LocalTreeIgnoredReason =
+	| "dotFile"
+	| "localIgnore"
+	| "defaultIgnore"
+	| "empty"
+	| "symlink"
+	| "invalidType"
+	| "duplicate"
+	| "permissions"
 export type LocalTreeIgnored = {
 	localPath: string
 	relativePath: string
@@ -78,6 +86,7 @@ export class LocalFileSystem {
 	public readonly itemsMutex = new Semaphore(1)
 	public readonly mutex = new Semaphore(1)
 	public readonly mkdirMutex = new Semaphore(1)
+	public readonly listSemaphore = new Semaphore(1024)
 
 	/**
 	 * Creates an instance of LocalFileSystem.
@@ -117,6 +126,7 @@ export class LocalFileSystem {
 		const inodes: LocalDirectoryINodes = {}
 		const errors: LocalTreeError[] = []
 		const ignored: LocalTreeIgnored[] = []
+		const pathsAdded: Record<string, boolean> = {}
 		const dir = await fs.readdir(this.sync.syncPair.localPath, {
 			recursive: true,
 			encoding: "utf-8"
@@ -124,103 +134,135 @@ export class LocalFileSystem {
 
 		await promiseAllSettledChunked(
 			dir.map(async entry => {
-				const entryPath = `/${isWindows ? entry.replace(/\\/g, "/") : entry}`
-				const itemName = pathModule.posix.basename(entryPath)
-
-				if (itemName.startsWith(LOCAL_TRASH_NAME)) {
-					return
-				}
-
-				const itemPath = pathModule.join(this.sync.syncPair.localPath, entry)
-
-				if (
-					isDirectoryPathIgnoredByDefault(entryPath) ||
-					isRelativePathIgnoredByDefault(entryPath) ||
-					isSystemPathIgnoredByDefault(itemPath)
-				) {
-					ignored.push({
-						localPath: itemPath,
-						relativePath: entry,
-						reason: "defaultIgnore"
-					})
-
-					return
-				}
-
-				if (this.sync.excludeDotFiles && pathIncludesDotFile(entryPath)) {
-					ignored.push({
-						localPath: itemPath,
-						relativePath: entry,
-						reason: "dotFile"
-					})
-
-					return
-				}
-
-				if (this.sync.localIgnorer.ignores(entry)) {
-					ignored.push({
-						localPath: itemPath,
-						relativePath: entry,
-						reason: "localIgnore"
-					})
-
-					return
-				}
+				await this.listSemaphore.acquire()
 
 				try {
-					const stats = await fs.lstat(itemPath)
+					const entryPath = `/${isWindows ? entry.replace(/\\/g, "/") : entry}`
+					const itemName = pathModule.posix.basename(entryPath)
 
-					if (stats.isBlockDevice() || stats.isCharacterDevice() || stats.isFIFO() || stats.isSocket()) {
+					if (itemName.startsWith(LOCAL_TRASH_NAME)) {
+						return
+					}
+
+					const itemPath = pathModule.join(this.sync.syncPair.localPath, entry)
+
+					if (
+						isDirectoryPathIgnoredByDefault(entryPath) ||
+						isRelativePathIgnoredByDefault(entryPath) ||
+						isSystemPathIgnoredByDefault(itemPath)
+					) {
 						ignored.push({
 							localPath: itemPath,
 							relativePath: entry,
-							reason: "invalidType"
+							reason: "defaultIgnore"
 						})
 
 						return
 					}
 
-					if (stats.isSymbolicLink()) {
+					if (this.sync.excludeDotFiles && pathIncludesDotFile(entryPath)) {
 						ignored.push({
 							localPath: itemPath,
 							relativePath: entry,
-							reason: "symlink"
+							reason: "dotFile"
 						})
 
 						return
 					}
 
-					if (stats.isFile() && stats.size <= 0) {
+					if (this.sync.ignorer.ignores(entry)) {
 						ignored.push({
 							localPath: itemPath,
 							relativePath: entry,
-							reason: "empty"
+							reason: "localIgnore"
 						})
 
 						return
 					}
 
-					const item: LocalItem = {
-						lastModified: parseInt(stats.mtimeMs as unknown as string), // Sometimes comes as a float, but we need an int
-						type: stats.isDirectory() ? "directory" : "file",
-						path: entryPath,
-						creation: parseInt(stats.birthtimeMs as unknown as string), // Sometimes comes as a float, but we need an int
-						size: parseInt(stats.size as unknown as string), // Sometimes comes as a float, but we need an int
-						inode: parseInt(stats.ino as unknown as string) // Sometimes comes as a float, but we need an int
-					}
-
-					tree[entryPath] = item
-					inodes[item.inode] = item
-				} catch (e) {
-					this.sync.worker.logger.log("error", e, "filesystems.local.getDirectoryTree")
-
-					if (e instanceof Error) {
-						errors.push({
+					try {
+						await fs.access(itemPath, fs.constants.R_OK | fs.constants.W_OK)
+					} catch {
+						ignored.push({
 							localPath: itemPath,
-							relativePath: entryPath,
-							error: e
+							relativePath: entry,
+							reason: "permissions"
 						})
+
+						return
 					}
+
+					try {
+						const stats = await fs.lstat(itemPath)
+
+						if (stats.isBlockDevice() || stats.isCharacterDevice() || stats.isFIFO() || stats.isSocket()) {
+							ignored.push({
+								localPath: itemPath,
+								relativePath: entry,
+								reason: "invalidType"
+							})
+
+							return
+						}
+
+						if (stats.isSymbolicLink()) {
+							ignored.push({
+								localPath: itemPath,
+								relativePath: entry,
+								reason: "symlink"
+							})
+
+							return
+						}
+
+						if (stats.isFile() && stats.size <= 0) {
+							ignored.push({
+								localPath: itemPath,
+								relativePath: entry,
+								reason: "empty"
+							})
+
+							return
+						}
+
+						const lowercasePath = entryPath.toLowerCase()
+
+						if (pathsAdded[lowercasePath]) {
+							ignored.push({
+								localPath: itemPath,
+								relativePath: entry,
+								reason: "duplicate"
+							})
+
+							return
+						}
+
+						pathsAdded[lowercasePath] = true
+
+						const item: LocalItem = {
+							lastModified: parseInt(stats.mtimeMs as unknown as string), // Sometimes comes as a float, but we need an int
+							type: stats.isDirectory() ? "directory" : "file",
+							path: entryPath,
+							creation: parseInt(stats.birthtimeMs as unknown as string), // Sometimes comes as a float, but we need an int
+							size: parseInt(stats.size as unknown as string), // Sometimes comes as a float, but we need an int
+							inode: parseInt(stats.ino as unknown as string) // Sometimes comes as a float, but we need an int
+						}
+
+						tree[entryPath] = item
+						inodes[item.inode] = item
+					} catch (e) {
+						this.sync.worker.logger.log("error", e, "filesystems.local.getDirectoryTree")
+
+						if (e instanceof Error) {
+							errors.push({
+								localPath: itemPath,
+								relativePath: entryPath,
+								error: e
+							})
+						}
+					}
+				} finally {
+					this.listSemaphore.release()
 				}
 			})
 		)

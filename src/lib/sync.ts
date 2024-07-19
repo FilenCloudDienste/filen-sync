@@ -1,5 +1,5 @@
 import FilenSDK, { type PauseSignal } from "@filen/sdk"
-import { type SyncPair, type SyncMessage, type SyncMode } from "../types"
+import { type SyncPair, type SyncMode } from "../types"
 import { SYNC_INTERVAL } from "../constants"
 import { LocalFileSystem, LocalTree } from "./filesystems/local"
 import { RemoteFileSystem, RemoteTree } from "./filesystems/remote"
@@ -7,7 +7,6 @@ import Deltas from "./deltas"
 import Tasks, { type TaskError } from "./tasks"
 import State from "./state"
 import { postMessageToMain } from "./ipc"
-import { isMainThread, parentPort } from "worker_threads"
 import Ignorer from "../ignorer"
 import { serializeError } from "../utils"
 import type SyncWorker from ".."
@@ -41,8 +40,7 @@ export class Sync {
 	public readonly dbPath: string
 	public readonly abortControllers: Record<string, AbortController> = {}
 	public readonly pauseSignals: Record<string, PauseSignal> = {}
-	public readonly localIgnorer: Ignorer
-	public readonly remoteIgnorer: Ignorer
+	public readonly ignorer: Ignorer
 	public paused: boolean
 	public mode: SyncMode
 	public excludeDotFiles: boolean
@@ -74,66 +72,8 @@ export class Sync {
 		this.deltas = new Deltas(this)
 		this.tasks = new Tasks(this)
 		this.state = new State(this)
-		this.localIgnorer = new Ignorer(this, "localIgnorer")
-		this.remoteIgnorer = new Ignorer(this, "remoteIgnorer")
+		this.ignorer = new Ignorer(this, "ignorer")
 		this.lock = new Lock(this)
-
-		this.setupMainThreadListeners()
-	}
-
-	/**
-	 * Sets up receiving message from the main thread.
-	 *
-	 * @private
-	 */
-	private setupMainThreadListeners(): void {
-		const receiver = !isMainThread && parentPort ? parentPort : process
-
-		receiver.on("message", (message: SyncMessage) => {
-			if (message.type === "stopTransfer" && message.syncPair.uuid === this.syncPair.uuid) {
-				const abortController = this.abortControllers[`${message.data.of}:${message.data.relativePath}`]
-
-				if (!abortController || abortController.signal.aborted) {
-					return
-				}
-
-				abortController.abort()
-			} else if (message.type === "pauseTransfer" && message.syncPair.uuid === this.syncPair.uuid) {
-				const pauseSignal = this.pauseSignals[`${message.data.of}:${message.data.relativePath}`]
-
-				if (!pauseSignal || pauseSignal.isPaused()) {
-					return
-				}
-
-				pauseSignal.pause()
-			} else if (message.type === "resumeTransfer" && message.syncPair.uuid === this.syncPair.uuid) {
-				const pauseSignal = this.pauseSignals[`${message.data.of}:${message.data.relativePath}`]
-
-				if (!pauseSignal || !pauseSignal.isPaused()) {
-					return
-				}
-
-				pauseSignal.resume()
-			} else if (message.type === "updateLocalIgnorer" && message.syncPair.uuid === this.syncPair.uuid) {
-				this.localIgnorer.update(message.data?.content).catch(err => {
-					this.worker.logger.log("error", err, "sync.setupMainThreadListeners")
-				})
-			} else if (message.type === "updateRemoteIgnorer" && message.syncPair.uuid === this.syncPair.uuid) {
-				this.remoteIgnorer.update(message.data?.content).catch(err => {
-					this.worker.logger.log("error", err, "sync.setupMainThreadListeners")
-				})
-			} else if (message.type === "pauseSyncPair" && message.syncPair.uuid === this.syncPair.uuid) {
-				this.paused = true
-			} else if (message.type === "resumeSyncPair" && message.syncPair.uuid === this.syncPair.uuid) {
-				this.paused = false
-			} else if (message.type === "changeSyncPairMode" && message.syncPair.uuid === this.syncPair.uuid) {
-				this.mode = message.data.mode
-			} else if (message.type === "syncPairExcludeDotFiles" && message.syncPair.uuid === this.syncPair.uuid) {
-				this.excludeDotFiles = true
-			} else if (message.type === "syncPairIncludeDotFiles" && message.syncPair.uuid === this.syncPair.uuid) {
-				this.excludeDotFiles = false
-			}
-		})
 	}
 
 	public async smokeTest(): Promise<void> {
@@ -178,12 +118,7 @@ export class Sync {
 		try {
 			await this.smokeTest()
 
-			await Promise.all([
-				this.localFileSystem.startDirectoryWatcher(),
-				this.state.initialize(),
-				this.localIgnorer.initialize(),
-				this.remoteIgnorer.initialize()
-			])
+			await Promise.all([this.localFileSystem.startDirectoryWatcher(), this.state.initialize(), this.ignorer.initialize()])
 
 			this.run()
 		} catch (e) {

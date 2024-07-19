@@ -8,12 +8,40 @@ export const IGNORER_VERSION = 1
 export class Ignorer {
 	private readonly sync: Sync
 	private instance = ignore()
-	private readonly name: string = "localIgnorer"
+	private readonly name: string = "ignorer"
 	private readonly cache: Record<string, boolean> = {}
 
-	public constructor(sync: Sync, name: string = "localIgnorer") {
+	public constructor(sync: Sync, name: string = "ignorer") {
 		this.sync = sync
 		this.name = name
+	}
+
+	public async fetch(): Promise<string> {
+		const filePath = pathModule.join(this.sync.dbPath, this.name, `v${IGNORER_VERSION}`, this.sync.syncPair.uuid, "filenIgnore")
+
+		await fs.ensureDir(pathModule.dirname(filePath))
+
+		const exists = await fs.exists(filePath)
+
+		if (!exists) {
+			return ""
+		}
+
+		const stats = await fs.stat(filePath)
+
+		if (stats.size === 0) {
+			return ""
+		}
+
+		const readContent = await fs.readFile(filePath, {
+			encoding: "utf-8"
+		})
+
+		if (readContent.length === 0) {
+			return ""
+		}
+
+		return readContent
 	}
 
 	public async initialize(passedContent?: string): Promise<void> {
@@ -29,30 +57,14 @@ export class Ignorer {
 
 			content = passedContent
 		} else {
-			const exists = await fs.exists(filePath)
-
-			if (!exists) {
-				return
-			}
-
-			const stats = await fs.stat(filePath)
-
-			if (stats.size === 0) {
-				return
-			}
-
-			const readContent = await fs.readFile(filePath, {
-				encoding: "utf-8"
-			})
-
-			if (readContent.length === 0) {
-				return
-			}
-
-			content = readContent
+			content = await this.fetch()
 		}
 
-		this.instance = ignore().add(content)
+		this.instance = ignore()
+
+		if (content.length > 0) {
+			this.instance.add(content)
+		}
 	}
 
 	public async update(content?: string): Promise<void> {

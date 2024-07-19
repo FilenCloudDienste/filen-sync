@@ -23,7 +23,7 @@ The package is still a work in progress. DO NOT USE IT IN PRODUCTION YET. Class 
 npm install @filen/sync@latest
 ```
 
-2. Initialize the server and query it using aws-sdk
+2. Initialize sync pairs
 
 ```typescript
 import Sync from "@filen/sync"

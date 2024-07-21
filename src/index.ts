@@ -78,6 +78,8 @@ export class SyncWorker {
 				uuids: {},
 				ignored: []
 			}
+
+			sync.ignorer.cache = {}
 		}
 	}
 

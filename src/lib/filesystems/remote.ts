@@ -31,7 +31,7 @@ export type RemoteTree = {
 export type RemoteTreeIgnoredReason =
 	| "dotFile"
 	| "invalidPath"
-	| "remoteIgnore"
+	| "filenIgnore"
 	| "pathLength"
 	| "nameLength"
 	| "defaultIgnore"
@@ -212,7 +212,7 @@ export class RemoteFileSystem {
 					ignored.push({
 						localPath,
 						relativePath: folderPath,
-						reason: "remoteIgnore"
+						reason: "filenIgnore"
 					})
 
 					continue
@@ -336,7 +336,7 @@ export class RemoteFileSystem {
 						ignored.push({
 							localPath,
 							relativePath: filePath,
-							reason: "remoteIgnore"
+							reason: "filenIgnore"
 						})
 
 						return

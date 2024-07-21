@@ -44,7 +44,7 @@ export type LocalTreeError = {
 }
 export type LocalTreeIgnoredReason =
 	| "dotFile"
-	| "localIgnore"
+	| "filenIgnore"
 	| "defaultIgnore"
 	| "empty"
 	| "symlink"
@@ -174,7 +174,7 @@ export class LocalFileSystem {
 						ignored.push({
 							localPath: itemPath,
 							relativePath: entry,
-							reason: "localIgnore"
+							reason: "filenIgnore"
 						})
 
 						return

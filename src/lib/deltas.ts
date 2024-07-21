@@ -1,7 +1,7 @@
 import type Sync from "./sync"
 import { type LocalTree, type LocalTreeError } from "./filesystems/local"
 import { type RemoteTree } from "./filesystems/remote"
-import { replacePathStartWithFromAndTo } from "../utils"
+import { replacePathStartWithFromAndTo, pathIncludesDotFile } from "../utils"
 
 export type Delta = { path: string } & (
 	| {
@@ -377,7 +377,35 @@ export class Deltas {
 		}
 
 		// Work on deltas from "left to right" (ascending order, path length).
-		const deltasSorted = deltas.sort((a, b) => a.path.split("/").length - b.path.split("/").length)
+		const deltasSorted = deltas
+			.sort((a, b) => a.path.split("/").length - b.path.split("/").length)
+			// Filter by ignores paths
+			.filter(delta => {
+				if (
+					delta.type === "renameLocalDirectory" ||
+					delta.type === "renameLocalFile" ||
+					delta.type === "renameRemoteDirectory" ||
+					delta.type === "renameRemoteFile"
+				) {
+					if (this.sync.excludeDotFiles && (pathIncludesDotFile(delta.from) || pathIncludesDotFile(delta.to))) {
+						return false
+					}
+
+					if (this.sync.ignorer.ignores(delta.from) || this.sync.ignorer.ignores(delta.to)) {
+						return false
+					}
+				} else {
+					if (this.sync.excludeDotFiles && pathIncludesDotFile(delta.path)) {
+						return false
+					}
+
+					if (this.sync.ignorer.ignores(delta.path)) {
+						return false
+					}
+				}
+
+				return true
+			})
 
 		// Here we apply the done task to the delta state.
 		// E.g. when the user renames/moves a directory from "/sync/dir" to "/sync/dir2"
@@ -386,7 +414,6 @@ export class Deltas {
 		// Same for deletions. We only ever need to rename/move/delete the parent directory if the children did not change.
 		// This saves a lot of disk usage and API requests. This also saves time applying all done tasks to the overall state,
 		// since we need to loop through less doneTasks.
-
 		for (let i = 0; i < deltasSorted.length; i++) {
 			const delta = deltasSorted[i]!
 			let moveUp = false

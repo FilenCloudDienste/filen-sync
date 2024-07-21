@@ -6,10 +6,10 @@ import fs from "fs-extra"
 export const IGNORER_VERSION = 1
 
 export class Ignorer {
-	private readonly sync: Sync
-	private instance = ignore()
-	private readonly name: string = "ignorer"
-	private readonly cache: Record<string, boolean> = {}
+	private sync: Sync
+	public instance = ignore()
+	public name: string = "ignorer"
+	public cache: Record<string, boolean> = {}
 
 	public constructor(sync: Sync, name: string = "ignorer") {
 		this.sync = sync

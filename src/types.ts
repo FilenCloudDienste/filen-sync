@@ -372,27 +372,6 @@ export type SyncMessage =
 			| {
 					type: "cyclePaused"
 			  }
-			| {
-					type: "stopTransfer"
-					data: {
-						of: "upload" | "download"
-						relativePath: string
-					}
-			  }
-			| {
-					type: "pauseTransfer"
-					data: {
-						of: "upload" | "download"
-						relativePath: string
-					}
-			  }
-			| {
-					type: "resumeTransfer"
-					data: {
-						of: "upload" | "download"
-						relativePath: string
-					}
-			  }
 	  ))
 	| {
 			type: "updateSyncPairs"
@@ -406,51 +385,4 @@ export type SyncMessage =
 			data: {
 				error: SerializedError
 			}
-	  }
-	| {
-			type: "syncPairsUpdated"
-	  }
-	| {
-			type: "updateLocalIgnorer"
-			syncPair: SyncPair
-			data?: {
-				content?: string
-			}
-	  }
-	| {
-			type: "updateRemoteIgnorer"
-			syncPair: SyncPair
-			data?: {
-				content?: string
-			}
-	  }
-	| {
-			type: "resetSyncPairCache"
-	  }
-	| {
-			type: "pauseSyncPair"
-			syncPair: SyncPair
-	  }
-	| {
-			type: "resumeSyncPair"
-			syncPair: SyncPair
-	  }
-	| {
-			type: "changeSyncPairMode"
-			syncPair: SyncPair
-			data: {
-				mode: SyncMode
-			}
-	  }
-	| {
-			type: "syncPairExcludeDotFiles"
-			syncPair: SyncPair
-	  }
-	| {
-			type: "syncPairIncludeDotFiles"
-			syncPair: SyncPair
-	  }
-	| {
-			type: "syncPairRemoved"
-			syncPair: SyncPair
 	  }

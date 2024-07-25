@@ -123,16 +123,12 @@ export const isValidPath = memoize((path: string): boolean => {
 })
 
 export const isNameIgnoredByDefault = memoize((name: string): boolean => {
-	const nameLowercase = name.toLowerCase()
+	const nameLowercase = name.toLowerCase().trim()
 	const extension = pathModule.extname(name)
 	const extensionLowercase = extension.toLowerCase()
 
 	if (
 		name.length === 0 ||
-		name.startsWith(" ") ||
-		name.endsWith(" ") ||
-		name.includes("\n") ||
-		name.includes("\r") ||
 		nameLowercase.startsWith(".~lock.") ||
 		nameLowercase.startsWith(".~lock") ||
 		nameLowercase.startsWith("~$") ||
@@ -147,26 +143,6 @@ export const isNameIgnoredByDefault = memoize((name: string): boolean => {
 
 export const isRelativePathIgnoredByDefault = memoize((path: string): boolean => {
 	return path.split("/").some(part => part.length > 0 && isNameIgnoredByDefault(part))
-})
-
-export const isSystemPathIgnoredByDefault = memoize((path: string): boolean => {
-	for (const systemPath of DEFAULT_IGNORED.system) {
-		if (path.toLowerCase().includes(systemPath.toLowerCase())) {
-			return true
-		}
-	}
-
-	return false
-})
-
-export const isDirectoryPathIgnoredByDefault = memoize((path: string): boolean => {
-	for (const directoryPath of DEFAULT_IGNORED.directories) {
-		if (path.toLowerCase().includes(directoryPath.toLowerCase())) {
-			return true
-		}
-	}
-
-	return false
 })
 
 export type SerializedError = {

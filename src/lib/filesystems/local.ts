@@ -3,8 +3,6 @@ import watcher from "@parcel/watcher"
 import {
 	promiseAllSettledChunked,
 	isRelativePathIgnoredByDefault,
-	isDirectoryPathIgnoredByDefault,
-	isSystemPathIgnoredByDefault,
 	serializeError,
 	replacePathStartWithFromAndTo,
 	pathIncludesDotFile
@@ -138,19 +136,14 @@ export class LocalFileSystem {
 
 				try {
 					const entryPath = `/${isWindows ? entry.replace(/\\/g, "/") : entry}`
-					const itemName = pathModule.posix.basename(entryPath)
 
-					if (itemName.startsWith(LOCAL_TRASH_NAME)) {
+					if (entryPath.includes(LOCAL_TRASH_NAME)) {
 						return
 					}
 
 					const itemPath = pathModule.join(this.sync.syncPair.localPath, entry)
 
-					if (
-						isDirectoryPathIgnoredByDefault(entryPath) ||
-						isRelativePathIgnoredByDefault(entryPath) ||
-						isSystemPathIgnoredByDefault(itemPath)
-					) {
+					if (isRelativePathIgnoredByDefault(entryPath)) {
 						ignored.push({
 							localPath: itemPath,
 							relativePath: entry,
@@ -299,11 +292,17 @@ export class LocalFileSystem {
 			return
 		}
 
-		this.watcherInstance = await watcher.subscribe(this.sync.syncPair.localPath, (err, events) => {
-			if (!err && events && events.length > 0) {
-				this.lastDirectoryChangeTimestamp = Date.now()
+		this.watcherInstance = await watcher.subscribe(
+			this.sync.syncPair.localPath,
+			(err, events) => {
+				if (!err && events && events.length > 0) {
+					this.lastDirectoryChangeTimestamp = Date.now()
+				}
+			},
+			{
+				ignore: [".filen.trash.local"]
 			}
-		})
+		)
 	}
 
 	/**

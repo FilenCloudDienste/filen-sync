@@ -11,7 +11,6 @@ import {
 	isPathOverMaxLength,
 	isNameOverMaxLength,
 	isValidPath,
-	isDirectoryPathIgnoredByDefault,
 	isRelativePathIgnoredByDefault,
 	serializeError,
 	replacePathStartWithFromAndTo,
@@ -198,7 +197,7 @@ export class RemoteFileSystem {
 					continue
 				}
 
-				if (isDirectoryPathIgnoredByDefault(folderPath) || isRelativePathIgnoredByDefault(folderPath)) {
+				if (isRelativePathIgnoredByDefault(folderPath)) {
 					ignored.push({
 						localPath,
 						relativePath: folderPath,
@@ -322,7 +321,7 @@ export class RemoteFileSystem {
 						return
 					}
 
-					if (isDirectoryPathIgnoredByDefault(filePath) || isRelativePathIgnoredByDefault(filePath)) {
+					if (isRelativePathIgnoredByDefault(filePath)) {
 						ignored.push({
 							localPath,
 							relativePath: filePath,

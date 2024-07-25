@@ -143,11 +143,6 @@ export class Sync {
 
 	private async run(): Promise<void> {
 		if (this.removed) {
-			postMessageToMain({
-				type: "syncPairRemoved",
-				syncPair: this.syncPair
-			})
-
 			return
 		}
 
@@ -187,6 +182,11 @@ export class Sync {
 
 				postMessageToMain({
 					type: "cyclePaused",
+					syncPair: this.syncPair
+				})
+
+				postMessageToMain({
+					type: "cycleSuccess",
 					syncPair: this.syncPair
 				})
 
@@ -275,6 +275,11 @@ export class Sync {
 						syncPair: this.syncPair
 					})
 				}
+
+				postMessageToMain({
+					type: "cycleSuccess",
+					syncPair: this.syncPair
+				})
 
 				postMessageToMain({
 					type: "cycleNoChanges",

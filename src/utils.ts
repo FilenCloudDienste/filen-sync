@@ -98,22 +98,85 @@ export function isNameOverMaxLength(name: string): boolean {
 	return name.length + 1 > 255
 }
 
-export const isValidPath = memoize((path: string): boolean => {
-	const illegalCharsWindows = /[<>:"/\\|?*]|^(?:aux|con|clock\$|nul|prn|com[1-9]|lpt[1-9])$/i
-	const illegalCharsMacOS = /[:]/i
-	const illegalCharsLinux = /[\0/]/i
+export const isValidPath = memoize((inputPath: string): boolean => {
+	// eslint-disable-next-line no-control-regex
+	const illegalCharsWindows = /[<>:"/\\|?*\x00-\x1F]/
+	const reservedNamesWindows = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i
+	// eslint-disable-next-line no-control-regex, no-useless-escape
+	const illegalCharsMacOS = /[\/:\x00]/
+	// eslint-disable-next-line no-control-regex
+	const illegalCharsLinux = /[\x00]/
+
+	if (inputPath.includes("..")) {
+		return false
+	}
+
+	const normalizedPath = pathModule.normalize(inputPath)
+	const parts = normalizedPath.split(pathModule.sep)
 
 	switch (process.platform) {
 		case "win32": {
-			return illegalCharsWindows.test(path)
+			for (const part of parts) {
+				if (part.trim() === "") {
+					continue
+				}
+
+				if (illegalCharsWindows.test(part)) {
+					return false
+				}
+
+				if (reservedNamesWindows.test(part)) {
+					return false
+				}
+
+				const nameParts = part.split(".")
+
+				if (nameParts[0] && reservedNamesWindows.test(nameParts[0]) && nameParts.length > 1) {
+					return false
+				}
+
+				if (part.endsWith(".") || part.endsWith(" ")) {
+					return false
+				}
+			}
+
+			return true
 		}
 
 		case "darwin": {
-			return illegalCharsMacOS.test(path)
+			for (const part of parts) {
+				if (part.trim() === "") {
+					continue
+				}
+
+				if (illegalCharsMacOS.test(part)) {
+					return false
+				}
+
+				if (part.startsWith(".")) {
+					continue
+				}
+			}
+
+			return true
 		}
 
 		case "linux": {
-			return illegalCharsLinux.test(path)
+			for (const part of parts) {
+				if (part.trim() === "") {
+					continue
+				}
+
+				if (illegalCharsLinux.test(part)) {
+					return false
+				}
+
+				if (part === ".") {
+					continue
+				}
+			}
+
+			return true
 		}
 
 		default: {
@@ -124,15 +187,15 @@ export const isValidPath = memoize((path: string): boolean => {
 
 export const isNameIgnoredByDefault = memoize((name: string): boolean => {
 	const nameLowercase = name.toLowerCase().trim()
-	const extension = pathModule.extname(name)
+	const extension = pathModule.extname(nameLowercase)
 	const extensionLowercase = extension.toLowerCase()
 
 	if (
-		name.length === 0 ||
+		nameLowercase.length === 0 ||
 		nameLowercase.startsWith(".~lock.") ||
 		nameLowercase.startsWith(".~lock") ||
 		nameLowercase.startsWith("~$") ||
-		DEFAULT_IGNORED.extensions.includes(extensionLowercase) ||
+		(extensionLowercase && extensionLowercase.length > 0 && DEFAULT_IGNORED.extensions.includes(extensionLowercase)) ||
 		DEFAULT_IGNORED.names.includes(nameLowercase)
 	) {
 		return true

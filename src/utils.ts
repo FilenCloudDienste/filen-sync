@@ -107,17 +107,23 @@ export const isValidPath = memoize((inputPath: string): boolean => {
 	// eslint-disable-next-line no-control-regex
 	const illegalCharsLinux = /[\x00]/
 
+	if (process.platform === "win32") {
+		inputPath = inputPath.replace(/\\/g, "/")
+	}
+
 	if (inputPath.includes("..")) {
 		return false
 	}
 
-	const normalizedPath = pathModule.normalize(inputPath)
-	const parts = normalizedPath.split(pathModule.sep)
+	const parts = inputPath.split("/")
 
 	switch (process.platform) {
 		case "win32": {
 			for (const part of parts) {
-				if (part.trim() === "") {
+				const trimmed = part.trim()
+
+				// Skip drive letter
+				if (trimmed.length === 0 || (trimmed.length === 2 && part.endsWith(":") && inputPath.startsWith(part))) {
 					continue
 				}
 
@@ -131,11 +137,7 @@ export const isValidPath = memoize((inputPath: string): boolean => {
 
 				const nameParts = part.split(".")
 
-				if (nameParts[0] && reservedNamesWindows.test(nameParts[0]) && nameParts.length > 1) {
-					return false
-				}
-
-				if (part.endsWith(".") || part.endsWith(" ")) {
+				if (nameParts[0] && nameParts[0].length > 0 && reservedNamesWindows.test(nameParts[0])) {
 					return false
 				}
 			}
@@ -145,16 +147,12 @@ export const isValidPath = memoize((inputPath: string): boolean => {
 
 		case "darwin": {
 			for (const part of parts) {
-				if (part.trim() === "") {
+				if (part.trim().length === 0) {
 					continue
 				}
 
 				if (illegalCharsMacOS.test(part)) {
 					return false
-				}
-
-				if (part.startsWith(".")) {
-					continue
 				}
 			}
 
@@ -163,16 +161,12 @@ export const isValidPath = memoize((inputPath: string): boolean => {
 
 		case "linux": {
 			for (const part of parts) {
-				if (part.trim() === "") {
+				if (part.trim().length === 0) {
 					continue
 				}
 
 				if (illegalCharsLinux.test(part)) {
 					return false
-				}
-
-				if (part === ".") {
-					continue
 				}
 			}
 

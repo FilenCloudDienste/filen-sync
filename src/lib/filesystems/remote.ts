@@ -912,6 +912,7 @@ export class RemoteFileSystem {
 			await fs.move(tmpLocalPath, localPath, {
 				overwrite: true
 			})
+			await fs.utimes(localPath, new Date(), new Date(convertTimestampToMs(item.lastModified)))
 
 			const stats = await fs.stat(localPath)
 			const localItem: LocalItem = {

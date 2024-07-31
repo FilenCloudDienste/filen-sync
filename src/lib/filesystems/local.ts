@@ -129,6 +129,7 @@ export class LocalFileSystem {
 			recursive: true,
 			encoding: "utf-8"
 		})
+		const now = Date.now()
 
 		await promiseAllSettledChunked(
 			dir.map(async entry => {
@@ -261,7 +262,7 @@ export class LocalFileSystem {
 		)
 
 		this.getDirectoryTreeCache = {
-			timestamp: Date.now(),
+			timestamp: now,
 			tree,
 			inodes,
 			errors,

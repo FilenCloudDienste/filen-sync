@@ -126,208 +126,240 @@ export class Deltas {
 
 		// Local file/directory move/rename
 
-		for (const inode in currentLocalTree.inodes) {
-			const currentItem = currentLocalTree.inodes[inode]
-			const previousItem = previousLocalTree.inodes[inode]
+		if (this.sync.mode === "twoWay" || this.sync.mode === "localBackup" || this.sync.mode === "localToCloud") {
+			for (const inode in currentLocalTree.inodes) {
+				const currentItem = currentLocalTree.inodes[inode]
+				const previousItem = previousLocalTree.inodes[inode]
 
-			if (
-				!currentItem ||
-				!previousItem ||
-				pathsAdded[currentItem.path] ||
-				pathsAdded[previousItem.path] ||
-				erroredLocalPaths[currentItem.path] ||
-				erroredLocalPaths[previousItem.path]
-			) {
-				continue
-			}
-
-			// Path from current item changed, it was either renamed or moved (same type)
-			if (currentItem.path !== previousItem.path && currentItem.type === previousItem.type) {
-				const delta: Delta = {
-					type: currentItem.type === "directory" ? "renameRemoteDirectory" : "renameRemoteFile",
-					path: currentItem.path,
-					from: previousItem.path,
-					to: currentItem.path
+				if (
+					!currentItem ||
+					!previousItem ||
+					pathsAdded[currentItem.path] ||
+					pathsAdded[previousItem.path] ||
+					erroredLocalPaths[currentItem.path] ||
+					erroredLocalPaths[previousItem.path]
+				) {
+					continue
 				}
 
-				deltas.push(delta)
+				// Path from current item changed, it was either renamed or moved (same type)
+				if (currentItem.path !== previousItem.path && currentItem.type === previousItem.type) {
+					const delta: Delta = {
+						type: currentItem.type === "directory" ? "renameRemoteDirectory" : "renameRemoteFile",
+						path: currentItem.path,
+						from: previousItem.path,
+						to: currentItem.path
+					}
 
-				if (currentItem.type === "directory") {
-					renamedRemoteDirectories.push(delta)
+					deltas.push(delta)
+
+					if (currentItem.type === "directory") {
+						renamedRemoteDirectories.push(delta)
+					}
+
+					pathsAdded[currentItem.path] = true
+					pathsAdded[previousItem.path] = true
 				}
-
-				pathsAdded[currentItem.path] = true
-				pathsAdded[previousItem.path] = true
 			}
 		}
 
 		// Remote file/directory move/rename
 
-		for (const uuid in currentRemoteTree.uuids) {
-			const currentItem = currentRemoteTree.uuids[uuid]
-			const previousItem = previousRemoteTree.uuids[uuid]
+		if (this.sync.mode === "twoWay" || this.sync.mode === "cloudBackup" || this.sync.mode === "cloudToLocal") {
+			for (const uuid in currentRemoteTree.uuids) {
+				const currentItem = currentRemoteTree.uuids[uuid]
+				const previousItem = previousRemoteTree.uuids[uuid]
 
-			if (!currentItem || !previousItem || pathsAdded[currentItem.path] || pathsAdded[previousItem.path]) {
-				continue
-			}
-
-			// Path from current item changed, it was either renamed or moved (same type)
-			if (currentItem.path !== previousItem.path && currentItem.type === previousItem.type) {
-				const delta: Delta = {
-					type: currentItem.type === "directory" ? "renameLocalDirectory" : "renameLocalFile",
-					path: currentItem.path,
-					from: previousItem.path,
-					to: currentItem.path
+				if (!currentItem || !previousItem || pathsAdded[currentItem.path] || pathsAdded[previousItem.path]) {
+					continue
 				}
 
-				deltas.push(delta)
+				// Path from current item changed, it was either renamed or moved (same type)
+				if (currentItem.path !== previousItem.path && currentItem.type === previousItem.type) {
+					const delta: Delta = {
+						type: currentItem.type === "directory" ? "renameLocalDirectory" : "renameLocalFile",
+						path: currentItem.path,
+						from: previousItem.path,
+						to: currentItem.path
+					}
 
-				if (currentItem.type === "directory") {
-					renamedLocalDirectories.push(delta)
+					deltas.push(delta)
+
+					if (currentItem.type === "directory") {
+						renamedLocalDirectories.push(delta)
+					}
+
+					pathsAdded[currentItem.path] = true
+					pathsAdded[previousItem.path] = true
 				}
-
-				pathsAdded[currentItem.path] = true
-				pathsAdded[previousItem.path] = true
 			}
 		}
 
 		// Local deletions
 
-		for (const path in previousLocalTree.tree) {
-			if (pathsAdded[path] || erroredLocalPaths[path]) {
-				continue
-			}
-
-			const previousLocalItem = previousLocalTree.tree[path]
-			const currentLocalItem = currentLocalTree.tree[path]
-
-			// If the item does not exist in the current tree but does in the previous one, it has been deleted.
-			// We also check if the previous inode does not exist in the current tree.
-			if (!currentLocalItem && previousLocalItem && !currentLocalTree.inodes[previousLocalItem.inode]) {
-				const delta: Delta = {
-					type: previousLocalItem.type === "directory" ? "deleteRemoteDirectory" : "deleteRemoteFile",
-					path
+		if (this.sync.mode === "twoWay" || this.sync.mode === "localToCloud") {
+			for (const path in previousLocalTree.tree) {
+				if (pathsAdded[path] || erroredLocalPaths[path]) {
+					continue
 				}
 
-				deltas.push(delta)
+				const previousLocalItem = previousLocalTree.tree[path]
+				const currentLocalItem = currentLocalTree.tree[path]
 
-				if (previousLocalItem.type === "directory") {
-					deletedRemoteDirectories.push(delta)
+				// If the item does not exist in the current tree but does in the previous one, it has been deleted.
+				// We also check if the previous inode does not exist in the current tree, and if so, we skip it (only in cloud -> local modes. It should always be deleted in local -> cloud modes if it exists remotely).
+				if (
+					!currentLocalItem &&
+					previousLocalItem &&
+					(this.sync.mode !== "localToCloud" ? !currentLocalTree.inodes[previousLocalItem.inode] : true)
+				) {
+					const delta: Delta = {
+						type: previousLocalItem.type === "directory" ? "deleteRemoteDirectory" : "deleteRemoteFile",
+						path
+					}
+
+					deltas.push(delta)
+
+					if (previousLocalItem.type === "directory") {
+						deletedRemoteDirectories.push(delta)
+					}
+
+					pathsAdded[path] = true
+					pathsAdded[previousLocalItem.path] = true
 				}
-
-				pathsAdded[path] = true
-				pathsAdded[previousLocalItem.path] = true
 			}
 		}
 
 		// Remote deletions
 
-		for (const path in previousRemoteTree.tree) {
-			if (pathsAdded[path]) {
-				continue
-			}
-
-			const previousRemoteItem = previousRemoteTree.tree[path]
-			const currentRemoteItem = currentRemoteTree.tree[path]
-
-			// If the item does not exist in the current tree but does in the previous one, it has been deleted.
-			// We also check if the previous UUID does not exist in the current tree.
-			if (!currentRemoteItem && previousRemoteItem && !currentRemoteTree.uuids[previousRemoteItem.uuid]) {
-				const delta: Delta = {
-					type: previousRemoteItem.type === "directory" ? "deleteLocalDirectory" : "deleteLocalFile",
-					path
+		if (this.sync.mode === "twoWay" || this.sync.mode === "cloudToLocal") {
+			for (const path in previousRemoteTree.tree) {
+				if (pathsAdded[path]) {
+					continue
 				}
 
-				deltas.push(delta)
+				const previousRemoteItem = previousRemoteTree.tree[path]
+				const currentRemoteItem = currentRemoteTree.tree[path]
 
-				if (previousRemoteItem.type === "directory") {
-					deletedLocalDirectories.push(delta)
+				// If the item does not exist in the current tree but does in the previous one, it has been deleted.
+				// We also check if the previous UUID does not exist in the current tree, and if so, we skip it (only in local -> cloud modes. It should always be deleted in cloud -> local modes if it exists locally).
+				if (
+					!currentRemoteItem &&
+					previousRemoteItem &&
+					(this.sync.mode !== "cloudToLocal" ? !currentRemoteTree.uuids[previousRemoteItem.uuid] : true)
+				) {
+					const delta: Delta = {
+						type: previousRemoteItem.type === "directory" ? "deleteLocalDirectory" : "deleteLocalFile",
+						path
+					}
+
+					deltas.push(delta)
+
+					if (previousRemoteItem.type === "directory") {
+						deletedLocalDirectories.push(delta)
+					}
+
+					pathsAdded[path] = true
+					pathsAdded[previousRemoteItem.path] = true
 				}
-
-				pathsAdded[path] = true
-				pathsAdded[previousRemoteItem.path] = true
 			}
 		}
 
 		// Local additions/filemodifications
 
-		for (const path in currentLocalTree.tree) {
-			if (pathsAdded[path] || erroredLocalPaths[path]) {
-				continue
-			}
+		if (this.sync.mode === "twoWay" || this.sync.mode === "localBackup" || this.sync.mode === "localToCloud") {
+			for (const path in currentLocalTree.tree) {
+				if (pathsAdded[path] || erroredLocalPaths[path]) {
+					continue
+				}
 
-			const currentLocalItem = currentLocalTree.tree[path]
-			const currentRemoteItem = currentRemoteTree.tree[path]
+				const currentLocalItem = currentLocalTree.tree[path]
+				const currentRemoteItem = currentRemoteTree.tree[path]
 
-			// If the item does not exist in the current remote tree, but does in the local one, it should be uploaded.
-			// We also check if it in fact has existed before (the inode), if so, we skip it.
-			if (!currentRemoteItem && currentLocalItem && !previousLocalTree.inodes[currentLocalItem.inode]) {
-				deltas.push({
-					type: currentLocalItem.type === "directory" ? "createRemoteDirectory" : "uploadFile",
-					path
-				})
+				// If the item does not exist in the current remote tree, but does in the local one, it should be uploaded.
+				// We also check if it in fact has existed before (the inode), if so, we skip it (only in cloud -> local modes. It should always be uploaded in local -> cloud modes if it does not exist remotely).
+				if (
+					!currentRemoteItem &&
+					currentLocalItem &&
+					(this.sync.mode !== "localBackup" && this.sync.mode !== "localToCloud"
+						? !previousLocalTree.inodes[currentLocalItem.inode]
+						: true)
+				) {
+					deltas.push({
+						type: currentLocalItem.type === "directory" ? "createRemoteDirectory" : "uploadFile",
+						path
+					})
 
-				pathsAdded[path] = true
+					pathsAdded[path] = true
 
-				continue
-			}
+					continue
+				}
 
-			// If the item exists in both trees and has a different mod time + hash, we upload it again.
-			if (
-				currentRemoteItem &&
-				currentRemoteItem.type === "file" &&
-				currentLocalItem &&
-				currentLocalItem.lastModified > currentRemoteItem.lastModified &&
-				(await this.sync.localFileSystem.createFileHash({
-					relativePath: path,
-					algorithm: "md5"
-				})) !== this.sync.localFileHashes[currentLocalItem.path]
-			) {
-				deltas.push({
-					type: "uploadFile",
-					path
-				})
+				// If the item exists in both trees and has a different mod time + hash, we upload it again.
+				if (
+					currentRemoteItem &&
+					currentRemoteItem.type === "file" &&
+					currentLocalItem &&
+					currentLocalItem.lastModified > currentRemoteItem.lastModified &&
+					(await this.sync.localFileSystem.createFileHash({
+						relativePath: path,
+						algorithm: "md5"
+					})) !== this.sync.localFileHashes[currentLocalItem.path]
+				) {
+					deltas.push({
+						type: "uploadFile",
+						path
+					})
 
-				pathsAdded[path] = true
+					pathsAdded[path] = true
+				}
 			}
 		}
 
 		// Remote additions/changes
 
-		for (const path in currentRemoteTree.tree) {
-			if (pathsAdded[path]) {
-				continue
-			}
+		if (this.sync.mode === "twoWay" || this.sync.mode === "cloudBackup" || this.sync.mode === "cloudToLocal") {
+			for (const path in currentRemoteTree.tree) {
+				if (pathsAdded[path]) {
+					continue
+				}
 
-			const currentLocalItem = currentLocalTree.tree[path]
-			const currentRemoteItem = currentRemoteTree.tree[path]
+				const currentLocalItem = currentLocalTree.tree[path]
+				const currentRemoteItem = currentRemoteTree.tree[path]
 
-			// If the item does not exist in the current local tree, but does in the remote one, it should be download.
-			// We also check if it in fact has existed before (the UUID), if so, we skip it.
-			if (!currentLocalItem && currentRemoteItem && !previousRemoteTree.uuids[currentRemoteItem.uuid]) {
-				deltas.push({
-					type: currentRemoteItem.type === "directory" ? "createLocalDirectory" : "downloadFile",
-					path
-				})
+				// If the item does not exist in the current local tree, but does in the remote one, it should be downloaded.
+				// We also check if it in fact has existed before (the UUID), if so, we skip it (only in local -> cloud modes. It should always be downloaded in cloud -> local modes if it does not exist locally).
+				if (
+					!currentLocalItem &&
+					currentRemoteItem &&
+					(this.sync.mode !== "cloudBackup" && this.sync.mode !== "cloudToLocal"
+						? !previousRemoteTree.uuids[currentRemoteItem.uuid]
+						: true)
+				) {
+					deltas.push({
+						type: currentRemoteItem.type === "directory" ? "createLocalDirectory" : "downloadFile",
+						path
+					})
 
-				pathsAdded[path] = true
+					pathsAdded[path] = true
 
-				continue
-			}
+					continue
+				}
 
-			// If the item exists in both trees and the mod time changed, we download it.
-			if (
-				currentRemoteItem &&
-				currentRemoteItem.type === "file" &&
-				currentLocalItem &&
-				currentRemoteItem.lastModified > currentLocalItem.lastModified
-			) {
-				deltas.push({
-					type: "downloadFile",
-					path
-				})
+				// If the item exists in both trees and the mod time changed, we download it.
+				if (
+					currentRemoteItem &&
+					currentRemoteItem.type === "file" &&
+					currentLocalItem &&
+					currentRemoteItem.lastModified > currentLocalItem.lastModified
+				) {
+					deltas.push({
+						type: "downloadFile",
+						path
+					})
 
-				pathsAdded[path] = true
+					pathsAdded[path] = true
+				}
 			}
 		}
 

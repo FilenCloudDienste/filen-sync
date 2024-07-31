@@ -105,6 +105,7 @@ export class RemoteFileSystem {
 			skipCache,
 			includeRaw: true
 		})
+		const now = Date.now()
 
 		// Data did not change, use cache
 		if (dir.files.length === 0 && dir.folders.length === 0) {
@@ -392,7 +393,7 @@ export class RemoteFileSystem {
 
 		this.previousTreeRawResponse = rawEx.length === 2 ? rawEx[0] ?? "" : ""
 		this.getDirectoryTreeCache = {
-			timestamp: Date.now(),
+			timestamp: now,
 			tree,
 			uuids,
 			ignored

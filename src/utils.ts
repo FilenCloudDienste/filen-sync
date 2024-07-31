@@ -120,10 +120,8 @@ export const isValidPath = memoize((inputPath: string): boolean => {
 	switch (process.platform) {
 		case "win32": {
 			for (const part of parts) {
-				const trimmed = part.trim()
-
-				// Skip drive letter
-				if (trimmed.length === 0 || (trimmed.length === 2 && part.endsWith(":") && inputPath.startsWith(part))) {
+				// Skip drive letter and empty parts
+				if (part.trim().length === 0 || (part.length === 2 && part.endsWith(":") && inputPath.startsWith(part))) {
 					continue
 				}
 
@@ -135,9 +133,9 @@ export const isValidPath = memoize((inputPath: string): boolean => {
 					return false
 				}
 
-				const nameParts = part.split(".")
+				const parsedName = part.includes(".") ? pathModule.parse(part).name : part
 
-				if (nameParts[0] && nameParts[0].length > 0 && reservedNamesWindows.test(nameParts[0])) {
+				if (parsedName.length > 0 && reservedNamesWindows.test(parsedName)) {
 					return false
 				}
 			}

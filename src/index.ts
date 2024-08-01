@@ -83,6 +83,18 @@ export class SyncWorker {
 		}
 	}
 
+	public resetTaskErrors(uuid: string): void {
+		for (const pair of this.syncPairs) {
+			const sync = this.syncs[pair.uuid]
+
+			if (!sync || pair.uuid !== uuid) {
+				continue
+			}
+
+			sync.taskErrors = []
+		}
+	}
+
 	/**
 	 * Update sync pairs.
 	 *

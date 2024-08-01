@@ -2,6 +2,7 @@ import { type LocalTreeError, type LocalTreeIgnored } from "./lib/filesystems/lo
 import { type DoneTask, type TaskError } from "./lib/tasks"
 import { type RemoteTreeIgnored } from "./lib/filesystems/remote"
 import { type SerializedError } from "./utils"
+import { type Delta } from "./lib/deltas"
 
 export type SyncMode = "twoWay" | "localToCloud" | "localBackup" | "cloudToLocal" | "cloudBackup"
 
@@ -262,6 +263,12 @@ export type SyncMessage =
 					type: "localTreeErrors"
 					data: {
 						errors: IPCLocalTreeError[]
+					}
+			  }
+			| {
+					type: "deltas"
+					data: {
+						deltas: Delta[]
 					}
 			  }
 			| {

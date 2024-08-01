@@ -6,6 +6,7 @@ import { replacePathStartWithFromAndTo, pathIncludesDotFile } from "../utils"
 export type Delta = { path: string } & (
 	| {
 			type: "uploadFile"
+			size: number
 	  }
 	| {
 			type: "createRemoteDirectory"
@@ -27,6 +28,7 @@ export type Delta = { path: string } & (
 	  }
 	| {
 			type: "downloadFile"
+			size: number
 	  }
 	| {
 			type: "renameLocalFile"
@@ -287,7 +289,8 @@ export class Deltas {
 				) {
 					deltas.push({
 						type: currentLocalItem.type === "directory" ? "createRemoteDirectory" : "uploadFile",
-						path
+						path,
+						size: currentLocalItem.size
 					})
 
 					pathsAdded[path] = true
@@ -300,6 +303,7 @@ export class Deltas {
 					currentRemoteItem &&
 					currentRemoteItem.type === "file" &&
 					currentLocalItem &&
+					currentLocalItem.type === "file" &&
 					currentLocalItem.lastModified > currentRemoteItem.lastModified &&
 					(await this.sync.localFileSystem.createFileHash({
 						relativePath: path,
@@ -308,7 +312,8 @@ export class Deltas {
 				) {
 					deltas.push({
 						type: "uploadFile",
-						path
+						path,
+						size: currentLocalItem.size
 					})
 
 					pathsAdded[path] = true
@@ -338,7 +343,8 @@ export class Deltas {
 				) {
 					deltas.push({
 						type: currentRemoteItem.type === "directory" ? "createLocalDirectory" : "downloadFile",
-						path
+						path,
+						size: currentRemoteItem.size
 					})
 
 					pathsAdded[path] = true
@@ -355,7 +361,8 @@ export class Deltas {
 				) {
 					deltas.push({
 						type: "downloadFile",
-						path
+						path,
+						size: currentRemoteItem.size
 					})
 
 					pathsAdded[path] = true

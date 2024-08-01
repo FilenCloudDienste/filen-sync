@@ -315,6 +315,14 @@ export class Sync {
 				syncPair: this.syncPair
 			})
 
+			postMessageToMain({
+				type: "deltas",
+				syncPair: this.syncPair,
+				data: {
+					deltas
+				}
+			})
+
 			this.worker.logger.log("info", { deltas, localErrors: currentLocalTree.errors })
 
 			postMessageToMain({

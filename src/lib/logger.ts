@@ -17,7 +17,7 @@ export class Logger {
 		this.path = pathModule.join(dbPath, "logs")
 
 		this.debugStream = createStream("debug.log", {
-			size: "10M",
+			size: "32M",
 			interval: "5m",
 			compress: "gzip",
 			maxFiles: 3,
@@ -26,7 +26,7 @@ export class Logger {
 		})
 
 		this.infoStream = createStream("info.log", {
-			size: "10M",
+			size: "32M",
 			interval: "5m",
 			compress: "gzip",
 			maxFiles: 3,
@@ -35,7 +35,7 @@ export class Logger {
 		})
 
 		this.warnStream = createStream("warn.log", {
-			size: "10M",
+			size: "32M",
 			interval: "5m",
 			compress: "gzip",
 			maxFiles: 3,
@@ -44,7 +44,7 @@ export class Logger {
 		})
 
 		this.errorStream = createStream("error.log", {
-			size: "10M",
+			size: "32M",
 			interval: "5m",
 			compress: "gzip",
 			maxFiles: 3,

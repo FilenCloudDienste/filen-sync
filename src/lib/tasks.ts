@@ -93,6 +93,7 @@ export type DoneTask = { path: string } & (
 export class Tasks {
 	private readonly sync: Sync
 	private readonly transfersSemaphore = new Semaphore(32)
+	private readonly normalSemaphore = new Semaphore(128)
 
 	/**
 	 * Creates an instance of Tasks.
@@ -105,6 +106,22 @@ export class Tasks {
 		this.sync = sync
 	}
 
+	public async waitForPause(): Promise<void> {
+		if (!this.sync.paused) {
+			return
+		}
+
+		await new Promise<void>(resolve => {
+			const wait = setInterval(() => {
+				if (!this.sync.paused) {
+					clearInterval(wait)
+
+					resolve()
+				}
+			}, 100)
+		})
+	}
+
 	/**
 	 * Process a delta task.
 	 *
@@ -114,6 +131,8 @@ export class Tasks {
 	 * @returns {Promise<DoneTask | null>}
 	 */
 	private async processTask(delta: Delta): Promise<DoneTask | null> {
+		await this.waitForPause()
+
 		switch (delta.type) {
 			case "createLocalDirectory": {
 				try {
@@ -543,7 +562,7 @@ export class Tasks {
 		}
 
 		const process = async (delta: Delta): Promise<void> => {
-			const semaphore = delta.type === "uploadFile" || delta.type === "downloadFile" ? this.transfersSemaphore : null
+			const semaphore = delta.type === "uploadFile" || delta.type === "downloadFile" ? this.transfersSemaphore : this.normalSemaphore
 
 			await semaphore?.acquire()
 

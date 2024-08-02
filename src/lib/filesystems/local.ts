@@ -5,7 +5,8 @@ import {
 	isRelativePathIgnoredByDefault,
 	serializeError,
 	replacePathStartWithFromAndTo,
-	pathIncludesDotFile
+	pathIncludesDotFile,
+	normalizeUTime
 } from "../../utils"
 import pathModule from "path"
 import process from "process"
@@ -129,7 +130,6 @@ export class LocalFileSystem {
 			recursive: true,
 			encoding: "utf-8"
 		})
-		const now = Date.now()
 
 		await promiseAllSettledChunked(
 			dir.map(async entry => {
@@ -234,10 +234,10 @@ export class LocalFileSystem {
 						pathsAdded[lowercasePath] = true
 
 						const item: LocalItem = {
-							lastModified: Math.round(stats.mtimeMs), // Sometimes comes as a float, but we need an int
+							lastModified: normalizeUTime(stats.mtimeMs), // Sometimes comes as a float, but we need an int
 							type: stats.isDirectory() ? "directory" : "file",
 							path: entryPath,
-							creation: Math.round(stats.birthtimeMs), // Sometimes comes as a float, but we need an int
+							creation: normalizeUTime(stats.birthtimeMs), // Sometimes comes as a float, but we need an int
 							size: parseInt(stats.size as unknown as string), // Sometimes comes as a float, but we need an int
 							inode: parseInt(stats.ino as unknown as string) // Sometimes comes as a float, but we need an int
 						}
@@ -262,7 +262,7 @@ export class LocalFileSystem {
 		)
 
 		this.getDirectoryTreeCache = {
-			timestamp: now,
+			timestamp: Date.now(),
 			tree,
 			inodes,
 			errors,
@@ -410,8 +410,8 @@ export class LocalFileSystem {
 			const item: LocalItem = {
 				type: "directory",
 				inode: parseInt(stats.ino as unknown as string), // Sometimes comes as a float, but we need an int
-				lastModified: Math.round(stats.mtimeMs), // Sometimes comes as a float, but we need an int
-				creation: Math.round(stats.birthtimeMs), // Sometimes comes as a float, but we need an int
+				lastModified: normalizeUTime(stats.mtimeMs), // Sometimes comes as a float, but we need an int
+				creation: normalizeUTime(stats.birthtimeMs), // Sometimes comes as a float, but we need an int
 				size: 0,
 				path: relativePath
 			}

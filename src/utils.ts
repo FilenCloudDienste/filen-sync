@@ -272,3 +272,11 @@ export function replacePathStartWithFromAndTo(path: string, from: string, to: st
 export const pathIncludesDotFile = memoize((path: string): boolean => {
 	return path.split("/").some(part => part.length > 0 && part.trimStart().startsWith("."))
 })
+
+export function normalizeUTime(time: number): number {
+	if (Number.isInteger(time)) {
+		return time
+	}
+
+	return Math.round(time)
+}

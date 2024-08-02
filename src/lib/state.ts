@@ -5,7 +5,7 @@ import { serialize, deserialize } from "v8"
 import { type RemoteTree, type RemoteItem } from "./filesystems/remote"
 import { type LocalTree, type LocalItem } from "./filesystems/local"
 import { type DoneTask } from "./tasks"
-import { replacePathStartWithFromAndTo } from "../utils"
+import { replacePathStartWithFromAndTo, normalizeUTime } from "../utils"
 
 const STATE_VERSION = 1
 
@@ -215,11 +215,11 @@ export class State {
 
 				case "createRemoteDirectory": {
 					const localItem: LocalItem = {
-						lastModified: Math.round(task.stats.mtimeMs), // Sometimes comes as a float, but we need an int
+						lastModified: normalizeUTime(task.stats.mtimeMs), // Sometimes comes as a float, but we need an int
 						type: "directory",
 						path: task.path,
 						size: 0,
-						creation: Math.round(task.stats.birthtimeMs), // Sometimes comes as a float, but we need an int
+						creation: normalizeUTime(task.stats.birthtimeMs), // Sometimes comes as a float, but we need an int
 						inode: parseInt(task.stats.ino as unknown as string) // Sometimes comes as a float, but we need an int
 					}
 
@@ -233,11 +233,11 @@ export class State {
 
 				case "uploadFile": {
 					const localItem: LocalItem = {
-						lastModified: Math.round(task.stats.mtimeMs), // Sometimes comes as a float, but we need an int
+						lastModified: normalizeUTime(task.stats.mtimeMs), // Sometimes comes as a float, but we need an int
 						type: "file",
 						path: task.path,
 						size: parseInt(task.stats.size as unknown as string), // Sometimes comes as a float, but we need an int
-						creation: Math.round(task.stats.birthtimeMs), // Sometimes comes as a float, but we need an int
+						creation: normalizeUTime(task.stats.birthtimeMs), // Sometimes comes as a float, but we need an int
 						inode: parseInt(task.stats.ino as unknown as string) // Sometimes comes as a float, but we need an int
 					}
 
@@ -251,10 +251,10 @@ export class State {
 
 				case "createLocalDirectory": {
 					const localItem: LocalItem = {
-						lastModified: Math.round(task.stats.mtimeMs), // Sometimes comes as a float, but we need an int
+						lastModified: normalizeUTime(task.stats.mtimeMs), // Sometimes comes as a float, but we need an int
 						type: "directory",
 						path: task.path,
-						creation: Math.round(task.stats.birthtimeMs), // Sometimes comes as a float, but we need an int
+						creation: normalizeUTime(task.stats.birthtimeMs), // Sometimes comes as a float, but we need an int
 						size: parseInt(task.stats.size as unknown as string), // Sometimes comes as a float, but we need an int
 						inode: parseInt(task.stats.ino as unknown as string) // Sometimes comes as a float, but we need an int
 					}
@@ -269,10 +269,10 @@ export class State {
 
 				case "downloadFile": {
 					const item: LocalItem = {
-						lastModified: Math.round(task.stats.mtimeMs), // Sometimes comes as a float, but we need an int
+						lastModified: normalizeUTime(task.stats.mtimeMs), // Sometimes comes as a float, but we need an int
 						type: "file",
 						path: task.path,
-						creation: Math.round(task.stats.birthtimeMs), // Sometimes comes as a float, but we need an int
+						creation: normalizeUTime(task.stats.birthtimeMs), // Sometimes comes as a float, but we need an int
 						size: parseInt(task.stats.size as unknown as string), // Sometimes comes as a float, but we need an int
 						inode: parseInt(task.stats.ino as unknown as string) // Sometimes comes as a float, but we need an int
 					}

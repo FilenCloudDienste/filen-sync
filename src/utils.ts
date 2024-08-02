@@ -278,5 +278,5 @@ export function normalizeUTime(time: number): number {
 		return time
 	}
 
-	return process.platform === "win32" ? parseInt(time.toString()) : Math.round(time)
+	return Math.round(time)
 }

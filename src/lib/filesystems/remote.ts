@@ -909,18 +909,18 @@ export class RemoteFileSystem {
 				}
 			})
 
-			await fs.utimes(tmpLocalPath, new Date(), new Date(convertTimestampToMs(item.lastModified)))
 			await fs.move(tmpLocalPath, localPath, {
 				overwrite: true
 			})
-			await fs.utimes(localPath, new Date(), new Date(convertTimestampToMs(item.lastModified)))
+
+			await fs.utimes(localPath, new Date(convertTimestampToMs(item.lastModified)), new Date(convertTimestampToMs(item.lastModified)))
 
 			const stats = await fs.stat(localPath)
 			const localItem: LocalItem = {
 				type: "file",
 				inode: parseInt(stats.ino as unknown as string), // Sometimes comes as a float, but we need an int
-				lastModified: parseInt(stats.mtimeMs as unknown as string), // Sometimes comes as a float, but we need an int
-				creation: parseInt(stats.birthtimeMs as unknown as string), // Sometimes comes as a float, but we need an int
+				lastModified: Math.round(stats.mtimeMs), // Sometimes comes as a float, but we need an int
+				creation: Math.round(stats.birthtimeMs), // Sometimes comes as a float, but we need an int
 				size: parseInt(stats.size as unknown as string), // Sometimes comes as a float, but we need an int
 				path: relativePath
 			}

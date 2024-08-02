@@ -234,10 +234,10 @@ export class LocalFileSystem {
 						pathsAdded[lowercasePath] = true
 
 						const item: LocalItem = {
-							lastModified: parseInt(stats.mtimeMs as unknown as string), // Sometimes comes as a float, but we need an int
+							lastModified: Math.round(stats.mtimeMs), // Sometimes comes as a float, but we need an int
 							type: stats.isDirectory() ? "directory" : "file",
 							path: entryPath,
-							creation: parseInt(stats.birthtimeMs as unknown as string), // Sometimes comes as a float, but we need an int
+							creation: Math.round(stats.birthtimeMs), // Sometimes comes as a float, but we need an int
 							size: parseInt(stats.size as unknown as string), // Sometimes comes as a float, but we need an int
 							inode: parseInt(stats.ino as unknown as string) // Sometimes comes as a float, but we need an int
 						}
@@ -410,8 +410,8 @@ export class LocalFileSystem {
 			const item: LocalItem = {
 				type: "directory",
 				inode: parseInt(stats.ino as unknown as string), // Sometimes comes as a float, but we need an int
-				lastModified: parseInt(stats.mtimeMs as unknown as string), // Sometimes comes as a float, but we need an int
-				creation: parseInt(stats.birthtimeMs as unknown as string), // Sometimes comes as a float, but we need an int
+				lastModified: Math.round(stats.mtimeMs), // Sometimes comes as a float, but we need an int
+				creation: Math.round(stats.birthtimeMs), // Sometimes comes as a float, but we need an int
 				size: 0,
 				path: relativePath
 			}

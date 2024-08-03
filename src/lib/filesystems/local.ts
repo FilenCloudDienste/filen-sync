@@ -301,7 +301,15 @@ export class LocalFileSystem {
 				}
 			},
 			{
-				ignore: [".filen.trash.local"]
+				ignore: [".filen.trash.local"],
+				backend:
+					process.platform === "win32"
+						? "windows"
+						: process.platform === "darwin"
+						? "fs-events"
+						: process.platform === "linux"
+						? "inotify"
+						: undefined
 			}
 		)
 	}

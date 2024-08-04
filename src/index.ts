@@ -37,6 +37,10 @@ export class SyncWorker {
 		runOnce?: boolean
 		sdk?: FilenSDK
 	}) {
+		if (!sdk && !sdkConfig) {
+			throw new Error("Either pass a configured SDK instance OR a SDKConfig object.")
+		}
+
 		if (onMessage) {
 			process.onMessage = onMessage
 		}
@@ -92,6 +96,18 @@ export class SyncWorker {
 			}
 
 			sync.taskErrors = []
+		}
+	}
+
+	public disableLocalTrash(uuid: string): void {
+		for (const pair of this.syncPairs) {
+			const sync = this.syncs[pair.uuid]
+
+			if (!sync || pair.uuid !== uuid) {
+				continue
+			}
+
+			sync.localTrashDisabled = true
 		}
 	}
 

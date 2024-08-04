@@ -15,6 +15,7 @@ export type SyncPair = {
 	mode: SyncMode
 	excludeDotFiles: boolean
 	paused: boolean
+	localTrashDisabled: boolean
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

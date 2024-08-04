@@ -49,6 +49,7 @@ export class Sync {
 	public saveStateOnNoChanges = true
 	public readonly lock: Lock
 	public taskErrors: TaskError[] = []
+	public localTrashDisabled: boolean
 
 	/**
 	 * Creates an instance of Sync.
@@ -67,6 +68,7 @@ export class Sync {
 		this.excludeDotFiles = syncPair.excludeDotFiles
 		this.dbPath = worker.dbPath
 		this.sdk = worker.sdk
+		this.localTrashDisabled = syncPair.localTrashDisabled
 		this.localFileSystem = new LocalFileSystem(this)
 		this.remoteFileSystem = new RemoteFileSystem(this)
 		this.deltas = new Deltas(this)

@@ -447,7 +447,7 @@ export class LocalFileSystem {
 
 			const localPath = pathModule.join(this.sync.syncPair.localPath, relativePath)
 
-			if (!permanent) {
+			if (!permanent && !this.sync.localTrashDisabled) {
 				const localTrashPath = pathModule.join(this.sync.syncPair.localPath, LOCAL_TRASH_NAME)
 
 				await fs.ensureDir(localTrashPath)

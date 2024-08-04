@@ -99,7 +99,7 @@ export class SyncWorker {
 		}
 	}
 
-	public disableLocalTrash(uuid: string): void {
+	public toggleLocalTrash(uuid: string, enabled: boolean): void {
 		for (const pair of this.syncPairs) {
 			const sync = this.syncs[pair.uuid]
 
@@ -107,7 +107,7 @@ export class SyncWorker {
 				continue
 			}
 
-			sync.localTrashDisabled = true
+			sync.localTrashDisabled = enabled
 		}
 	}
 

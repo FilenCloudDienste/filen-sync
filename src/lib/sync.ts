@@ -145,6 +145,8 @@ export class Sync {
 
 	private async run(): Promise<void> {
 		if (this.removed) {
+			await this.cleanup()
+
 			return
 		}
 
@@ -206,12 +208,6 @@ export class Sync {
 			})
 
 			await this.smokeTest()
-
-			postMessageToMain({
-				type: "cycleWaitingForLocalDirectoryChangesStarted",
-				syncPair: this.syncPair
-			})
-
 			await this.localFileSystem.waitForLocalDirectoryChanges()
 
 			postMessageToMain({

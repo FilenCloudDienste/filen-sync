@@ -86,6 +86,7 @@ export class LocalFileSystem {
 	public readonly mutex = new Semaphore(1)
 	public readonly mkdirMutex = new Semaphore(1)
 	public readonly listSemaphore = new Semaphore(1024)
+	public readonly watcherMutex = new Semaphore(1)
 
 	/**
 	 * Creates an instance of LocalFileSystem.
@@ -289,29 +290,35 @@ export class LocalFileSystem {
 	 * @returns {Promise<void>}
 	 */
 	public async startDirectoryWatcher(): Promise<void> {
-		if (this.watcherInstance) {
-			return
-		}
+		await this.watcherMutex.acquire()
 
-		this.watcherInstance = await watcher.subscribe(
-			this.sync.syncPair.localPath,
-			(err, events) => {
-				if (!err && events && events.length > 0) {
-					this.lastDirectoryChangeTimestamp = Date.now()
-				}
-			},
-			{
-				ignore: [".filen.trash.local"],
-				backend:
-					process.platform === "win32"
-						? "windows"
-						: process.platform === "darwin"
-						? "fs-events"
-						: process.platform === "linux"
-						? "inotify"
-						: undefined
+		try {
+			if (this.watcherInstance) {
+				return
 			}
-		)
+
+			this.watcherInstance = await watcher.subscribe(
+				this.sync.syncPair.localPath,
+				(err, events) => {
+					if (!err && events && events.length > 0) {
+						this.lastDirectoryChangeTimestamp = Date.now()
+					}
+				},
+				{
+					ignore: [".filen.trash.local"],
+					backend:
+						process.platform === "win32"
+							? "windows"
+							: process.platform === "darwin"
+							? "fs-events"
+							: process.platform === "linux"
+							? "inotify"
+							: undefined
+				}
+			)
+		} finally {
+			this.watcherMutex.release()
+		}
 	}
 
 	/**
@@ -323,13 +330,19 @@ export class LocalFileSystem {
 	 * @returns {Promise<void>}
 	 */
 	public async stopDirectoryWatcher(): Promise<void> {
-		if (!this.watcherInstance) {
-			return
+		await this.watcherMutex.acquire()
+
+		try {
+			if (!this.watcherInstance) {
+				return
+			}
+
+			await this.watcherInstance.unsubscribe()
+
+			this.watcherInstance = null
+		} finally {
+			this.watcherMutex.release()
 		}
-
-		await this.watcherInstance.unsubscribe()
-
-		this.watcherInstance = null
 	}
 
 	/**
@@ -346,13 +359,16 @@ export class LocalFileSystem {
 	public async waitForLocalDirectoryChanges(): Promise<void> {
 		const waitTimeout = SYNC_INTERVAL * 2
 
+		if (Date.now() > this.lastDirectoryChangeTimestamp + waitTimeout) {
+			return
+		}
+
+		postMessageToMain({
+			type: "cycleWaitingForLocalDirectoryChangesStarted",
+			syncPair: this.sync.syncPair
+		})
+
 		await new Promise<void>(resolve => {
-			if (Date.now() > this.lastDirectoryChangeTimestamp + waitTimeout) {
-				resolve()
-
-				return
-			}
-
 			const wait = setInterval(() => {
 				if (Date.now() > this.lastDirectoryChangeTimestamp + waitTimeout) {
 					clearInterval(wait)

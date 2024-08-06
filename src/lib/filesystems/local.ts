@@ -188,7 +188,7 @@ export class LocalFileSystem {
 					}
 
 					try {
-						const stats = await fs.stat(itemPath)
+						const stats = await fs.lstat(itemPath)
 
 						if (stats.isBlockDevice() || stats.isCharacterDevice() || stats.isFIFO() || stats.isSocket()) {
 							ignored.push({

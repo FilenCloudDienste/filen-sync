@@ -43,6 +43,8 @@ export type RemoteTreeIgnored = {
 	reason: RemoteTreeIgnoredReason
 }
 
+export const DEVICE_ID_VERSION = 1
+
 export class RemoteFileSystem {
 	private readonly sync: Sync
 	public getDirectoryTreeCache: {
@@ -71,7 +73,7 @@ export class RemoteFileSystem {
 			return this.deviceIdCache
 		}
 
-		const deviceIdFile = pathModule.join(this.sync.dbPath, this.sync.syncPair.uuid, "deviceId")
+		const deviceIdFile = pathModule.join(this.sync.dbPath, "deviceId", `v${DEVICE_ID_VERSION}`, this.sync.syncPair.uuid)
 
 		await fs.ensureDir(pathModule.dirname(deviceIdFile))
 
@@ -914,9 +916,7 @@ export class RemoteFileSystem {
 				overwrite: true
 			})
 
-			const mtimeToSet = new Date(convertTimestampToMs(item.lastModified))
-
-			await fs.utimes(localPath, mtimeToSet, mtimeToSet)
+			await fs.utimes(localPath, new Date(), new Date(convertTimestampToMs(item.lastModified)))
 
 			const stats = await fs.stat(localPath)
 			const localItem: LocalItem = {

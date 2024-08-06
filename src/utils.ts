@@ -278,5 +278,19 @@ export function normalizeUTime(time: number): number {
 		return time
 	}
 
-	return Math.round(time)
+	return Math.floor(time)
+}
+
+/**
+ * We need to normalize lastModified times (milliseconds) for delta comparison.
+ * Some filesystems provide different floating point precisions, therefore sometimes borking the comparison.
+ * We normalize it to a 10th of a second.
+ * Downside is that we _can_ miss modifications if they happen in the 100ms window that we are rounding too.
+ *
+ * @export
+ * @param {number} time
+ * @returns {number}
+ */
+export function normalizeLastModifiedMsForComparison(time: number): number {
+	return Math.floor(time / 100)
 }

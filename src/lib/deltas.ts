@@ -1,7 +1,7 @@
 import type Sync from "./sync"
 import { type LocalTree, type LocalTreeError } from "./filesystems/local"
 import { type RemoteTree } from "./filesystems/remote"
-import { replacePathStartWithFromAndTo, pathIncludesDotFile } from "../utils"
+import { replacePathStartWithFromAndTo, pathIncludesDotFile, normalizeLastModifiedMsForComparison } from "../utils"
 
 export type Delta = { path: string } & (
 	| {
@@ -304,7 +304,8 @@ export class Deltas {
 					currentRemoteItem.type === "file" &&
 					currentLocalItem &&
 					currentLocalItem.type === "file" &&
-					currentLocalItem.lastModified > currentRemoteItem.lastModified &&
+					normalizeLastModifiedMsForComparison(currentLocalItem.lastModified) >
+						normalizeLastModifiedMsForComparison(currentRemoteItem.lastModified) &&
 					(await this.sync.localFileSystem.createFileHash({
 						relativePath: path,
 						algorithm: "md5"
@@ -357,7 +358,8 @@ export class Deltas {
 					currentRemoteItem &&
 					currentRemoteItem.type === "file" &&
 					currentLocalItem &&
-					currentRemoteItem.lastModified > currentLocalItem.lastModified
+					normalizeLastModifiedMsForComparison(currentRemoteItem.lastModified) >
+						normalizeLastModifiedMsForComparison(currentLocalItem.lastModified)
 				) {
 					deltas.push({
 						type: "downloadFile",

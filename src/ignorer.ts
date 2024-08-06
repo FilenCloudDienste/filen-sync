@@ -50,7 +50,7 @@ export class Ignorer {
 
 		await fs.ensureDir(pathModule.dirname(filePath))
 
-		if (typeof passedContent === "string" && passedContent.length > 0) {
+		if (typeof passedContent === "string") {
 			await fs.writeFile(filePath, passedContent, {
 				encoding: "utf-8"
 			})

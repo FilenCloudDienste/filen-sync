@@ -99,6 +99,18 @@ export class SyncWorker {
 		}
 	}
 
+	public resetLocalTreeErrors(uuid: string): void {
+		for (const pair of this.syncPairs) {
+			const sync = this.syncs[pair.uuid]
+
+			if (!sync || pair.uuid !== uuid) {
+				continue
+			}
+
+			sync.localTreeErrors = []
+		}
+	}
+
 	public toggleLocalTrash(uuid: string, enabled: boolean): void {
 		for (const pair of this.syncPairs) {
 			const sync = this.syncs[pair.uuid]

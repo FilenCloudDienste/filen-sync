@@ -188,7 +188,7 @@ export class LocalFileSystem {
 					}
 
 					try {
-						const stats = await fs.lstat(itemPath)
+						const stats = await fs.stat(itemPath)
 
 						if (stats.isBlockDevice() || stats.isCharacterDevice() || stats.isFIFO() || stats.isSocket()) {
 							ignored.push({
@@ -523,9 +523,7 @@ export class LocalFileSystem {
 			const fromLocalPathParentPath = pathModule.dirname(fromLocalPath)
 			const toLocalPathParentPath = pathModule.dirname(toLocalPath)
 
-			if (!(await fs.exists(toLocalPathParentPath))) {
-				throw new Error(`Could not rename ${fromLocalPath} to ${toLocalPath}: Parent directory missing.`)
-			}
+			await fs.ensureDir(toLocalPathParentPath)
 
 			if (fromLocalPathParentPath === toLocalPathParentPath) {
 				await fs.rename(fromLocalPath, toLocalPath)

@@ -1,6 +1,6 @@
 import FilenSDK, { type PauseSignal } from "@filen/sdk"
 import { type SyncPair, type SyncMode } from "../types"
-import { SYNC_INTERVAL } from "../constants"
+import { SYNC_INTERVAL, LOCAL_TRASH_NAME } from "../constants"
 import { LocalFileSystem, LocalTree, type LocalTreeError } from "./filesystems/local"
 import { RemoteFileSystem, RemoteTree } from "./filesystems/remote"
 import Deltas from "./deltas"
@@ -8,9 +8,11 @@ import Tasks, { type TaskError } from "./tasks"
 import State from "./state"
 import { postMessageToMain } from "./ipc"
 import Ignorer from "../ignorer"
-import { serializeError } from "../utils"
+import { serializeError, promiseAllChunked } from "../utils"
 import type SyncWorker from ".."
 import Lock from "./lock"
+import pathModule from "path"
+import fs from "fs-extra"
 
 /**
  * Sync
@@ -51,6 +53,7 @@ export class Sync {
 	public taskErrors: TaskError[] = []
 	public localTrashDisabled: boolean
 	public localTreeErrors: LocalTreeError[] = []
+	public cleaningLocalTrash: boolean = false
 
 	/**
 	 * Creates an instance of Sync.
@@ -77,6 +80,8 @@ export class Sync {
 		this.state = new State(this)
 		this.ignorer = new Ignorer(this, "ignorer")
 		this.lock = new Lock(this)
+
+		this.cleanupLocalTrash()
 	}
 
 	public async smokeTest(): Promise<void> {
@@ -117,6 +122,50 @@ export class Sync {
 
 			return await this.smokeTest()
 		}
+	}
+
+	public cleanupLocalTrash(): void {
+		setInterval(async () => {
+			if (this.cleaningLocalTrash) {
+				return
+			}
+
+			this.cleaningLocalTrash = true
+
+			try {
+				const localTrashPath = pathModule.join(this.syncPair.localPath, LOCAL_TRASH_NAME)
+
+				if (await fs.exists(localTrashPath)) {
+					const now = Date.now()
+					const dir = await fs.readdir(localTrashPath, {
+						recursive: false,
+						encoding: "utf-8"
+					})
+
+					await promiseAllChunked(
+						dir.map(async entry => {
+							const entryPath = pathModule.join(localTrashPath, entry)
+							const stat = await fs.stat(entryPath)
+
+							if (stat.atimeMs + 86400000 * 30 < now) {
+								await fs.rm(entryPath, {
+									force: true,
+									maxRetries: 60 * 10,
+									recursive: true,
+									retryDelay: 100
+								})
+							}
+						})
+					)
+				}
+
+				this.worker.logger.log("info", "Local trash cleaned", this.syncPair.localPath)
+			} catch (e) {
+				this.worker.logger.log("error", e, "sync.cleanupLocalTrash")
+			} finally {
+				this.cleaningLocalTrash = false
+			}
+		}, 300000)
 	}
 
 	public async initialize(): Promise<void> {

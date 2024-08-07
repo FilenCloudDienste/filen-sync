@@ -73,7 +73,7 @@ export class Logger {
 			return
 		}
 
-		const log = `[${level}] [${new Date()}] ${where ? `[${where}] ` : ""}${
+		const log = `${where ? `[${where}] ` : ""}${
 			typeof object !== "undefined"
 				? typeof object === "string" || typeof object === "number"
 					? object

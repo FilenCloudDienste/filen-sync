@@ -87,6 +87,12 @@ export class Sync {
 		const localSmokeTest = await this.localFileSystem.isPathWritable(this.syncPair.localPath)
 
 		if (!localSmokeTest) {
+			this.worker.logger.log(
+				"error",
+				"Local smoke test failed, path not existing or not readable or writable",
+				this.syncPair.localPath
+			)
+
 			postMessageToMain({
 				type: "cycleLocalSmokeTestFailed",
 				syncPair: this.syncPair
@@ -100,6 +106,8 @@ export class Sync {
 		const remoteSmokeTest = await this.remoteFileSystem.remoteDirPathExisting()
 
 		if (!remoteSmokeTest) {
+			this.worker.logger.log("error", "Remote smoke test failed, path does not exist or is in the trash", this.syncPair.remotePath)
+
 			postMessageToMain({
 				type: "cycleRemoteSmokeTestFailed",
 				syncPair: this.syncPair
@@ -123,6 +131,8 @@ export class Sync {
 
 			await Promise.all([this.localFileSystem.startDirectoryWatcher(), this.state.initialize(), this.ignorer.initialize()])
 
+			this.worker.logger.log("info", "Initialized", this.syncPair.localPath)
+
 			this.run()
 		} catch (e) {
 			this.worker.logger.log("error", e, "sync.initialize")
@@ -137,6 +147,8 @@ export class Sync {
 		await this.localFileSystem.stopDirectoryWatcher()
 
 		this.isInitialized = false
+
+		this.worker.logger.log("info", "Cleanup done", this.syncPair.localPath)
 
 		postMessageToMain({
 			type: "cycleExited",
@@ -186,6 +198,13 @@ export class Sync {
 					syncPair: this.syncPair
 				})
 
+				this.worker.logger.log("error", "Not continueing sync cycle, got taskErrors or localTreeErrors", this.syncPair.localPath)
+				this.worker.logger.log(
+					"error",
+					{ taskErrors: this.taskErrors, localTreeErrors: this.localTreeErrors },
+					this.syncPair.localPath
+				)
+
 				return
 			}
 
@@ -211,6 +230,8 @@ export class Sync {
 					syncPair: this.syncPair
 				})
 
+				this.worker.logger.log("info", "Sync paused", this.syncPair.localPath)
+
 				return
 			}
 
@@ -219,7 +240,12 @@ export class Sync {
 				syncPair: this.syncPair
 			})
 
+			this.worker.logger.log("info", "Smoke testing", this.syncPair.localPath)
+
 			await this.smokeTest()
+
+			this.worker.logger.log("info", "Waiting for local changes", this.syncPair.localPath)
+
 			await this.localFileSystem.waitForLocalDirectoryChanges()
 
 			postMessageToMain({
@@ -231,6 +257,8 @@ export class Sync {
 				type: "cycleGettingTreesStarted",
 				syncPair: this.syncPair
 			})
+
+			this.worker.logger.log("info", "Getting trees", this.syncPair.localPath)
 
 			// eslint-disable-next-line prefer-const
 			let [currentLocalTree, currentRemoteTree] = await Promise.all([
@@ -255,6 +283,8 @@ export class Sync {
 			})
 
 			this.localTreeErrors = currentLocalTree.errors
+
+			this.worker.logger.log("info", { localTreeErrors: this.localTreeErrors }, this.syncPair.localPath)
 
 			// Only continue if we did not encounter any local tree related errors
 			if (this.localTreeErrors.length === 0) {
@@ -337,7 +367,7 @@ export class Sync {
 					}
 				})
 
-				this.worker.logger.log("info", { deltas, localErrors: currentLocalTree.errors })
+				this.worker.logger.log("info", { deltas }, this.syncPair.localPath)
 
 				postMessageToMain({
 					type: "cycleProcessingTasksStarted",

@@ -1,104 +1,125 @@
 import pathModule from "path"
-import { type RotatingFileStream, createStream } from "rotating-file-stream"
-import { Semaphore } from "../semaphore"
+import pino, { type Logger as PinoLogger } from "pino"
+import os from "os"
+import fs from "fs-extra"
 
-export class Logger {
-	private readonly path: string
-	private readonly debugStream: RotatingFileStream
-	private readonly infoStream: RotatingFileStream
-	private readonly errorStream: RotatingFileStream
-	private readonly warnStream: RotatingFileStream
-	private readonly infoMutex = new Semaphore(1)
-	private readonly debugMutex = new Semaphore(1)
-	private readonly errorMutex = new Semaphore(1)
-	private readonly warnMutex = new Semaphore(1)
+export function filenLogsPath(): string {
+	let configPath = ""
 
-	public constructor(dbPath: string) {
-		this.path = pathModule.join(dbPath, "logs")
+	switch (process.platform) {
+		case "win32":
+			configPath = pathModule.resolve(process.env.APPDATA!)
 
-		this.debugStream = createStream("debug.log", {
-			size: "32M",
-			interval: "5m",
-			compress: "gzip",
-			maxFiles: 3,
-			encoding: "utf-8",
-			path: this.path
-		})
+			break
+		case "darwin":
+			configPath = pathModule.resolve(pathModule.join(os.homedir(), "Library/Application Support/"))
 
-		this.infoStream = createStream("info.log", {
-			size: "32M",
-			interval: "5m",
-			compress: "gzip",
-			maxFiles: 3,
-			encoding: "utf-8",
-			path: this.path
-		})
+			break
+		default:
+			configPath = process.env.XDG_CONFIG_HOME
+				? pathModule.resolve(process.env.XDG_CONFIG_HOME)
+				: pathModule.resolve(pathModule.join(os.homedir(), ".config/"))
 
-		this.warnStream = createStream("warn.log", {
-			size: "32M",
-			interval: "5m",
-			compress: "gzip",
-			maxFiles: 3,
-			encoding: "utf-8",
-			path: this.path
-		})
+			break
+	}
 
-		this.errorStream = createStream("error.log", {
-			size: "32M",
-			interval: "5m",
-			compress: "gzip",
-			maxFiles: 3,
-			encoding: "utf-8",
-			path: this.path
+	if (!configPath || configPath.length === 0) {
+		throw new Error("Could not find homedir path.")
+	}
+
+	configPath = pathModule.join(configPath, "@filen", "logs")
+
+	if (!fs.existsSync(configPath)) {
+		fs.mkdirSync(configPath, {
+			recursive: true
 		})
 	}
 
-	public log(level: "info" | "debug" | "warn" | "error", object: unknown, where?: string): void {
-		// eslint-disable-next-line no-extra-semi
-		;(async () => {
-			const mutex =
-				level === "info"
-					? this.infoMutex
-					: level === "debug"
-					? this.debugMutex
-					: level === "warn"
-					? this.warnMutex
-					: this.errorMutex
+	return configPath
+}
 
-			await mutex.acquire()
+export class Logger {
+	private logger: PinoLogger
+	private readonly dest: string
+	private isCleaning: boolean = false
+	private readonly maxSize = 1024 * 1024 * 10
+
+	public constructor() {
+		this.dest = pathModule.join(filenLogsPath(), "sync.log")
+
+		if (fs.existsSync(this.dest)) {
+			const stats = fs.statSync(this.dest)
+
+			if (stats.size >= this.maxSize) {
+				fs.rmSync(this.dest)
+			}
+		}
+
+		this.logger = pino(
+			pino.destination({
+				sync: false,
+				fsync: false,
+				dest: this.dest
+			})
+		)
+
+		this.clean()
+	}
+
+	public log(level: "info" | "debug" | "warn" | "error" | "trace" | "fatal", object?: unknown, where?: string): void {
+		if (this.isCleaning) {
+			return
+		}
+
+		const log = `[${level}] [${new Date()}] ${where ? `[${where}] ` : ""}${
+			typeof object !== "undefined"
+				? typeof object === "string" || typeof object === "number"
+					? object
+					: JSON.stringify(object)
+				: ""
+		}`
+
+		if (level === "info") {
+			this.logger.info(log)
+		} else if (level === "debug") {
+			this.logger.debug(log)
+		} else if (level === "error") {
+			this.logger.error(log)
+		} else if (level === "warn") {
+			this.logger.warn(log)
+		} else if (level === "trace") {
+			this.logger.trace(log)
+		} else if (level === "fatal") {
+			this.logger.fatal(log)
+		} else {
+			this.logger.info(log)
+		}
+	}
+
+	public clean(): void {
+		setInterval(async () => {
+			if (this.isCleaning) {
+				return
+			}
+
+			this.isCleaning = true
 
 			try {
-				const stream =
-					level === "info"
-						? this.infoStream
-						: level === "debug"
-						? this.debugStream
-						: level === "warn"
-						? this.warnStream
-						: this.errorStream
+				if ((await fs.exists(this.dest)) && (await fs.stat(this.dest)).size > this.maxSize) {
+					await fs.unlink(this.dest)
 
-				if (
-					!stream.writable ||
-					stream.destroyed ||
-					stream.errored ||
-					stream.closed ||
-					stream.writableEnded ||
-					stream.writableFinished
-				) {
-					return
+					this.logger = pino(
+						pino.destination({
+							sync: false,
+							fsync: false,
+							dest: this.dest
+						})
+					)
 				}
-
-				const log = `[${level}] [${new Date()}] ${where ? `[${where}] ` : ""}${JSON.stringify(object)}`
-
-				await new Promise<void>(resolve => {
-					stream.write(`${log}\n`, () => {
-						resolve()
-					})
-				})
 			} finally {
-				mutex.release()
+				this.isCleaning = false
 			}
-		})()
+		}, 3600000)
 	}
 }
 

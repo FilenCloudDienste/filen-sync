@@ -158,8 +158,6 @@ export class Sync {
 						})
 					)
 				}
-
-				this.worker.logger.log("info", "Local trash cleaned", this.syncPair.localPath)
 			} catch (e) {
 				this.worker.logger.log("error", e, "sync.cleanupLocalTrash")
 			} finally {
@@ -279,8 +277,6 @@ export class Sync {
 					syncPair: this.syncPair
 				})
 
-				this.worker.logger.log("info", "Sync paused", this.syncPair.localPath)
-
 				return
 			}
 
@@ -289,11 +285,7 @@ export class Sync {
 				syncPair: this.syncPair
 			})
 
-			this.worker.logger.log("info", "Smoke testing", this.syncPair.localPath)
-
 			await this.smokeTest()
-
-			this.worker.logger.log("info", "Waiting for local changes", this.syncPair.localPath)
 
 			await this.localFileSystem.waitForLocalDirectoryChanges()
 
@@ -306,8 +298,6 @@ export class Sync {
 				type: "cycleGettingTreesStarted",
 				syncPair: this.syncPair
 			})
-
-			this.worker.logger.log("info", "Getting trees", this.syncPair.localPath)
 
 			// eslint-disable-next-line prefer-const
 			let [currentLocalTree, currentRemoteTree] = await Promise.all([
@@ -332,8 +322,6 @@ export class Sync {
 			})
 
 			this.localTreeErrors = currentLocalTree.errors
-
-			this.worker.logger.log("info", { localTreeErrors: this.localTreeErrors }, this.syncPair.localPath)
 
 			// Only continue if we did not encounter any local tree related errors
 			if (this.localTreeErrors.length === 0) {
@@ -415,8 +403,6 @@ export class Sync {
 						deltas
 					}
 				})
-
-				this.worker.logger.log("info", { deltas }, this.syncPair.localPath)
 
 				postMessageToMain({
 					type: "cycleProcessingTasksStarted",

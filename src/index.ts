@@ -87,8 +87,6 @@ export class SyncWorker {
 
 			sync.ignorer.cache = {}
 
-			this.logger.log("info", `Reset sync cache for ${uuid}`)
-
 			break
 		}
 	}
@@ -102,8 +100,6 @@ export class SyncWorker {
 			}
 
 			sync.taskErrors = []
-
-			this.logger.log("info", `Reset task errors for ${uuid}`)
 
 			break
 		}
@@ -119,8 +115,6 @@ export class SyncWorker {
 
 			sync.localTreeErrors = []
 
-			this.logger.log("info", `Reset local tree errors for ${uuid}`)
-
 			break
 		}
 	}
@@ -134,8 +128,6 @@ export class SyncWorker {
 			}
 
 			sync.localTrashDisabled = enabled
-
-			this.logger.log("info", `Toggled local trash for ${uuid} to ${enabled}`)
 
 			break
 		}
@@ -167,8 +159,6 @@ export class SyncWorker {
 			}
 
 			await Promise.all(promises)
-
-			this.logger.log("info", `Updated sync pairs to ${JSON.stringify(pairs)}`)
 		} catch (e) {
 			this.logger.log("error", e, "index.updateSyncPairs")
 
@@ -199,8 +189,6 @@ export class SyncWorker {
 					}
 				}
 
-				this.logger.log("info", `Updated pause for ${uuid} to ${paused}`)
-
 				break
 			}
 		}
@@ -223,8 +211,6 @@ export class SyncWorker {
 					}
 				}
 
-				this.logger.log("info", `Updated removed for ${uuid} to ${removed}`)
-
 				break
 			}
 		}
@@ -234,8 +220,6 @@ export class SyncWorker {
 		for (const syncUUID in this.syncs) {
 			if (syncUUID === uuid) {
 				this.syncs[syncUUID]!.excludeDotFiles = excludeDotFiles
-
-				this.logger.log("info", `Updated excluding of dot files for ${uuid} to ${excludeDotFiles}`)
 
 				break
 			}
@@ -247,8 +231,6 @@ export class SyncWorker {
 			if (syncUUID === uuid) {
 				this.syncs[syncUUID]!.mode = mode
 
-				this.logger.log("info", `Updated sync mode for ${uuid} to ${mode}`)
-
 				break
 			}
 		}
@@ -258,8 +240,6 @@ export class SyncWorker {
 		for (const syncUUID in this.syncs) {
 			if (syncUUID === uuid) {
 				this.syncs[syncUUID]!.ignorer.update(content)
-
-				this.logger.log("info", `Updated ignorer content for ${uuid}`)
 
 				break
 			}

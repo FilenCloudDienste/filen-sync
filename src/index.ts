@@ -28,7 +28,8 @@ export class SyncWorker {
 		sdkConfig,
 		onMessage,
 		runOnce = false,
-		sdk
+		sdk,
+		disableLogging = false
 	}: {
 		syncPairs: SyncPair[]
 		dbPath: string
@@ -36,6 +37,7 @@ export class SyncWorker {
 		onMessage?: (message: SyncMessage) => void
 		runOnce?: boolean
 		sdk?: FilenSDK
+		disableLogging?: boolean
 	}) {
 		if (!sdk && !sdkConfig) {
 			throw new Error("Either pass a configured SDK instance OR a SDKConfig object.")
@@ -48,7 +50,7 @@ export class SyncWorker {
 		this.runOnce = runOnce
 		this.syncPairs = syncPairs
 		this.dbPath = dbPath
-		this.logger = new Logger()
+		this.logger = new Logger(disableLogging)
 		this.sdk = sdk
 			? sdk
 			: new FilenSDK({

@@ -43,9 +43,11 @@ export class Logger {
 	private readonly dest: string
 	private isCleaning: boolean = false
 	private readonly maxSize = 1024 * 1024 * 10
+	private readonly disableLogging: boolean
 
-	public constructor() {
+	public constructor(disableLogging: boolean = false) {
 		this.dest = pathModule.join(filenLogsPath(), "sync.log")
+		this.disableLogging = disableLogging
 
 		if (fs.existsSync(this.dest)) {
 			const stats = fs.statSync(this.dest)
@@ -67,7 +69,7 @@ export class Logger {
 	}
 
 	public log(level: "info" | "debug" | "warn" | "error" | "trace" | "fatal", object?: unknown, where?: string): void {
-		if (this.isCleaning) {
+		if (this.isCleaning || this.disableLogging) {
 			return
 		}
 
@@ -97,6 +99,10 @@ export class Logger {
 	}
 
 	public clean(): void {
+		if (this.disableLogging) {
+			return
+		}
+
 		setInterval(async () => {
 			if (this.isCleaning) {
 				return

@@ -13,6 +13,7 @@ import type SyncWorker from ".."
 import Lock from "./lock"
 import pathModule from "path"
 import fs from "fs-extra"
+import { v4 as uuidv4 } from "uuid"
 
 /**
  * Sync
@@ -160,6 +161,7 @@ export class Sync {
 				}
 			} catch (e) {
 				this.worker.logger.log("error", e, "sync.cleanupLocalTrash")
+				this.worker.logger.log("error", e)
 			} finally {
 				this.cleaningLocalTrash = false
 			}
@@ -183,6 +185,7 @@ export class Sync {
 			this.run()
 		} catch (e) {
 			this.worker.logger.log("error", e, "sync.initialize")
+			this.worker.logger.log("error", e)
 
 			this.isInitialized = false
 
@@ -285,56 +288,227 @@ export class Sync {
 				syncPair: this.syncPair
 			})
 
-			await this.smokeTest()
-
-			await this.localFileSystem.waitForLocalDirectoryChanges()
-
-			postMessageToMain({
-				type: "cycleWaitingForLocalDirectoryChangesDone",
-				syncPair: this.syncPair
-			})
-
-			postMessageToMain({
-				type: "cycleGettingTreesStarted",
-				syncPair: this.syncPair
-			})
-
-			// eslint-disable-next-line prefer-const
-			let [currentLocalTree, currentRemoteTree] = await Promise.all([
-				this.localFileSystem.getDirectoryTree(),
-				this.remoteFileSystem.getDirectoryTree()
-			])
-
-			postMessageToMain({
-				type: "cycleGettingTreesDone",
-				syncPair: this.syncPair
-			})
-
-			postMessageToMain({
-				type: "localTreeErrors",
-				syncPair: this.syncPair,
-				data: {
-					errors: currentLocalTree.errors.map(e => ({
-						...e,
-						error: serializeError(e.error)
-					}))
-				}
-			})
-
-			this.localTreeErrors = currentLocalTree.errors
-
-			// Only continue if we did not encounter any local tree related errors
-			if (this.localTreeErrors.length === 0) {
+			const acquireLockMessageTimeout = setTimeout(() => {
 				postMessageToMain({
-					type: "localTreeIgnored",
+					type: "cycleAcquiringLockStarted",
+					syncPair: this.syncPair
+				})
+			}, 3000)
+
+			await this.lock.acquire()
+
+			clearTimeout(acquireLockMessageTimeout)
+
+			postMessageToMain({
+				type: "cycleAcquiringLockDone",
+				syncPair: this.syncPair
+			})
+
+			try {
+				await this.smokeTest()
+				await this.localFileSystem.waitForLocalDirectoryChanges()
+
+				postMessageToMain({
+					type: "cycleWaitingForLocalDirectoryChangesDone",
+					syncPair: this.syncPair
+				})
+
+				postMessageToMain({
+					type: "cycleGettingTreesStarted",
+					syncPair: this.syncPair
+				})
+
+				// eslint-disable-next-line prefer-const
+				let [currentLocalTree, currentRemoteTree] = await Promise.all([
+					this.localFileSystem.getDirectoryTree(),
+					this.remoteFileSystem.getDirectoryTree()
+				])
+
+				postMessageToMain({
+					type: "cycleGettingTreesDone",
+					syncPair: this.syncPair
+				})
+
+				postMessageToMain({
+					type: "localTreeErrors",
 					syncPair: this.syncPair,
 					data: {
-						ignored: currentLocalTree.ignored
+						errors: currentLocalTree.errors.map(e => ({
+							...e,
+							error: serializeError(e.error)
+						}))
 					}
 				})
 
-				if (!currentLocalTree.changed && !currentRemoteTree.changed) {
+				this.localTreeErrors = currentLocalTree.errors
+
+				// Only continue if we did not encounter any local tree related errors
+				if (this.localTreeErrors.length === 0) {
+					postMessageToMain({
+						type: "localTreeIgnored",
+						syncPair: this.syncPair,
+						data: {
+							ignored: currentLocalTree.ignored
+						}
+					})
+
+					if (!currentLocalTree.changed && !currentRemoteTree.changed) {
+						if (this.taskErrors.length === 0) {
+							postMessageToMain({
+								type: "cycleSavingStateStarted",
+								syncPair: this.syncPair
+							})
+
+							this.previousLocalTree = currentLocalTree.result
+							this.previousRemoteTree = currentRemoteTree.result
+
+							// We only save the state once if there are no changes.
+							// This helps reducing the cpu and disk footprint when there are continuously no changes.
+							if (this.saveStateOnNoChanges) {
+								this.saveStateOnNoChanges = false
+
+								await this.state.save()
+							}
+
+							postMessageToMain({
+								type: "cycleSavingStateDone",
+								syncPair: this.syncPair
+							})
+						}
+
+						postMessageToMain({
+							type: "cycleSuccess",
+							syncPair: this.syncPair
+						})
+
+						postMessageToMain({
+							type: "cycleNoChanges",
+							syncPair: this.syncPair
+						})
+
+						return
+					}
+
+					postMessageToMain({
+						type: "remoteTreeIgnored",
+						syncPair: this.syncPair,
+						data: {
+							ignored: currentRemoteTree.ignored
+						}
+					})
+
+					postMessageToMain({
+						type: "cycleProcessingDeltasStarted",
+						syncPair: this.syncPair
+					})
+
+					const deltas = await this.deltas.process({
+						currentLocalTree: currentLocalTree.result,
+						currentRemoteTree: currentRemoteTree.result,
+						previousLocalTree: this.previousLocalTree,
+						previousRemoteTree: this.previousRemoteTree,
+						currentLocalTreeErrors: currentLocalTree.errors
+					})
+
+					postMessageToMain({
+						type: "cycleProcessingDeltasDone",
+						syncPair: this.syncPair
+					})
+
+					postMessageToMain({
+						type: "deltas",
+						syncPair: this.syncPair,
+						data: {
+							deltas
+						}
+					})
+
+					postMessageToMain({
+						type: "cycleProcessingTasksStarted",
+						syncPair: this.syncPair
+					})
+
+					const { doneTasks, errors } = await this.tasks.process({ deltas })
+
+					postMessageToMain({
+						type: "cycleProcessingTasksDone",
+						syncPair: this.syncPair
+					})
+
+					postMessageToMain({
+						type: "taskErrors",
+						syncPair: this.syncPair,
+						data: {
+							errors: errors.map(e => ({
+								...e,
+								error: serializeError(e.error)
+							}))
+						}
+					})
+
+					this.taskErrors = errors
+
 					if (this.taskErrors.length === 0) {
+						if (doneTasks.length > 0) {
+							postMessageToMain({
+								type: "cycleApplyingStateStarted",
+								syncPair: this.syncPair
+							})
+
+							const didLocalChanges = doneTasks.some(
+								task =>
+									task.type === "createLocalDirectory" ||
+									task.type === "deleteLocalDirectory" ||
+									task.type === "deleteLocalFile" ||
+									task.type === "renameLocalDirectory" ||
+									task.type === "renameLocalFile"
+							)
+							const didRemoteChanges = doneTasks.some(
+								task =>
+									task.type === "renameRemoteDirectory" ||
+									task.type === "renameRemoteFile" ||
+									task.type === "createRemoteDirectory" ||
+									task.type === "deleteRemoteDirectory" ||
+									task.type === "deleteRemoteFile"
+							)
+
+							// Here we reset the internal local/remote tree changed times so we rescan after we did changes for consistency
+							if (didLocalChanges) {
+								this.localFileSystem.lastDirectoryChangeTimestamp = Date.now() - SYNC_INTERVAL * 2
+								this.localFileSystem.getDirectoryTreeCache = {
+									timestamp: 0,
+									tree: {},
+									inodes: {},
+									ignored: [],
+									errors: []
+								}
+							}
+
+							if (didRemoteChanges) {
+								this.remoteFileSystem.previousTreeRawResponse = ""
+								this.remoteFileSystem.getDirectoryTreeCache = {
+									timestamp: 0,
+									tree: {},
+									uuids: {},
+									ignored: []
+								}
+							}
+
+							const applied = this.state.applyDoneTasksToState({
+								doneTasks,
+								currentLocalTree: currentLocalTree.result,
+								currentRemoteTree: currentRemoteTree.result
+							})
+
+							currentLocalTree.result = applied.currentLocalTree
+							currentRemoteTree.result = applied.currentRemoteTree
+
+							postMessageToMain({
+								type: "cycleApplyingStateDone",
+								syncPair: this.syncPair
+							})
+						}
+
 						postMessageToMain({
 							type: "cycleSavingStateStarted",
 							syncPair: this.syncPair
@@ -342,14 +516,9 @@ export class Sync {
 
 						this.previousLocalTree = currentLocalTree.result
 						this.previousRemoteTree = currentRemoteTree.result
+						this.saveStateOnNoChanges = true
 
-						// We only save the state once if there are no changes.
-						// This helps reducing the cpu and disk footprint when there are continuously no changes.
-						if (this.saveStateOnNoChanges) {
-							this.saveStateOnNoChanges = false
-
-							await this.state.save()
-						}
+						await this.state.save()
 
 						postMessageToMain({
 							type: "cycleSavingStateDone",
@@ -361,127 +530,31 @@ export class Sync {
 						type: "cycleSuccess",
 						syncPair: this.syncPair
 					})
-
-					postMessageToMain({
-						type: "cycleNoChanges",
-						syncPair: this.syncPair
-					})
-
-					return
 				}
-
+			} finally {
 				postMessageToMain({
-					type: "remoteTreeIgnored",
-					syncPair: this.syncPair,
-					data: {
-						ignored: currentRemoteTree.ignored
-					}
-				})
-
-				postMessageToMain({
-					type: "cycleProcessingDeltasStarted",
+					type: "cycleReleasingLockStarted",
 					syncPair: this.syncPair
 				})
 
-				const deltas = await this.deltas.process({
-					currentLocalTree: currentLocalTree.result,
-					currentRemoteTree: currentRemoteTree.result,
-					previousLocalTree: this.previousLocalTree,
-					previousRemoteTree: this.previousRemoteTree,
-					currentLocalTreeErrors: currentLocalTree.errors
-				})
+				await this.lock.release()
 
 				postMessageToMain({
-					type: "cycleProcessingDeltasDone",
-					syncPair: this.syncPair
-				})
-
-				postMessageToMain({
-					type: "deltas",
-					syncPair: this.syncPair,
-					data: {
-						deltas
-					}
-				})
-
-				postMessageToMain({
-					type: "cycleProcessingTasksStarted",
-					syncPair: this.syncPair
-				})
-
-				const { doneTasks, errors } = await this.tasks.process({ deltas })
-
-				postMessageToMain({
-					type: "cycleProcessingTasksDone",
-					syncPair: this.syncPair
-				})
-
-				postMessageToMain({
-					type: "taskErrors",
-					syncPair: this.syncPair,
-					data: {
-						errors: errors.map(e => ({
-							...e,
-							error: serializeError(e.error)
-						}))
-					}
-				})
-
-				this.taskErrors = errors
-
-				if (this.taskErrors.length === 0) {
-					if (doneTasks.length > 0) {
-						postMessageToMain({
-							type: "cycleApplyingStateStarted",
-							syncPair: this.syncPair
-						})
-
-						const applied = this.state.applyDoneTasksToState({
-							doneTasks,
-							currentLocalTree: currentLocalTree.result,
-							currentRemoteTree: currentRemoteTree.result
-						})
-
-						currentLocalTree.result = applied.currentLocalTree
-						currentRemoteTree.result = applied.currentRemoteTree
-
-						postMessageToMain({
-							type: "cycleApplyingStateDone",
-							syncPair: this.syncPair
-						})
-					}
-
-					postMessageToMain({
-						type: "cycleSavingStateStarted",
-						syncPair: this.syncPair
-					})
-
-					this.previousLocalTree = currentLocalTree.result
-					this.previousRemoteTree = currentRemoteTree.result
-					this.saveStateOnNoChanges = true
-
-					await this.state.save()
-
-					postMessageToMain({
-						type: "cycleSavingStateDone",
-						syncPair: this.syncPair
-					})
-				}
-
-				postMessageToMain({
-					type: "cycleSuccess",
+					type: "cycleReleasingLockDone",
 					syncPair: this.syncPair
 				})
 			}
 		} catch (e) {
 			this.worker.logger.log("error", e, "sync.run")
+			this.worker.logger.log("error", e)
 
 			if (e instanceof Error) {
 				postMessageToMain({
 					type: "cycleError",
 					syncPair: this.syncPair,
 					data: {
-						error: serializeError(e)
+						error: serializeError(e),
+						uuid: uuidv4()
 					}
 				})
 			}

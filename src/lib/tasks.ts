@@ -6,24 +6,29 @@ import fs from "fs-extra"
 import { postMessageToMain } from "./ipc"
 import pathModule from "path"
 import { Semaphore } from "../semaphore"
+import { Prettify } from "../types"
+import { v4 as uuidv4 } from "uuid"
 
-export type TaskError = {
-	path: string
-	error: Error
-	type:
-		| "uploadFile"
-		| "createRemoteDirectory"
-		| "createLocalDirectory"
-		| "deleteLocalFile"
-		| "deleteRemoteFile"
-		| "deleteLocalDirectory"
-		| "deleteRemoteDirectory"
-		| "downloadFile"
-		| "renameLocalFile"
-		| "renameRemoteFile"
-		| "renameRemoteDirectory"
-		| "renameLocalDirectory"
-}
+export type TaskError = Prettify<
+	{ path: string; error: Error; uuid: string } & (
+		| {
+				type:
+					| "uploadFile"
+					| "createRemoteDirectory"
+					| "createLocalDirectory"
+					| "deleteLocalFile"
+					| "deleteRemoteFile"
+					| "deleteLocalDirectory"
+					| "deleteRemoteDirectory"
+					| "downloadFile"
+		  }
+		| {
+				type: "renameLocalFile" | "renameRemoteFile" | "renameRemoteDirectory" | "renameLocalDirectory"
+				from: string
+				to: string
+		  }
+	)
+>
 
 export type DoneTask = { path: string } & (
 	| {
@@ -107,13 +112,13 @@ export class Tasks {
 	}
 
 	public async waitForPause(): Promise<void> {
-		if (!this.sync.paused) {
+		if (!this.sync.paused || this.sync.removed) {
 			return
 		}
 
 		await new Promise<void>(resolve => {
 			const wait = setInterval(() => {
-				if (!this.sync.paused) {
+				if (!this.sync.paused || this.sync.removed) {
 					clearInterval(wait)
 
 					resolve()
@@ -132,6 +137,10 @@ export class Tasks {
 	 */
 	private async processTask(delta: Delta): Promise<DoneTask | null> {
 		await this.waitForPause()
+
+		if (this.sync.removed) {
+			return null
+		}
 
 		switch (delta.type) {
 			case "createLocalDirectory": {
@@ -169,7 +178,8 @@ export class Tasks {
 								type: "error",
 								relativePath: delta.path,
 								localPath: pathModule.join(this.sync.syncPair.localPath, delta.path),
-								error: serializeError(e)
+								error: serializeError(e),
+								uuid: uuidv4()
 							}
 						})
 					}
@@ -216,7 +226,8 @@ export class Tasks {
 								type: "error",
 								relativePath: delta.path,
 								localPath: pathModule.join(this.sync.syncPair.localPath, delta.path),
-								error: serializeError(e)
+								error: serializeError(e),
+								uuid: uuidv4()
 							}
 						})
 					}
@@ -257,7 +268,8 @@ export class Tasks {
 								type: "error",
 								relativePath: delta.path,
 								localPath: pathModule.join(this.sync.syncPair.localPath, delta.path),
-								error: serializeError(e)
+								error: serializeError(e),
+								uuid: uuidv4()
 							}
 						})
 					}
@@ -307,7 +319,8 @@ export class Tasks {
 								type: "error",
 								relativePath: delta.path,
 								localPath: pathModule.join(this.sync.syncPair.localPath, delta.path),
-								error: serializeError(e)
+								error: serializeError(e),
+								uuid: uuidv4()
 							}
 						})
 					}
@@ -349,7 +362,8 @@ export class Tasks {
 								type: "error",
 								relativePath: delta.path,
 								localPath: pathModule.join(this.sync.syncPair.localPath, delta.path),
-								error: serializeError(e)
+								error: serializeError(e),
+								uuid: uuidv4()
 							}
 						})
 					}
@@ -388,7 +402,8 @@ export class Tasks {
 								type: "error",
 								relativePath: delta.path,
 								localPath: pathModule.join(this.sync.syncPair.localPath, delta.path),
-								error: serializeError(e)
+								error: serializeError(e),
+								uuid: uuidv4()
 							}
 						})
 					}
@@ -437,7 +452,8 @@ export class Tasks {
 								type: "error",
 								relativePath: delta.path,
 								localPath: pathModule.join(this.sync.syncPair.localPath, delta.path),
-								error: serializeError(e)
+								error: serializeError(e),
+								uuid: uuidv4()
 							}
 						})
 					}
@@ -489,7 +505,8 @@ export class Tasks {
 								type: "error",
 								relativePath: delta.path,
 								localPath: pathModule.join(this.sync.syncPair.localPath, delta.path),
-								error: serializeError(e)
+								error: serializeError(e),
+								uuid: uuidv4()
 							}
 						})
 					}
@@ -576,13 +593,31 @@ export class Tasks {
 				executed.push(doneTask)
 			} catch (e) {
 				this.sync.worker.logger.log("error", e, "tasks.process")
+				this.sync.worker.logger.log("error", e)
 
 				if (e instanceof Error) {
-					errors.push({
-						path: delta.path,
-						type: delta.type,
-						error: e
-					})
+					if (
+						delta.type === "renameLocalDirectory" ||
+						delta.type === "renameLocalFile" ||
+						delta.type === "renameRemoteDirectory" ||
+						delta.type === "renameRemoteFile"
+					) {
+						errors.push({
+							path: delta.path,
+							type: delta.type,
+							error: e,
+							from: delta.from,
+							to: delta.to,
+							uuid: uuidv4()
+						})
+					} else {
+						errors.push({
+							path: delta.path,
+							type: delta.type,
+							error: e,
+							uuid: uuidv4()
+						})
+					}
 				}
 			} finally {
 				semaphore?.release()

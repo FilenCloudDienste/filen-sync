@@ -106,6 +106,10 @@ export class Deltas {
 		previousRemoteTree: RemoteTree
 		currentLocalTreeErrors: LocalTreeError[]
 	}): Promise<Delta[]> {
+		if (this.sync.removed) {
+			return []
+		}
+
 		let deltas: Delta[] = []
 		const pathsAdded: Record<string, boolean> = {}
 		const erroredLocalPaths: Record<string, boolean> = {}
@@ -145,7 +149,14 @@ export class Deltas {
 				}
 
 				// Path from current item changed, it was either renamed or moved (same type)
-				if (currentItem.path !== previousItem.path && currentItem.type === previousItem.type) {
+				if (
+					currentItem.path !== previousItem.path &&
+					currentItem.type === previousItem.type &&
+					// Does an item with the same path and type already exist in the current remote tree (probably moved by something else prior)?
+					!(currentRemoteTree.tree[currentItem.path] && currentRemoteTree.tree[currentItem.path]!.type === currentItem.type) &&
+					// Because only comparing strings can be weird sometimes
+					Buffer.from(currentItem.path, "utf-8").toString("hex") !== Buffer.from(previousItem.path, "utf-8").toString("hex")
+				) {
 					const delta: Delta = {
 						type: currentItem.type === "directory" ? "renameRemoteDirectory" : "renameRemoteFile",
 						path: currentItem.path,
@@ -177,7 +188,14 @@ export class Deltas {
 				}
 
 				// Path from current item changed, it was either renamed or moved (same type)
-				if (currentItem.path !== previousItem.path && currentItem.type === previousItem.type) {
+				if (
+					currentItem.path !== previousItem.path &&
+					currentItem.type === previousItem.type &&
+					// Does an item with the same path and type already exist in the current local tree (probably moved by something else prior)?
+					!(currentLocalTree.tree[currentItem.path] && currentLocalTree.tree[currentItem.path]!.type === currentItem.type) &&
+					// Because only comparing strings can be weird sometimes
+					Buffer.from(currentItem.path, "utf-8").toString("hex") !== Buffer.from(previousItem.path, "utf-8").toString("hex")
+				) {
 					const delta: Delta = {
 						type: currentItem.type === "directory" ? "renameLocalDirectory" : "renameLocalFile",
 						path: currentItem.path,
@@ -285,7 +303,9 @@ export class Deltas {
 					currentLocalItem &&
 					(this.sync.mode !== "localBackup" && this.sync.mode !== "localToCloud"
 						? !previousLocalTree.inodes[currentLocalItem.inode]
-						: true)
+						: true) &&
+					// Does an item with the same path and type already exist in the current remote tree (probably uploaded by something else prior)?
+					!(currentRemoteTree.tree[path] && currentRemoteTree.tree[path]!.type === currentLocalItem.type)
 				) {
 					deltas.push({
 						type: currentLocalItem.type === "directory" ? "createRemoteDirectory" : "uploadFile",
@@ -340,7 +360,9 @@ export class Deltas {
 					currentRemoteItem &&
 					(this.sync.mode !== "cloudBackup" && this.sync.mode !== "cloudToLocal"
 						? !previousRemoteTree.uuids[currentRemoteItem.uuid]
-						: true)
+						: true) &&
+					// Does an item with the same path and type already exist in the current local tree (probably downloaded by something else prior)?
+					!(currentLocalTree.tree[path] && currentLocalTree.tree[path]!.type === currentRemoteItem.type)
 				) {
 					deltas.push({
 						type: currentRemoteItem.type === "directory" ? "createLocalDirectory" : "downloadFile",
@@ -353,13 +375,17 @@ export class Deltas {
 					continue
 				}
 
+				const previousRemoteItem = previousRemoteTree.tree[path]
+
 				// If the item exists in both trees and the mod time changed, we download it.
 				if (
 					currentRemoteItem &&
 					currentRemoteItem.type === "file" &&
 					currentLocalItem &&
+					previousRemoteItem &&
 					normalizeLastModifiedMsForComparison(currentRemoteItem.lastModified) >
-						normalizeLastModifiedMsForComparison(currentLocalItem.lastModified)
+						normalizeLastModifiedMsForComparison(currentLocalItem.lastModified) &&
+					currentRemoteItem.uuid !== previousRemoteItem.uuid
 				) {
 					deltas.push({
 						type: "downloadFile",

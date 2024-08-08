@@ -5,10 +5,10 @@ import { Semaphore } from "../semaphore"
 export class Lock {
 	private readonly sync: Sync
 	private readonly resource = "filen-sync"
-	private readonly lockUUID = uuidv4()
-	private lockAcquired = false
-	private readonly mutex = new Semaphore(1)
+	private lockUUID: string | null = null
 	private lockRefreshInterval: ReturnType<typeof setInterval> | undefined = undefined
+	private lockAcquired: boolean = false
+	private mutex = new Semaphore(1)
 
 	public constructor(sync: Sync) {
 		this.sync = sync
@@ -17,9 +17,13 @@ export class Lock {
 	public async acquire(): Promise<void> {
 		await this.mutex.acquire()
 
-		clearInterval(this.lockRefreshInterval)
-
 		try {
+			clearInterval(this.lockRefreshInterval)
+
+			if (!this.lockUUID) {
+				this.lockUUID = uuidv4()
+			}
+
 			await this.sync.sdk.user().acquireResourceLock({
 				resource: this.resource,
 				lockUUID: this.lockUUID,
@@ -27,28 +31,24 @@ export class Lock {
 				tryTimeout: 1000
 			})
 
+			this.lockAcquired = true
+
 			this.lockRefreshInterval = setInterval(async () => {
+				if (!this.lockAcquired || !this.lockUUID) {
+					return
+				}
+
 				await this.mutex.acquire()
 
 				try {
-					if (!this.lockAcquired) {
-						return
-					}
-
 					await this.sync.sdk.user().refreshResourceLock({
 						resource: this.resource,
 						lockUUID: this.lockUUID
 					})
-
-					this.lockAcquired = true
-				} catch {
-					await this.release().catch(() => {})
 				} finally {
 					this.mutex.release()
 				}
 			}, 5000)
-
-			this.lockAcquired = true
 		} finally {
 			this.mutex.release()
 		}
@@ -57,21 +57,23 @@ export class Lock {
 	public async release(): Promise<void> {
 		await this.mutex.acquire()
 
-		clearInterval(this.lockRefreshInterval)
-
 		try {
-			if (!this.lockAcquired) {
+			if (!this.lockAcquired || !this.lockUUID) {
 				return
 			}
 
-			await this.sync.sdk.user().releaseResourceLock({
-				resource: this.resource,
-				lockUUID: this.lockUUID
-			})
+			clearInterval(this.lockRefreshInterval)
+
+			await this.sync.sdk
+				.user()
+				.releaseResourceLock({
+					resource: this.resource,
+					lockUUID: this.lockUUID
+				})
+				.catch(() => {})
 
 			this.lockAcquired = false
-		} catch {
-			this.lockAcquired = false
+			this.lockUUID = null
 		} finally {
 			this.mutex.release()
 		}

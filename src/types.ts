@@ -96,6 +96,7 @@ export type TransferData =
 			localPath: string
 			error: SerializedError
 			size: number
+			uuid: string
 	  }
 	| {
 			of: "createLocalDirectory"
@@ -103,6 +104,7 @@ export type TransferData =
 			relativePath: string
 			localPath: string
 			error: SerializedError
+			uuid: string
 	  }
 	| {
 			of: "createLocalDirectory"
@@ -116,6 +118,7 @@ export type TransferData =
 			relativePath: string
 			localPath: string
 			error: SerializedError
+			uuid: string
 	  }
 	| {
 			of: "createRemoteDirectory"
@@ -129,6 +132,7 @@ export type TransferData =
 			relativePath: string
 			localPath: string
 			error: SerializedError
+			uuid: string
 	  }
 	| {
 			of: "deleteLocalFile"
@@ -142,6 +146,7 @@ export type TransferData =
 			relativePath: string
 			localPath: string
 			error: SerializedError
+			uuid: string
 	  }
 	| {
 			of: "deleteLocalDirectory"
@@ -155,6 +160,7 @@ export type TransferData =
 			relativePath: string
 			localPath: string
 			error: SerializedError
+			uuid: string
 	  }
 	| {
 			of: "deleteRemoteFile"
@@ -168,6 +174,7 @@ export type TransferData =
 			relativePath: string
 			localPath: string
 			error: SerializedError
+			uuid: string
 	  }
 	| {
 			of: "deleteRemoteDirectory"
@@ -181,6 +188,7 @@ export type TransferData =
 			relativePath: string
 			localPath: string
 			error: SerializedError
+			uuid: string
 	  }
 	| {
 			of: "renameLocalFile"
@@ -194,6 +202,7 @@ export type TransferData =
 			relativePath: string
 			localPath: string
 			error: SerializedError
+			uuid: string
 	  }
 	| {
 			of: "renameLocalDirectory"
@@ -207,6 +216,7 @@ export type TransferData =
 			relativePath: string
 			localPath: string
 			error: SerializedError
+			uuid: string
 	  }
 	| {
 			of: "renameRemoteDirectory"
@@ -220,6 +230,7 @@ export type TransferData =
 			relativePath: string
 			localPath: string
 			error: SerializedError
+			uuid: string
 	  }
 	| {
 			of: "renameRemoteFile"
@@ -233,6 +244,7 @@ export type TransferData =
 			relativePath: string
 			localPath: string
 			error: SerializedError
+			uuid: string
 	  }
 	| {
 			of: "downloadFile"
@@ -246,6 +258,7 @@ export type TransferData =
 			relativePath: string
 			localPath: string
 			error: SerializedError
+			uuid: string
 	  }
 	| {
 			of: "uploadFile"
@@ -297,6 +310,7 @@ export type SyncMessage =
 					type: "cycleError"
 					data: {
 						error: SerializedError
+						uuid: string
 					}
 			  }
 			| {
@@ -392,5 +406,6 @@ export type SyncMessage =
 			type: "error"
 			data: {
 				error: SerializedError
+				uuid: string
 			}
 	  }

@@ -161,6 +161,7 @@ export class SyncWorker {
 			await Promise.all(promises)
 		} catch (e) {
 			this.logger.log("error", e, "index.updateSyncPairs")
+			this.logger.log("error", e)
 
 			throw e
 		} finally {

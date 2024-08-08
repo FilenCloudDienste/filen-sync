@@ -261,6 +261,7 @@ export class RemoteFileSystem {
 				uuids[folder[0]] = item
 			} catch (e) {
 				this.sync.worker.logger.log("error", e, "filesystems.remote.getDirectoryTree")
+				this.sync.worker.logger.log("error", e)
 			}
 		}
 
@@ -390,6 +391,7 @@ export class RemoteFileSystem {
 					uuids[item.uuid] = item
 				} catch (e) {
 					this.sync.worker.logger.log("error", e, "filesystems.remote.getDirectoryTree")
+					this.sync.worker.logger.log("error", e)
 				}
 			})
 		)
@@ -693,13 +695,15 @@ export class RemoteFileSystem {
 				if (item.type === "directory") {
 					await this.sync.sdk.cloud().renameDirectory({
 						uuid,
-						name: newBasename
+						name: newBasename,
+						overwriteIfExists: true
 					})
 				} else {
 					await this.sync.sdk.cloud().renameFile({
 						uuid,
 						metadata: itemMetadata as FileMetadata,
-						name: newBasename
+						name: newBasename,
+						overwriteIfExists: true
 					})
 				}
 			} else {
@@ -711,13 +715,15 @@ export class RemoteFileSystem {
 					if (item.type === "directory") {
 						await this.sync.sdk.cloud().renameDirectory({
 							uuid,
-							name: newBasename
+							name: newBasename,
+							overwriteIfExists: true
 						})
 					} else {
 						await this.sync.sdk.cloud().renameFile({
 							uuid,
 							metadata: itemMetadata as FileMetadata,
-							name: newBasename
+							name: newBasename,
+							overwriteIfExists: true
 						})
 					}
 				}
@@ -727,13 +733,15 @@ export class RemoteFileSystem {
 						await this.sync.sdk.cloud().moveDirectory({
 							uuid,
 							to: this.sync.syncPair.remoteParentUUID,
-							metadata: itemMetadata as FolderMetadata
+							metadata: itemMetadata as FolderMetadata,
+							overwriteIfExists: true
 						})
 					} else {
 						await this.sync.sdk.cloud().moveFile({
 							uuid,
 							to: this.sync.syncPair.remoteParentUUID,
-							metadata: itemMetadata as FileMetadata
+							metadata: itemMetadata as FileMetadata,
+							overwriteIfExists: true
 						})
 					}
 				} else {
@@ -749,13 +757,15 @@ export class RemoteFileSystem {
 						await this.sync.sdk.cloud().moveDirectory({
 							uuid,
 							to: newParentItem.uuid!,
-							metadata: itemMetadata as FolderMetadata
+							metadata: itemMetadata as FolderMetadata,
+							overwriteIfExists: true
 						})
 					} else {
 						await this.sync.sdk.cloud().moveFile({
 							uuid,
 							to: newParentItem.uuid,
-							metadata: itemMetadata as FileMetadata
+							metadata: itemMetadata as FileMetadata,
+							overwriteIfExists: true
 						})
 					}
 				}
@@ -869,6 +879,7 @@ export class RemoteFileSystem {
 				abortSignal: this.sync.abortControllers[signalKey]?.signal,
 				onError: err => {
 					this.sync.worker.logger.log("error", err, "filesystems.remote.download")
+					this.sync.worker.logger.log("error", err)
 
 					postMessageToMain({
 						type: "transfer",
@@ -879,7 +890,8 @@ export class RemoteFileSystem {
 							relativePath,
 							localPath,
 							error: serializeError(err),
-							size: item.size
+							size: item.size,
+							uuid: uuidv4()
 						}
 					})
 				},
@@ -921,10 +933,10 @@ export class RemoteFileSystem {
 			const stats = await fs.stat(localPath)
 			const localItem: LocalItem = {
 				type: "file",
-				inode: parseInt(stats.ino as unknown as string), // Sometimes comes as a float, but we need an int
+				inode: stats.ino,
 				lastModified: normalizeUTime(stats.mtimeMs), // Sometimes comes as a float, but we need an int
 				creation: normalizeUTime(stats.birthtimeMs), // Sometimes comes as a float, but we need an int
-				size: parseInt(stats.size as unknown as string), // Sometimes comes as a float, but we need an int
+				size: stats.size,
 				path: relativePath
 			}
 
@@ -950,6 +962,7 @@ export class RemoteFileSystem {
 			return stats
 		} catch (e) {
 			this.sync.worker.logger.log("error", e, "filesystems.remote.download")
+			this.sync.worker.logger.log("error", e)
 
 			if (e instanceof Error) {
 				postMessageToMain({
@@ -961,7 +974,8 @@ export class RemoteFileSystem {
 						relativePath,
 						localPath,
 						error: serializeError(e),
-						size: item.size
+						size: item.size,
+						uuid: uuidv4()
 					}
 				})
 			}
@@ -1016,7 +1030,7 @@ export class RemoteFileSystem {
 				return false
 			}
 
-			const { exists, existsUUID } = await this.sync.sdk.api(3).file().exists({
+			const { exists, existsUUID } = await this.sync.sdk.cloud().fileExists({
 				name: item.name,
 				parent: parent.uuid
 			})

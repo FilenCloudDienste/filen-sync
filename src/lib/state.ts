@@ -35,6 +35,13 @@ export class State {
 		currentLocalTree: LocalTree
 		currentRemoteTree: RemoteTree
 	}): { currentLocalTree: LocalTree; currentRemoteTree: RemoteTree } {
+		if (this.sync.removed) {
+			return {
+				currentLocalTree,
+				currentRemoteTree
+			}
+		}
+
 		// Work on the done tasks from "right to left" (descending order, path length).
 		// This ensures we pick up all individual files/directory movements (e.g. parent moved to /a/b while children are moved /c/d)
 		const tasks = doneTasks.sort((a, b) => b.path.split("/").length - a.path.split("/").length)
@@ -220,7 +227,7 @@ export class State {
 						path: task.path,
 						size: 0,
 						creation: normalizeUTime(task.stats.birthtimeMs), // Sometimes comes as a float, but we need an int
-						inode: parseInt(task.stats.ino as unknown as string) // Sometimes comes as a float, but we need an int
+						inode: task.stats.ino
 					}
 
 					currentRemoteTree.tree[task.item.path] = task.item
@@ -236,9 +243,9 @@ export class State {
 						lastModified: normalizeUTime(task.stats.mtimeMs), // Sometimes comes as a float, but we need an int
 						type: "file",
 						path: task.path,
-						size: parseInt(task.stats.size as unknown as string), // Sometimes comes as a float, but we need an int
+						size: task.stats.size,
 						creation: normalizeUTime(task.stats.birthtimeMs), // Sometimes comes as a float, but we need an int
-						inode: parseInt(task.stats.ino as unknown as string) // Sometimes comes as a float, but we need an int
+						inode: task.stats.ino
 					}
 
 					currentRemoteTree.tree[task.item.path] = task.item
@@ -255,8 +262,8 @@ export class State {
 						type: "directory",
 						path: task.path,
 						creation: normalizeUTime(task.stats.birthtimeMs), // Sometimes comes as a float, but we need an int
-						size: parseInt(task.stats.size as unknown as string), // Sometimes comes as a float, but we need an int
-						inode: parseInt(task.stats.ino as unknown as string) // Sometimes comes as a float, but we need an int
+						size: task.stats.size,
+						inode: task.stats.ino
 					}
 
 					currentLocalTree.tree[task.path] = localItem
@@ -273,8 +280,8 @@ export class State {
 						type: "file",
 						path: task.path,
 						creation: normalizeUTime(task.stats.birthtimeMs), // Sometimes comes as a float, but we need an int
-						size: parseInt(task.stats.size as unknown as string), // Sometimes comes as a float, but we need an int
-						inode: parseInt(task.stats.ino as unknown as string) // Sometimes comes as a float, but we need an int
+						size: task.stats.size,
+						inode: task.stats.ino
 					}
 
 					currentLocalTree.tree[task.path] = item

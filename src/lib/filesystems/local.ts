@@ -18,6 +18,7 @@ import { promisify } from "util"
 import { type CloudItem, PauseSignal } from "@filen/sdk"
 import { postMessageToMain } from "../ipc"
 import { Semaphore } from "../../semaphore"
+import { v4 as uuidv4 } from "uuid"
 
 const pipelineAsync = promisify(pipeline)
 
@@ -40,6 +41,7 @@ export type LocalTreeError = {
 	localPath: string
 	relativePath: string
 	error: Error
+	uuid: string
 }
 export type LocalTreeIgnoredReason =
 	| "dotFile"
@@ -239,20 +241,22 @@ export class LocalFileSystem {
 							type: stats.isDirectory() ? "directory" : "file",
 							path: entryPath,
 							creation: normalizeUTime(stats.birthtimeMs), // Sometimes comes as a float, but we need an int
-							size: parseInt(stats.size as unknown as string), // Sometimes comes as a float, but we need an int
-							inode: parseInt(stats.ino as unknown as string) // Sometimes comes as a float, but we need an int
+							size: stats.size,
+							inode: stats.ino
 						}
 
 						tree[entryPath] = item
 						inodes[item.inode] = item
 					} catch (e) {
 						this.sync.worker.logger.log("error", e, "filesystems.local.getDirectoryTree")
+						this.sync.worker.logger.log("error", e)
 
 						if (e instanceof Error) {
 							errors.push({
 								localPath: itemPath,
 								relativePath: entryPath,
-								error: e
+								error: e,
+								uuid: uuidv4()
 							})
 						}
 					}
@@ -433,7 +437,7 @@ export class LocalFileSystem {
 
 			const item: LocalItem = {
 				type: "directory",
-				inode: parseInt(stats.ino as unknown as string), // Sometimes comes as a float, but we need an int
+				inode: stats.ino,
 				lastModified: normalizeUTime(stats.mtimeMs), // Sometimes comes as a float, but we need an int
 				creation: normalizeUTime(stats.birthtimeMs), // Sometimes comes as a float, but we need an int
 				size: 0,
@@ -525,7 +529,11 @@ export class LocalFileSystem {
 
 			await fs.ensureDir(toLocalPathParentPath)
 
-			if (fromLocalPathParentPath === toLocalPathParentPath) {
+			if (
+				fromLocalPathParentPath === toLocalPathParentPath ||
+				Buffer.from(fromLocalPathParentPath, "utf-8").toString("hex") ===
+					Buffer.from(toLocalPathParentPath, "utf-8").toString("hex")
+			) {
 				await fs.rename(fromLocalPath, toLocalPath)
 			} else {
 				if (toRelativePath.startsWith(fromRelativePath)) {
@@ -626,7 +634,7 @@ export class LocalFileSystem {
 				type: "queued",
 				relativePath,
 				localPath,
-				size: parseInt(stats.size as unknown as string) // Sometimes comes as a float, but we need an int
+				size: stats.size
 			}
 		})
 
@@ -656,6 +664,7 @@ export class LocalFileSystem {
 				abortSignal: this.sync.abortControllers[signalKey]?.signal,
 				onError: err => {
 					this.sync.worker.logger.log("error", err, "filesystems.local.upload")
+					this.sync.worker.logger.log("error", err)
 
 					postMessageToMain({
 						type: "transfer",
@@ -666,7 +675,8 @@ export class LocalFileSystem {
 							relativePath,
 							localPath,
 							error: serializeError(err),
-							size: parseInt(stats.size as unknown as string) // Sometimes comes as a float, but we need an int
+							size: stats.size,
+							uuid: uuidv4()
 						}
 					})
 				},
@@ -680,7 +690,7 @@ export class LocalFileSystem {
 							relativePath,
 							localPath,
 							bytes,
-							size: parseInt(stats.size as unknown as string) // Sometimes comes as a float, but we need an int
+							size: stats.size
 						}
 					})
 				},
@@ -693,7 +703,7 @@ export class LocalFileSystem {
 							type: "started",
 							relativePath,
 							localPath,
-							size: parseInt(stats.size as unknown as string) // Sometimes comes as a float, but we need an int
+							size: stats.size
 						}
 					})
 				}
@@ -721,13 +731,14 @@ export class LocalFileSystem {
 					type: "finished",
 					relativePath,
 					localPath,
-					size: parseInt(stats.size as unknown as string) // Sometimes comes as a float, but we need an int
+					size: stats.size
 				}
 			})
 
 			return item
 		} catch (e) {
 			this.sync.worker.logger.log("error", e, "filesystems.local.upload")
+			this.sync.worker.logger.log("error", e)
 
 			if (e instanceof Error) {
 				postMessageToMain({
@@ -739,7 +750,8 @@ export class LocalFileSystem {
 						relativePath,
 						localPath,
 						error: serializeError(e),
-						size: parseInt(stats.size as unknown as string) // Sometimes comes as a float, but we need an int
+						size: stats.size,
+						uuid: uuidv4()
 					}
 				})
 			}

@@ -359,6 +359,15 @@ export class State {
 		await fs.writeFile(localPath, serialize(this.sync.previousLocalTree))
 		await fs.writeFile(remotePath, serialize(this.sync.previousRemoteTree))
 	}
+
+	public async clear(): Promise<void> {
+		const previousLocalTreePath = pathModule.join(this.statePath, "previousLocalTree")
+		const previousRemoteTreePath = pathModule.join(this.statePath, "previousRemoteTree")
+		const localFileHashesPath = pathModule.join(this.statePath, "localFileHashes")
+
+		await fs.ensureDir(this.statePath)
+		await Promise.all([fs.unlink(previousLocalTreePath), fs.unlink(previousRemoteTreePath), fs.unlink(localFileHashesPath)])
+	}
 }
 
 export default State

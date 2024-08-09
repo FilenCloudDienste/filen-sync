@@ -533,6 +533,13 @@ export class Tasks {
 		doneTasks: DoneTask[]
 		errors: TaskError[]
 	}> {
+		if (this.sync.removed) {
+			return {
+				doneTasks: [],
+				errors: []
+			}
+		}
+
 		const executed: DoneTask[] = []
 		const errors: TaskError[] = []
 		// Work on deltas from "left to right" (ascending order, path length).
@@ -579,6 +586,10 @@ export class Tasks {
 		}
 
 		const process = async (delta: Delta): Promise<void> => {
+			if (this.sync.removed) {
+				return
+			}
+
 			const semaphore = delta.type === "uploadFile" || delta.type === "downloadFile" ? this.transfersSemaphore : this.normalSemaphore
 
 			await semaphore?.acquire()

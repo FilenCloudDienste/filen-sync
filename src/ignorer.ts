@@ -75,6 +75,13 @@ export class Ignorer {
 		this.instance = ignore()
 	}
 
+	public async clearFile(): Promise<void> {
+		const filePath = pathModule.join(this.sync.dbPath, this.name, `v${IGNORER_VERSION}`, this.sync.syncPair.uuid, "filenIgnore")
+
+		await fs.ensureDir(pathModule.dirname(filePath))
+		await fs.unlink(filePath)
+	}
+
 	public ignores(path: string): boolean {
 		if (this.cache[path]) {
 			return this.cache[path]!

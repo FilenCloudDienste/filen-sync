@@ -206,8 +206,13 @@ export class Sync {
 		})
 	}
 
+	public async deleteLocalSyncDbFiles(): Promise<void> {
+		await Promise.all([this.remoteFileSystem.clearDeviceId(), this.state.clear(), this.ignorer.clearFile()])
+	}
+
 	private async run(): Promise<void> {
 		if (this.removed) {
+			await this.deleteLocalSyncDbFiles()
 			await this.cleanup()
 
 			return

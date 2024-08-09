@@ -96,6 +96,13 @@ export class RemoteFileSystem {
 		return deviceId
 	}
 
+	public async clearDeviceId(): Promise<void> {
+		const deviceIdFile = pathModule.join(this.sync.dbPath, "deviceId", `v${DEVICE_ID_VERSION}`, this.sync.syncPair.uuid)
+
+		await fs.ensureDir(pathModule.dirname(deviceIdFile))
+		await fs.unlink(deviceIdFile)
+	}
+
 	public async getDirectoryTree(skipCache: boolean = false): Promise<{
 		result: RemoteTree
 		ignored: RemoteTreeIgnored[]

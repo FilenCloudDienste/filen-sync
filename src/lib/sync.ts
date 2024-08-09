@@ -313,16 +313,20 @@ export class Sync {
 					syncPair: this.syncPair
 				})
 
-				postMessageToMain({
-					type: "cycleGettingTreesStarted",
-					syncPair: this.syncPair
-				})
+				const gettingTreesMessageTimeout = setTimeout(() => {
+					postMessageToMain({
+						type: "cycleGettingTreesStarted",
+						syncPair: this.syncPair
+					})
+				}, 1000)
 
 				// eslint-disable-next-line prefer-const
 				let [currentLocalTree, currentRemoteTree] = await Promise.all([
 					this.localFileSystem.getDirectoryTree(),
 					this.remoteFileSystem.getDirectoryTree()
 				])
+
+				clearTimeout(gettingTreesMessageTimeout)
 
 				postMessageToMain({
 					type: "cycleGettingTreesDone",

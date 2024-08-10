@@ -254,7 +254,7 @@ export class Tasks {
 
 					return delta
 				} catch (e) {
-					// Don't throw if the file/directory does not exist anymore.
+					// Don't throw if the file/directory does not exist anymore (it has been changed while we were inside the sync cycle, after deltas have been calculated).
 					if (!(await this.sync.localFileSystem.pathExists(delta.path))) {
 						return delta
 					}
@@ -297,14 +297,14 @@ export class Tasks {
 					return delta
 				} catch (e) {
 					if (delta.type === "deleteRemoteFile") {
-						// Don't throw if the file/directory does not exist anymore.
+						// Don't throw if the file/directory does not exist anymore (it has been changed while we were inside the sync cycle, after deltas have been calculated).
 						if (!(await this.sync.remoteFileSystem.fileExists(delta.path))) {
 							return delta
 						}
 					}
 
 					if (delta.type === "deleteRemoteDirectory") {
-						// Don't throw if the file/directory does not exist anymore.
+						// Don't throw if the file/directory does not exist anymore (it has been changed while we were inside the sync cycle, after deltas have been calculated).
 						if (!(await this.sync.remoteFileSystem.directoryExists(delta.path))) {
 							return delta
 						}
@@ -353,6 +353,11 @@ export class Tasks {
 						stats
 					}
 				} catch (e) {
+					// Don't throw if the file does not exist anymore, simply skip it (it has been changed while we were inside the sync cycle, after deltas have been calculated).
+					if (!(await this.sync.localFileSystem.pathExists(pathModule.join(this.sync.syncPair.localPath, delta.from)))) {
+						return null
+					}
+
 					if (e instanceof Error) {
 						postMessageToMain({
 							type: "transfer",
@@ -393,6 +398,20 @@ export class Tasks {
 
 					return delta
 				} catch (e) {
+					if (delta.type === "renameRemoteFile") {
+						// Don't throw if the file/directory does not exist anymore (it has been changed while we were inside the sync cycle, after deltas have been calculated).
+						if (!(await this.sync.remoteFileSystem.fileExists(delta.from))) {
+							return null
+						}
+					}
+
+					if (delta.type === "renameRemoteDirectory") {
+						// Don't throw if the file/directory does not exist anymore (it has been changed while we were inside the sync cycle, after deltas have been calculated).
+						if (!(await this.sync.remoteFileSystem.directoryExists(delta.from))) {
+							return null
+						}
+					}
+
 					if (e instanceof Error) {
 						postMessageToMain({
 							type: "transfer",
@@ -438,7 +457,7 @@ export class Tasks {
 						item
 					}
 				} catch (e) {
-					// Don't throw if the file does not exist anymore, simply skip it.
+					// Don't throw if the file does not exist anymore, simply skip it (it has been changed while we were inside the sync cycle, after deltas have been calculated).
 					if (!(await this.sync.remoteFileSystem.fileExists(delta.path))) {
 						return null
 					}
@@ -491,7 +510,7 @@ export class Tasks {
 						stats
 					}
 				} catch (e) {
-					// Don't throw if the file does not exist anymore, simply skip it.
+					// Don't throw if the file does not exist anymore, simply skip it (it has been changed while we were inside the sync cycle, after deltas have been calculated).
 					if (!(await this.sync.localFileSystem.pathExists(pathModule.join(this.sync.syncPair.localPath, delta.path)))) {
 						return null
 					}

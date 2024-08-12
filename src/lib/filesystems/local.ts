@@ -372,8 +372,18 @@ export class LocalFileSystem {
 			syncPair: this.sync.syncPair
 		})
 
+		const maxWaitTimeout = Date.now() + 30000
+
 		await new Promise<void>(resolve => {
 			const wait = setInterval(() => {
+				if (Date.now() > maxWaitTimeout) {
+					clearInterval(wait)
+
+					resolve()
+
+					return
+				}
+
 				if (Date.now() > this.lastDirectoryChangeTimestamp + waitTimeout) {
 					clearInterval(wait)
 

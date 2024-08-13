@@ -45,6 +45,9 @@ export class Lock {
 						resource: this.resource,
 						lockUUID: this.lockUUID
 					})
+				} catch (e) {
+					this.sync.worker.logger.log("error", e, "lock.refresh")
+					this.sync.worker.logger.log("error", e)
 				} finally {
 					this.mutex.release()
 				}

@@ -398,55 +398,10 @@ export class Deltas {
 			}
 		}
 
-		// Filter deltas by sync mode
-		if (this.sync.mode === "localToCloud") {
-			deltas = deltas.filter(
-				delta =>
-					delta.type === "createRemoteDirectory" ||
-					delta.type === "deleteRemoteDirectory" ||
-					delta.type === "deleteRemoteFile" ||
-					delta.type === "renameRemoteDirectory" ||
-					delta.type === "renameRemoteFile" ||
-					delta.type === "uploadFile"
-			)
-		}
-
-		if (this.sync.mode === "localBackup") {
-			deltas = deltas.filter(
-				delta =>
-					delta.type === "createRemoteDirectory" ||
-					delta.type === "renameRemoteDirectory" ||
-					delta.type === "renameRemoteFile" ||
-					delta.type === "uploadFile"
-			)
-		}
-
-		if (this.sync.mode === "cloudToLocal") {
-			deltas = deltas.filter(
-				delta =>
-					delta.type === "createLocalDirectory" ||
-					delta.type === "deleteLocalDirectory" ||
-					delta.type === "deleteLocalFile" ||
-					delta.type === "renameLocalDirectory" ||
-					delta.type === "renameLocalFile" ||
-					delta.type === "downloadFile"
-			)
-		}
-
-		if (this.sync.mode === "cloudBackup") {
-			deltas = deltas.filter(
-				delta =>
-					delta.type === "createLocalDirectory" ||
-					delta.type === "renameLocalDirectory" ||
-					delta.type === "renameLocalFile" ||
-					delta.type === "downloadFile"
-			)
-		}
-
 		// Work on deltas from "left to right" (ascending order, path length).
-		const deltasSorted = deltas
+		deltas = deltas
 			.sort((a, b) => a.path.split("/").length - b.path.split("/").length)
-			// Filter by ignores paths
+			// Filter by ignored paths
 			.filter(delta => {
 				if (
 					delta.type === "renameLocalDirectory" ||
@@ -474,15 +429,15 @@ export class Deltas {
 				return true
 			})
 
-		// Here we apply the done task to the delta state.
+		// Here we apply the "done" task to the delta state.
 		// E.g. when the user renames/moves a directory from "/sync/dir" to "/sync/dir2"
 		// we'll get all the rename/move deltas for the directory children aswell.
-		// This is pretty unecessary, hence we filter them here.
+		// This is pretty unnecessary, hence we filter them here.
 		// Same for deletions. We only ever need to rename/move/delete the parent directory if the children did not change.
 		// This saves a lot of disk usage and API requests. This also saves time applying all done tasks to the overall state,
 		// since we need to loop through less doneTasks.
-		for (let i = 0; i < deltasSorted.length; i++) {
-			const delta = deltasSorted[i]!
+		for (let i = 0; i < deltas.length; i++) {
+			const delta = deltas[i]!
 			let moveUp = false
 
 			if (delta.type === "renameLocalDirectory" || delta.type === "renameLocalFile") {
@@ -491,11 +446,11 @@ export class Deltas {
 						const newFromPath = replacePathStartWithFromAndTo(delta.from, directoryDelta.from, directoryDelta.to)
 
 						if (newFromPath === delta.to) {
-							deltasSorted.splice(i, 1)
+							deltas.splice(i, 1)
 
 							moveUp = true
 						} else {
-							deltasSorted.splice(i, 1, {
+							deltas.splice(i, 1, {
 								...delta,
 								from: newFromPath
 							})
@@ -508,11 +463,11 @@ export class Deltas {
 						const newFromPath = replacePathStartWithFromAndTo(delta.from, directoryDelta.from, directoryDelta.to)
 
 						if (newFromPath === delta.to) {
-							deltasSorted.splice(i, 1)
+							deltas.splice(i, 1)
 
 							moveUp = true
 						} else {
-							deltasSorted.splice(i, 1, {
+							deltas.splice(i, 1, {
 								...delta,
 								from: newFromPath
 							})
@@ -522,7 +477,7 @@ export class Deltas {
 			} else if (delta.type === "deleteLocalDirectory" || delta.type === "deleteLocalFile") {
 				for (const directoryDelta of deletedLocalDirectories) {
 					if (directoryDelta.type === "deleteLocalDirectory" && delta.path.startsWith(directoryDelta.path + "/")) {
-						deltasSorted.splice(i, 1)
+						deltas.splice(i, 1)
 
 						moveUp = true
 					}
@@ -530,7 +485,7 @@ export class Deltas {
 			} else if (delta.type === "deleteRemoteDirectory" || delta.type === "deleteRemoteFile") {
 				for (const directoryDelta of deletedRemoteDirectories) {
 					if (directoryDelta.type === "deleteRemoteDirectory" && delta.path.startsWith(directoryDelta.path + "/")) {
-						deltasSorted.splice(i, 1)
+						deltas.splice(i, 1)
 
 						moveUp = true
 					}
@@ -542,7 +497,7 @@ export class Deltas {
 			}
 		}
 
-		return deltasSorted
+		return deltas
 	}
 }
 

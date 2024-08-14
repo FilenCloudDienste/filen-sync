@@ -26,7 +26,23 @@ npm install @filen/sync@latest
 2. Initialize sync pairs
 
 ```typescript
+import FilenSDK from "@filen/sdk"
+import path from "path"
+import os from "os"
 import Sync from "@filen/sync"
+
+// Initialize a SDK instance (optional)
+const filen = new FilenSDK({
+	metadataCache: true,
+	connectToSocket: true,
+	tmpPath: path.join(os.tmpdir(), "filen-sdk")
+})
+
+await filen.login({
+	email: "your@email.com",
+	password: "supersecret123",
+	twoFactorCode: "123456"
+})
 
 const sync = new Sync({
 	syncPairs: [
@@ -36,12 +52,13 @@ const sync = new Sync({
 			remotePath: "/sync", // Remote absolute path (UNIX style)
 			remoteParentUUID: "UUIDV4", // UUIDv4 of the remote parent directory
 			mode: "twoWay", // Sync mode
-			paused: false,
-			excludeDotFiles: true,
+			paused: false, // Start paused
+			excludeDotFiles: true, // Exclude dot files and paths
+			localTrashDisabled: false, // Disable the local trash
 			name: "Sync" // Only used locally to identify the sync pair
 		}
 	],
-	sdk: new FilenSDK(), // You can either directly pass a configured FilenSDK instance or instantiate a new SDK instance when passing `sdkConfig` (optional)
+	sdk: filen, // You can either directly pass a configured FilenSDK instance or instantiate a new SDK instance when passing `sdkConfig` (optional)
 	sdkConfig, // FilenSDK config object (omit when SDK instance is passed, needed when no SDK instance is passed)
 	dbPath: pathModule.join(__dirname, "db"), // Used to store sync state and other data
 	runOnce: false, // Run the sync once
@@ -51,7 +68,7 @@ const sync = new Sync({
 })
 
 // Start the sync
-await server.initialize()
+await sync.initialize()
 ```
 
 ## License

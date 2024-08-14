@@ -372,7 +372,7 @@ export class LocalFileSystem {
 			syncPair: this.sync.syncPair
 		})
 
-		const maxWaitTimeout = Date.now() + 60000
+		const maxWaitTimeout = Date.now() + 60000 * 15
 
 		await new Promise<void>(resolve => {
 			const wait = setInterval(() => {

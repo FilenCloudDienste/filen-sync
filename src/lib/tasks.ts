@@ -97,8 +97,8 @@ export type DoneTask = { path: string } & (
  */
 export class Tasks {
 	private readonly sync: Sync
-	private readonly transfersSemaphore = new Semaphore(32)
-	private readonly normalSemaphore = new Semaphore(128)
+	private readonly transfersSemaphore = new Semaphore(16)
+	private readonly normalSemaphore = new Semaphore(32)
 
 	/**
 	 * Creates an instance of Tasks.

@@ -2,6 +2,7 @@ import ignore from "ignore"
 import type Sync from "./lib/sync"
 import pathModule from "path"
 import fs from "fs-extra"
+import writeFileAtomic from "write-file-atomic"
 
 export const IGNORER_VERSION = 1
 
@@ -51,7 +52,7 @@ export class Ignorer {
 		await fs.ensureDir(pathModule.dirname(filePath))
 
 		if (typeof passedContent === "string") {
-			await fs.writeFile(filePath, passedContent, {
+			await writeFileAtomic(filePath, passedContent, {
 				encoding: "utf-8"
 			})
 

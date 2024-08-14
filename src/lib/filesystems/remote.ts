@@ -20,6 +20,7 @@ import {
 import { v4 as uuidv4 } from "uuid"
 import { LOCAL_TRASH_NAME } from "../../constants"
 import { type LocalItem } from "./local"
+import writeFileAtomic from "write-file-atomic"
 
 export type RemoteItem = Prettify<DistributiveOmit<CloudItemTree, "parent"> & { path: string }>
 export type RemoteDirectoryTree = Record<string, RemoteItem>
@@ -82,7 +83,7 @@ export class RemoteFileSystem {
 		if (!(await fs.exists(deviceIdFile))) {
 			deviceId = uuidv4()
 
-			await fs.writeFile(deviceIdFile, deviceId, {
+			await writeFileAtomic(deviceIdFile, deviceId, {
 				encoding: "utf-8"
 			})
 		} else {

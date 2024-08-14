@@ -6,6 +6,7 @@ import { type RemoteTree, type RemoteItem } from "./filesystems/remote"
 import { type LocalTree, type LocalItem } from "./filesystems/local"
 import { type DoneTask } from "./tasks"
 import { replacePathStartWithFromAndTo, normalizeUTime } from "../utils"
+import writeFileAtomic from "write-file-atomic"
 
 const STATE_VERSION = 1
 
@@ -306,7 +307,7 @@ export class State {
 		const path = pathModule.join(this.statePath, "localFileHashes")
 		const serialized = serialize(this.sync.localFileHashes)
 
-		await fs.writeFile(path, serialized)
+		await writeFileAtomic(path, serialized)
 	}
 
 	public async loadLocalFileHashes(): Promise<void> {
@@ -341,12 +342,9 @@ export class State {
 			return
 		}
 
-		const localBuffer = await fs.readFile(localPath)
+		const [localBuffer, remoteBuffer] = await Promise.all([fs.readFile(localPath), fs.readFile(remotePath)])
 
 		this.sync.previousLocalTree = deserialize(localBuffer)
-
-		const remoteBuffer = await fs.readFile(remotePath)
-
 		this.sync.previousRemoteTree = deserialize(remoteBuffer)
 	}
 
@@ -356,8 +354,10 @@ export class State {
 		const localPath = pathModule.join(this.statePath, "previousLocalTree")
 		const remotePath = pathModule.join(this.statePath, "previousRemoteTree")
 
-		await fs.writeFile(localPath, serialize(this.sync.previousLocalTree))
-		await fs.writeFile(remotePath, serialize(this.sync.previousRemoteTree))
+		await Promise.all([
+			writeFileAtomic(localPath, serialize(this.sync.previousLocalTree)),
+			writeFileAtomic(remotePath, serialize(this.sync.previousRemoteTree))
+		])
 	}
 
 	public async clear(): Promise<void> {

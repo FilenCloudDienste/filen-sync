@@ -425,10 +425,21 @@ export class Sync {
 					})
 
 					postMessageToMain({
-						type: "deltas",
+						type: "deltasCount",
 						syncPair: this.syncPair,
 						data: {
-							deltas
+							count: deltas.length
+						}
+					})
+
+					postMessageToMain({
+						type: "deltasSize",
+						syncPair: this.syncPair,
+						data: {
+							size: deltas.reduce(
+								(prev, delta) => prev + (delta.type === "uploadFile" || delta.type === "downloadFile" ? delta.size : 0),
+								0
+							)
 						}
 					})
 

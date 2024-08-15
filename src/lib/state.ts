@@ -7,6 +7,7 @@ import { type LocalTree, type LocalItem } from "./filesystems/local"
 import { type DoneTask } from "./tasks"
 import { replacePathStartWithFromAndTo, normalizeUTime } from "../utils"
 import writeFileAtomic from "write-file-atomic"
+import { runGC } from "./gc"
 
 const STATE_VERSION = 2
 
@@ -326,17 +327,21 @@ export class State {
 			return
 		}
 
-		const buffer = await fs.readFile(this.localFileHashesPath)
-
-		this.sync.localFileHashes = deserialize(buffer)
+		this.sync.localFileHashes = deserialize(await fs.readFile(this.localFileHashesPath))
 	}
 
 	public async initialize(): Promise<void> {
-		await Promise.all([this.loadLocalFileHashes(), this.loadPreviousTrees()])
+		await this.loadLocalFileHashes()
+		await this.loadPreviousTrees()
+
+		runGC()
 	}
 
 	public async save(): Promise<void> {
-		await Promise.all([this.saveLocalFileHashes(), this.savePreviousTrees()])
+		await this.saveLocalFileHashes()
+		await this.savePreviousTrees()
+
+		runGC()
 	}
 
 	public async loadPreviousTrees(): Promise<void> {
@@ -351,30 +356,19 @@ export class State {
 			return
 		}
 
-		const [previousLocalTreeBuffer, previousLocalINodesBuffer, previousRemoteTreeBuffer, previousRemoteUUIDsBuffer] = await Promise.all(
-			[
-				fs.readFile(this.previousLocalTreePath),
-				fs.readFile(this.previousLocalINodesPath),
-				fs.readFile(this.previousRemoteTreePath),
-				fs.readFile(this.previousRemoteUUIDsPath)
-			]
-		)
-
-		this.sync.previousLocalTree.tree = deserialize(previousLocalTreeBuffer)
-		this.sync.previousLocalTree.inodes = deserialize(previousLocalINodesBuffer)
-		this.sync.previousRemoteTree.tree = deserialize(previousRemoteTreeBuffer)
-		this.sync.previousRemoteTree.uuids = deserialize(previousRemoteUUIDsBuffer)
+		this.sync.previousLocalTree.tree = deserialize(await fs.readFile(this.previousLocalTreePath))
+		this.sync.previousLocalTree.inodes = deserialize(await fs.readFile(this.previousLocalINodesPath))
+		this.sync.previousRemoteTree.tree = deserialize(await fs.readFile(this.previousRemoteTreePath))
+		this.sync.previousRemoteTree.uuids = deserialize(await fs.readFile(this.previousRemoteUUIDsPath))
 	}
 
 	public async savePreviousTrees(): Promise<void> {
 		await fs.ensureDir(this.statePath)
 
-		await Promise.all([
-			writeFileAtomic(this.previousLocalTreePath, serialize(this.sync.previousLocalTree.tree)),
-			writeFileAtomic(this.previousLocalINodesPath, serialize(this.sync.previousLocalTree.inodes)),
-			writeFileAtomic(this.previousRemoteTreePath, serialize(this.sync.previousRemoteTree.tree)),
-			writeFileAtomic(this.previousRemoteUUIDsPath, serialize(this.sync.previousRemoteTree.uuids))
-		])
+		await writeFileAtomic(this.previousLocalTreePath, serialize(this.sync.previousLocalTree.tree))
+		await writeFileAtomic(this.previousLocalINodesPath, serialize(this.sync.previousLocalTree.inodes))
+		await writeFileAtomic(this.previousRemoteTreePath, serialize(this.sync.previousRemoteTree.tree))
+		await writeFileAtomic(this.previousRemoteUUIDsPath, serialize(this.sync.previousRemoteTree.uuids))
 	}
 
 	public async clear(): Promise<void> {

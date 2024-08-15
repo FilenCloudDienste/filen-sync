@@ -87,7 +87,7 @@ export class LocalFileSystem {
 	public readonly itemsMutex = new Semaphore(1)
 	public readonly mutex = new Semaphore(1)
 	public readonly mkdirMutex = new Semaphore(1)
-	public readonly listSemaphore = new Semaphore(1024)
+	public readonly listSemaphore = new Semaphore(256)
 	public readonly watcherMutex = new Semaphore(1)
 
 	/**
@@ -124,15 +124,17 @@ export class LocalFileSystem {
 		}
 
 		const isWindows = process.platform === "win32"
-		const tree: LocalDirectoryTree = {}
-		const inodes: LocalDirectoryINodes = {}
-		const errors: LocalTreeError[] = []
-		const ignored: LocalTreeIgnored[] = []
 		const pathsAdded: Record<string, boolean> = {}
+
 		const dir = await fs.readdir(this.sync.syncPair.localPath, {
 			recursive: true,
 			encoding: "utf-8"
 		})
+
+		this.getDirectoryTreeCache.tree = {}
+		this.getDirectoryTreeCache.inodes = {}
+		this.getDirectoryTreeCache.ignored = []
+		this.getDirectoryTreeCache.errors = []
 
 		await promiseAllSettledChunked(
 			dir.map(async entry => {
@@ -148,7 +150,7 @@ export class LocalFileSystem {
 					const itemPath = pathModule.join(this.sync.syncPair.localPath, entry)
 
 					if (isRelativePathIgnoredByDefault(entryPath)) {
-						ignored.push({
+						this.getDirectoryTreeCache.ignored.push({
 							localPath: itemPath,
 							relativePath: entry,
 							reason: "defaultIgnore"
@@ -158,7 +160,7 @@ export class LocalFileSystem {
 					}
 
 					if (this.sync.excludeDotFiles && pathIncludesDotFile(entryPath)) {
-						ignored.push({
+						this.getDirectoryTreeCache.ignored.push({
 							localPath: itemPath,
 							relativePath: entry,
 							reason: "dotFile"
@@ -168,7 +170,7 @@ export class LocalFileSystem {
 					}
 
 					if (this.sync.ignorer.ignores(entry)) {
-						ignored.push({
+						this.getDirectoryTreeCache.ignored.push({
 							localPath: itemPath,
 							relativePath: entry,
 							reason: "filenIgnore"
@@ -180,7 +182,7 @@ export class LocalFileSystem {
 					try {
 						await fs.access(itemPath, fs.constants.R_OK | fs.constants.W_OK)
 					} catch {
-						ignored.push({
+						this.getDirectoryTreeCache.ignored.push({
 							localPath: itemPath,
 							relativePath: entry,
 							reason: "permissions"
@@ -193,7 +195,7 @@ export class LocalFileSystem {
 						const stats = await fs.lstat(itemPath)
 
 						if (stats.isBlockDevice() || stats.isCharacterDevice() || stats.isFIFO() || stats.isSocket()) {
-							ignored.push({
+							this.getDirectoryTreeCache.ignored.push({
 								localPath: itemPath,
 								relativePath: entry,
 								reason: "invalidType"
@@ -203,7 +205,7 @@ export class LocalFileSystem {
 						}
 
 						if (stats.isSymbolicLink()) {
-							ignored.push({
+							this.getDirectoryTreeCache.ignored.push({
 								localPath: itemPath,
 								relativePath: entry,
 								reason: "symlink"
@@ -213,7 +215,7 @@ export class LocalFileSystem {
 						}
 
 						if (stats.isFile() && stats.size <= 0) {
-							ignored.push({
+							this.getDirectoryTreeCache.ignored.push({
 								localPath: itemPath,
 								relativePath: entry,
 								reason: "empty"
@@ -225,7 +227,7 @@ export class LocalFileSystem {
 						const lowercasePath = entryPath.toLowerCase()
 
 						if (pathsAdded[lowercasePath]) {
-							ignored.push({
+							this.getDirectoryTreeCache.ignored.push({
 								localPath: itemPath,
 								relativePath: entry,
 								reason: "duplicate"
@@ -245,14 +247,14 @@ export class LocalFileSystem {
 							inode: stats.ino
 						}
 
-						tree[entryPath] = item
-						inodes[item.inode] = item
+						this.getDirectoryTreeCache.tree[entryPath] = item
+						this.getDirectoryTreeCache.inodes[item.inode] = item
 					} catch (e) {
 						this.sync.worker.logger.log("error", e, "filesystems.local.getDirectoryTree")
 						this.sync.worker.logger.log("error", e)
 
 						if (e instanceof Error) {
-							errors.push({
+							this.getDirectoryTreeCache.errors.push({
 								localPath: itemPath,
 								relativePath: entryPath,
 								error: e,
@@ -266,21 +268,15 @@ export class LocalFileSystem {
 			})
 		)
 
-		this.getDirectoryTreeCache = {
-			timestamp: Date.now(),
-			tree,
-			inodes,
-			errors,
-			ignored
-		}
+		this.getDirectoryTreeCache.timestamp = Date.now()
 
 		return {
 			result: {
 				tree: this.getDirectoryTreeCache.tree,
 				inodes: this.getDirectoryTreeCache.inodes
 			},
-			errors,
-			ignored,
+			errors: this.getDirectoryTreeCache.errors,
+			ignored: this.getDirectoryTreeCache.ignored,
 			changed: true
 		}
 	}

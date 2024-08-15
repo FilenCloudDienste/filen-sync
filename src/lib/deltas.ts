@@ -497,7 +497,8 @@ export class Deltas {
 			}
 		}
 
-		return deltas
+		// Work on deltas from "left to right" (ascending order, path length).
+		return deltas.sort((a, b) => a.path.split("/").length - b.path.split("/").length)
 	}
 }
 

@@ -8,7 +8,7 @@ import { type DoneTask } from "./tasks"
 import { replacePathStartWithFromAndTo, normalizeUTime } from "../utils"
 import writeFileAtomic from "write-file-atomic"
 
-const STATE_VERSION = 1
+const STATE_VERSION = 2
 
 /**
  * State
@@ -20,11 +20,21 @@ const STATE_VERSION = 1
  */
 export class State {
 	private readonly sync: Sync
-	private readonly statePath: string
+	public readonly statePath: string
+	public readonly previousLocalTreePath: string
+	public readonly previousLocalINodesPath: string
+	public readonly previousRemoteTreePath: string
+	public readonly previousRemoteUUIDsPath: string
+	public readonly localFileHashesPath: string
 
 	public constructor(sync: Sync) {
 		this.sync = sync
 		this.statePath = pathModule.join(this.sync.dbPath, "state", `v${STATE_VERSION}`, sync.syncPair.uuid)
+		this.previousLocalTreePath = pathModule.join(this.statePath, "previousLocalTree")
+		this.previousLocalINodesPath = pathModule.join(this.statePath, "previousLocalINodes")
+		this.previousRemoteTreePath = pathModule.join(this.statePath, "previousRemoteTree")
+		this.previousRemoteUUIDsPath = pathModule.join(this.statePath, "previousRemoteUUIDs")
+		this.localFileHashesPath = pathModule.join(this.statePath, "localFileHashes")
 	}
 
 	public applyDoneTasksToState({
@@ -304,22 +314,19 @@ export class State {
 	public async saveLocalFileHashes(): Promise<void> {
 		await fs.ensureDir(this.statePath)
 
-		const path = pathModule.join(this.statePath, "localFileHashes")
 		const serialized = serialize(this.sync.localFileHashes)
 
-		await writeFileAtomic(path, serialized)
+		await writeFileAtomic(this.localFileHashesPath, serialized)
 	}
 
 	public async loadLocalFileHashes(): Promise<void> {
 		await fs.ensureDir(this.statePath)
 
-		const path = pathModule.join(this.statePath, "localFileHashes")
-
-		if (!(await fs.exists(path))) {
+		if (!(await fs.exists(this.localFileHashesPath))) {
 			return
 		}
 
-		const buffer = await fs.readFile(path)
+		const buffer = await fs.readFile(this.localFileHashesPath)
 
 		this.sync.localFileHashes = deserialize(buffer)
 	}
@@ -335,38 +342,51 @@ export class State {
 	public async loadPreviousTrees(): Promise<void> {
 		await fs.ensureDir(this.statePath)
 
-		const localPath = pathModule.join(this.statePath, "previousLocalTree")
-		const remotePath = pathModule.join(this.statePath, "previousRemoteTree")
-
-		if (!(await fs.exists(localPath)) || !(await fs.exists(remotePath))) {
+		if (
+			!(await fs.exists(this.previousLocalTreePath)) ||
+			!(await fs.exists(this.previousLocalINodesPath)) ||
+			!(await fs.exists(this.previousRemoteTreePath)) ||
+			!(await fs.exists(this.previousRemoteUUIDsPath))
+		) {
 			return
 		}
 
-		const [localBuffer, remoteBuffer] = await Promise.all([fs.readFile(localPath), fs.readFile(remotePath)])
+		const [previousLocalTreeBuffer, previousLocalINodesBuffer, previousRemoteTreeBuffer, previousRemoteUUIDsBuffer] = await Promise.all(
+			[
+				fs.readFile(this.previousLocalTreePath),
+				fs.readFile(this.previousLocalINodesPath),
+				fs.readFile(this.previousRemoteTreePath),
+				fs.readFile(this.previousRemoteUUIDsPath)
+			]
+		)
 
-		this.sync.previousLocalTree = deserialize(localBuffer)
-		this.sync.previousRemoteTree = deserialize(remoteBuffer)
+		this.sync.previousLocalTree.tree = deserialize(previousLocalTreeBuffer)
+		this.sync.previousLocalTree.inodes = deserialize(previousLocalINodesBuffer)
+		this.sync.previousRemoteTree.tree = deserialize(previousRemoteTreeBuffer)
+		this.sync.previousRemoteTree.uuids = deserialize(previousRemoteUUIDsBuffer)
 	}
 
 	public async savePreviousTrees(): Promise<void> {
 		await fs.ensureDir(this.statePath)
 
-		const localPath = pathModule.join(this.statePath, "previousLocalTree")
-		const remotePath = pathModule.join(this.statePath, "previousRemoteTree")
-
 		await Promise.all([
-			writeFileAtomic(localPath, serialize(this.sync.previousLocalTree)),
-			writeFileAtomic(remotePath, serialize(this.sync.previousRemoteTree))
+			writeFileAtomic(this.previousLocalTreePath, serialize(this.sync.previousLocalTree.tree)),
+			writeFileAtomic(this.previousLocalINodesPath, serialize(this.sync.previousLocalTree.inodes)),
+			writeFileAtomic(this.previousRemoteTreePath, serialize(this.sync.previousRemoteTree.tree)),
+			writeFileAtomic(this.previousRemoteUUIDsPath, serialize(this.sync.previousRemoteTree.uuids))
 		])
 	}
 
 	public async clear(): Promise<void> {
-		const previousLocalTreePath = pathModule.join(this.statePath, "previousLocalTree")
-		const previousRemoteTreePath = pathModule.join(this.statePath, "previousRemoteTree")
-		const localFileHashesPath = pathModule.join(this.statePath, "localFileHashes")
-
 		await fs.ensureDir(this.statePath)
-		await Promise.all([fs.unlink(previousLocalTreePath), fs.unlink(previousRemoteTreePath), fs.unlink(localFileHashesPath)])
+
+		await Promise.all([
+			fs.unlink(this.previousLocalTreePath),
+			fs.unlink(this.previousLocalINodesPath),
+			fs.unlink(this.previousRemoteTreePath),
+			fs.unlink(this.previousRemoteUUIDsPath),
+			fs.unlink(this.localFileHashesPath)
+		])
 	}
 }
 

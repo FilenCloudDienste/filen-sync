@@ -97,8 +97,8 @@ export type DoneTask = { path: string } & (
  */
 export class Tasks {
 	private readonly sync: Sync
-	private readonly transfersSemaphore = new Semaphore(16)
-	private readonly normalSemaphore = new Semaphore(32)
+	private readonly transfersSemaphore = new Semaphore(10)
+	private readonly normalSemaphore = new Semaphore(20)
 
 	/**
 	 * Creates an instance of Tasks.
@@ -541,14 +541,14 @@ export class Tasks {
 	 *
 	 * @public
 	 * @async
-	 * @param {{ deltas: Delta[] }} param0
-	 * @param {{}} param0.deltas
+	 * @param {{ deltasSorted: Delta[] }} param0
+	 * @param {{}} param0.deltasSorted
 	 * @returns {Promise<{
 	 * 		doneTasks: DoneTask[]
 	 * 		errors: TaskError[]
 	 * 	}>}
 	 */
-	public async process({ deltas }: { deltas: Delta[] }): Promise<{
+	public async process({ deltasSorted }: { deltasSorted: Delta[] }): Promise<{
 		doneTasks: DoneTask[]
 		errors: TaskError[]
 	}> {
@@ -561,48 +561,6 @@ export class Tasks {
 
 		const executed: DoneTask[] = []
 		const errors: TaskError[] = []
-		// Work on deltas from "left to right" (ascending order, path length).
-		const deltasSorted = deltas.sort((a, b) => a.path.split("/").length - b.path.split("/").length)
-		const renameRemoteDirectoryDeltas: Delta[] = []
-		const renameRemoteFileDeltas: Delta[] = []
-		const renameLocalDirectoryDeltas: Delta[] = []
-		const renameLocalFileDeltas: Delta[] = []
-		const deleteRemoteDirectoryDeltas: Delta[] = []
-		const deleteRemoteFileDeltas: Delta[] = []
-		const deleteLocalDirectoryDeltas: Delta[] = []
-		const deleteLocalFileDeltas: Delta[] = []
-		const createRemoteDirectoryDeltas: Delta[] = []
-		const createLocalDirectoryDeltas: Delta[] = []
-		const uploadFileDeltas: Delta[] = []
-		const downloadFileDeltas: Delta[] = []
-
-		for (const delta of deltasSorted) {
-			if (delta.type === "renameRemoteDirectory") {
-				renameRemoteDirectoryDeltas.push(delta)
-			} else if (delta.type === "renameRemoteFile") {
-				renameRemoteFileDeltas.push(delta)
-			} else if (delta.type === "renameLocalDirectory") {
-				renameLocalDirectoryDeltas.push(delta)
-			} else if (delta.type === "renameLocalFile") {
-				renameLocalFileDeltas.push(delta)
-			} else if (delta.type === "deleteRemoteDirectory") {
-				deleteRemoteDirectoryDeltas.push(delta)
-			} else if (delta.type === "deleteRemoteFile") {
-				deleteRemoteFileDeltas.push(delta)
-			} else if (delta.type === "deleteLocalDirectory") {
-				deleteLocalDirectoryDeltas.push(delta)
-			} else if (delta.type === "deleteLocalFile") {
-				deleteLocalFileDeltas.push(delta)
-			} else if (delta.type === "createRemoteDirectory") {
-				createRemoteDirectoryDeltas.push(delta)
-			} else if (delta.type === "createLocalDirectory") {
-				createLocalDirectoryDeltas.push(delta)
-			} else if (delta.type === "uploadFile") {
-				uploadFileDeltas.push(delta)
-			} else if (delta.type === "downloadFile") {
-				downloadFileDeltas.push(delta)
-			}
-		}
 
 		const process = async (delta: Delta): Promise<void> => {
 			if (this.sync.removed) {
@@ -670,48 +628,88 @@ export class Tasks {
 		// 11. File uploads
 		// 12. File downloads
 
-		for (const delta of renameLocalDirectoryDeltas) {
+		for (const delta of deltasSorted) {
+			if (delta.type !== "renameLocalDirectory") {
+				continue
+			}
+
 			await process(delta)
 		}
 
-		for (const delta of renameLocalFileDeltas) {
+		for (const delta of deltasSorted) {
+			if (delta.type !== "renameLocalFile") {
+				continue
+			}
+
 			await process(delta)
 		}
 
-		for (const delta of renameRemoteDirectoryDeltas) {
+		for (const delta of deltasSorted) {
+			if (delta.type !== "renameRemoteDirectory") {
+				continue
+			}
+
 			await process(delta)
 		}
 
-		for (const delta of renameRemoteFileDeltas) {
+		for (const delta of deltasSorted) {
+			if (delta.type !== "renameRemoteFile") {
+				continue
+			}
+
 			await process(delta)
 		}
 
-		for (const delta of deleteLocalDirectoryDeltas) {
+		for (const delta of deltasSorted) {
+			if (delta.type !== "deleteLocalDirectory") {
+				continue
+			}
+
 			await process(delta)
 		}
 
-		for (const delta of deleteLocalFileDeltas) {
+		for (const delta of deltasSorted) {
+			if (delta.type !== "deleteLocalFile") {
+				continue
+			}
+
 			await process(delta)
 		}
 
-		for (const delta of deleteRemoteDirectoryDeltas) {
+		for (const delta of deltasSorted) {
+			if (delta.type !== "deleteRemoteDirectory") {
+				continue
+			}
+
 			await process(delta)
 		}
 
-		for (const delta of deleteRemoteFileDeltas) {
+		for (const delta of deltasSorted) {
+			if (delta.type !== "deleteRemoteFile") {
+				continue
+			}
+
 			await process(delta)
 		}
 
-		for (const delta of createLocalDirectoryDeltas) {
+		for (const delta of deltasSorted) {
+			if (delta.type !== "createLocalDirectory") {
+				continue
+			}
+
 			await process(delta)
 		}
 
-		for (const delta of createRemoteDirectoryDeltas) {
+		for (const delta of deltasSorted) {
+			if (delta.type !== "createRemoteDirectory") {
+				continue
+			}
+
 			await process(delta)
 		}
 
-		await promiseAllChunked(uploadFileDeltas.map(process))
-		await promiseAllChunked(downloadFileDeltas.map(process))
+		await promiseAllChunked(deltasSorted.filter(delta => delta.type === "uploadFile").map(process))
+		await promiseAllChunked(deltasSorted.filter(delta => delta.type === "downloadFile").map(process))
 
 		return {
 			doneTasks: executed,

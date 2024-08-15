@@ -14,6 +14,7 @@ import Lock from "./lock"
 import pathModule from "path"
 import fs from "fs-extra"
 import { v4 as uuidv4 } from "uuid"
+import { runGC } from "./gc"
 
 /**
  * Sync
@@ -362,7 +363,7 @@ export class Sync {
 					})
 
 					if (!currentLocalTree.changed && !currentRemoteTree.changed) {
-						if (this.taskErrors.length === 0) {
+						/*if (this.taskErrors.length === 0) {
 							postMessageToMain({
 								type: "cycleSavingStateStarted",
 								syncPair: this.syncPair
@@ -379,11 +380,13 @@ export class Sync {
 								await this.state.save()
 							}
 
+							runGC()
+
 							postMessageToMain({
 								type: "cycleSavingStateDone",
 								syncPair: this.syncPair
 							})
-						}
+						}*/
 
 						postMessageToMain({
 							type: "cycleSuccess",
@@ -420,11 +423,6 @@ export class Sync {
 					})
 
 					postMessageToMain({
-						type: "cycleProcessingDeltasDone",
-						syncPair: this.syncPair
-					})
-
-					postMessageToMain({
 						type: "deltasCount",
 						syncPair: this.syncPair,
 						data: {
@@ -444,11 +442,16 @@ export class Sync {
 					})
 
 					postMessageToMain({
+						type: "cycleProcessingDeltasDone",
+						syncPair: this.syncPair
+					})
+
+					postMessageToMain({
 						type: "cycleProcessingTasksStarted",
 						syncPair: this.syncPair
 					})
 
-					const { doneTasks, errors } = await this.tasks.process({ deltas })
+					const { doneTasks, errors } = await this.tasks.process({ deltasSorted: deltas })
 
 					postMessageToMain({
 						type: "cycleProcessingTasksDone",
@@ -545,6 +548,8 @@ export class Sync {
 							syncPair: this.syncPair
 						})
 					}
+
+					runGC()
 
 					postMessageToMain({
 						type: "cycleSuccess",

@@ -157,10 +157,11 @@ export class RemoteFileSystem {
 		}
 
 		const folderNames: Record<string, string> = { base: "/" }
-		const tree: RemoteDirectoryTree = {}
-		const uuids: RemoteDirectoryUUIDs = {}
 		const pathsAdded: Record<string, boolean> = {}
-		const ignored: RemoteTreeIgnored[] = []
+
+		this.getDirectoryTreeCache.ignored = []
+		this.getDirectoryTreeCache.tree = {}
+		this.getDirectoryTreeCache.uuids = {}
 
 		for (const folder of dir.folders) {
 			try {
@@ -180,7 +181,7 @@ export class RemoteFileSystem {
 				}
 
 				if (isPathOverMaxLength(localPath)) {
-					ignored.push({
+					this.getDirectoryTreeCache.ignored.push({
 						localPath,
 						relativePath: folderPath,
 						reason: "pathLength"
@@ -190,7 +191,7 @@ export class RemoteFileSystem {
 				}
 
 				if (isNameOverMaxLength(decrypted.name)) {
-					ignored.push({
+					this.getDirectoryTreeCache.ignored.push({
 						localPath,
 						relativePath: folderPath,
 						reason: "nameLength"
@@ -200,7 +201,7 @@ export class RemoteFileSystem {
 				}
 
 				if (!isValidPath(localPath)) {
-					ignored.push({
+					this.getDirectoryTreeCache.ignored.push({
 						localPath,
 						relativePath: folderPath,
 						reason: "invalidPath"
@@ -210,7 +211,7 @@ export class RemoteFileSystem {
 				}
 
 				if (isRelativePathIgnoredByDefault(folderPath)) {
-					ignored.push({
+					this.getDirectoryTreeCache.ignored.push({
 						localPath,
 						relativePath: folderPath,
 						reason: "defaultIgnore"
@@ -220,7 +221,7 @@ export class RemoteFileSystem {
 				}
 
 				if (this.sync.ignorer.ignores(folderPath)) {
-					ignored.push({
+					this.getDirectoryTreeCache.ignored.push({
 						localPath,
 						relativePath: folderPath,
 						reason: "filenIgnore"
@@ -230,7 +231,7 @@ export class RemoteFileSystem {
 				}
 
 				if (this.sync.excludeDotFiles && pathIncludesDotFile(folderPath)) {
-					ignored.push({
+					this.getDirectoryTreeCache.ignored.push({
 						localPath,
 						relativePath: folderPath,
 						reason: "dotFile"
@@ -242,7 +243,7 @@ export class RemoteFileSystem {
 				const lowercasePath = folderPath.toLowerCase()
 
 				if (pathsAdded[lowercasePath]) {
-					ignored.push({
+					this.getDirectoryTreeCache.ignored.push({
 						localPath,
 						relativePath: folderPath,
 						reason: "duplicate"
@@ -265,8 +266,8 @@ export class RemoteFileSystem {
 					path: folderPath
 				}
 
-				tree[folderPath] = item
-				uuids[folder[0]] = item
+				this.getDirectoryTreeCache.tree[folderPath] = item
+				this.getDirectoryTreeCache.uuids[folder[0]] = item
 			} catch (e) {
 				this.sync.worker.logger.log("error", e, "filesystems.remote.getDirectoryTree")
 				this.sync.worker.logger.log("error", e)
@@ -295,7 +296,7 @@ export class RemoteFileSystem {
 					}
 
 					if (decrypted.size <= 0) {
-						ignored.push({
+						this.getDirectoryTreeCache.ignored.push({
 							localPath,
 							relativePath: filePath,
 							reason: "empty"
@@ -305,7 +306,7 @@ export class RemoteFileSystem {
 					}
 
 					if (isPathOverMaxLength(localPath)) {
-						ignored.push({
+						this.getDirectoryTreeCache.ignored.push({
 							localPath,
 							relativePath: filePath,
 							reason: "pathLength"
@@ -315,7 +316,7 @@ export class RemoteFileSystem {
 					}
 
 					if (isNameOverMaxLength(decrypted.name)) {
-						ignored.push({
+						this.getDirectoryTreeCache.ignored.push({
 							localPath,
 							relativePath: filePath,
 							reason: "nameLength"
@@ -325,7 +326,7 @@ export class RemoteFileSystem {
 					}
 
 					if (!isValidPath(localPath)) {
-						ignored.push({
+						this.getDirectoryTreeCache.ignored.push({
 							localPath,
 							relativePath: filePath,
 							reason: "invalidPath"
@@ -335,7 +336,7 @@ export class RemoteFileSystem {
 					}
 
 					if (isRelativePathIgnoredByDefault(filePath)) {
-						ignored.push({
+						this.getDirectoryTreeCache.ignored.push({
 							localPath,
 							relativePath: filePath,
 							reason: "defaultIgnore"
@@ -345,7 +346,7 @@ export class RemoteFileSystem {
 					}
 
 					if (this.sync.ignorer.ignores(filePath)) {
-						ignored.push({
+						this.getDirectoryTreeCache.ignored.push({
 							localPath,
 							relativePath: filePath,
 							reason: "filenIgnore"
@@ -355,7 +356,7 @@ export class RemoteFileSystem {
 					}
 
 					if (this.sync.excludeDotFiles && pathIncludesDotFile(filePath)) {
-						ignored.push({
+						this.getDirectoryTreeCache.ignored.push({
 							localPath,
 							relativePath: filePath,
 							reason: "dotFile"
@@ -367,7 +368,7 @@ export class RemoteFileSystem {
 					const lowercasePath = filePath.toLowerCase()
 
 					if (pathsAdded[lowercasePath]) {
-						ignored.push({
+						this.getDirectoryTreeCache.ignored.push({
 							localPath,
 							relativePath: filePath,
 							reason: "duplicate"
@@ -395,8 +396,8 @@ export class RemoteFileSystem {
 						path: filePath
 					}
 
-					tree[filePath] = item
-					uuids[item.uuid] = item
+					this.getDirectoryTreeCache.tree[filePath] = item
+					this.getDirectoryTreeCache.uuids[item.uuid] = item
 				} catch (e) {
 					this.sync.worker.logger.log("error", e, "filesystems.remote.getDirectoryTree")
 					this.sync.worker.logger.log("error", e)
@@ -405,19 +406,14 @@ export class RemoteFileSystem {
 		)
 
 		this.previousTreeRawResponse = rawEx.length === 2 ? rawEx[0] ?? "" : ""
-		this.getDirectoryTreeCache = {
-			timestamp: now,
-			tree,
-			uuids,
-			ignored
-		}
+		this.getDirectoryTreeCache.timestamp = now
 
 		return {
 			result: {
 				tree: this.getDirectoryTreeCache.tree,
 				uuids: this.getDirectoryTreeCache.uuids
 			},
-			ignored,
+			ignored: this.getDirectoryTreeCache.ignored,
 			changed: true
 		}
 	}

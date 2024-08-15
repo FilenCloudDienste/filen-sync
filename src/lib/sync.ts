@@ -510,7 +510,6 @@ export class Sync {
 							}
 
 							if (didRemoteChanges) {
-								this.remoteFileSystem.previousTreeRawResponseHash = ""
 								this.remoteFileSystem.getDirectoryTreeCache = {
 									timestamp: 0,
 									tree: {},

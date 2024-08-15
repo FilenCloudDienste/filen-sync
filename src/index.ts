@@ -77,7 +77,6 @@ export class SyncWorker {
 				errors: []
 			}
 
-			sync.remoteFileSystem.previousTreeRawResponseHash = ""
 			sync.remoteFileSystem.getDirectoryTreeCache = {
 				timestamp: 0,
 				tree: {},

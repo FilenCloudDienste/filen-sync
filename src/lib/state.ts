@@ -1,14 +1,14 @@
 import type Sync from "./sync"
 import pathModule from "path"
 import fs from "fs-extra"
-import { serialize, deserialize } from "v8"
 import { type RemoteTree, type RemoteItem } from "./filesystems/remote"
 import { type LocalTree, type LocalItem } from "./filesystems/local"
 import { type DoneTask } from "./tasks"
 import { replacePathStartWithFromAndTo, normalizeUTime } from "../utils"
-import writeFileAtomic from "write-file-atomic"
+import readline from "readline"
+import { v4 as uuidv4 } from "uuid"
 
-const STATE_VERSION = 1
+const STATE_VERSION = 2
 
 /**
  * State
@@ -22,14 +22,18 @@ export class State {
 	private readonly sync: Sync
 	public readonly statePath: string
 	public readonly previousLocalTreePath: string
+	public readonly previousLocalINodesPath: string
 	public readonly previousRemoteTreePath: string
+	public readonly previousRemoteUUIDsPath: string
 	public readonly localFileHashesPath: string
 
 	public constructor(sync: Sync) {
 		this.sync = sync
 		this.statePath = pathModule.join(this.sync.dbPath, "state", `v${STATE_VERSION}`, sync.syncPair.uuid)
 		this.previousLocalTreePath = pathModule.join(this.statePath, "previousLocalTree")
+		this.previousLocalINodesPath = pathModule.join(this.statePath, "previousLocalINodes")
 		this.previousRemoteTreePath = pathModule.join(this.statePath, "previousRemoteTree")
+		this.previousRemoteUUIDsPath = pathModule.join(this.statePath, "previousRemoteUUIDs")
 		this.localFileHashesPath = pathModule.join(this.statePath, "localFileHashes")
 	}
 
@@ -307,10 +311,107 @@ export class State {
 		}
 	}
 
+	public async writeLargeRecordSerializedAndAtomically(
+		destination: string,
+		record: Record<string | number, RemoteItem | LocalItem | string | number>
+	): Promise<void> {
+		await fs.ensureDir(pathModule.dirname(destination))
+
+		const tmpDestination = pathModule.join(pathModule.dirname(destination), `${uuidv4()}.tmp`)
+
+		try {
+			// eslint-disable-next-line no-async-promise-executor
+			await new Promise<void>(async (resolve, reject) => {
+				try {
+					let didError = false
+					const stream = fs.createWriteStream(tmpDestination, {
+						encoding: "utf-8"
+					})
+
+					stream.on("error", err => {
+						didError = true
+
+						reject(err)
+					})
+
+					for (const prop in record) {
+						if (didError) {
+							break
+						}
+
+						if (
+							!stream.write(
+								JSON.stringify({
+									prop,
+									data: record[prop]
+								}) + "\n"
+							)
+						) {
+							await new Promise<void>(resolve => stream.once("drain", resolve))
+						}
+					}
+
+					await new Promise<void>(resolve => stream.end(resolve))
+
+					if (didError) {
+						return
+					}
+
+					await fs.move(tmpDestination, destination, {
+						overwrite: true
+					})
+
+					resolve()
+				} catch (e) {
+					reject(e)
+				}
+			})
+		} finally {
+			if (await fs.pathExists(tmpDestination)) {
+				await fs.unlink(tmpDestination)
+			}
+		}
+	}
+
+	public async readLargeRecordFromLineStream<T = unknown>(inputPath: string): Promise<Record<string, T>> {
+		const record: Record<string, T> = {}
+
+		const rl = readline.createInterface({
+			input: fs.createReadStream(inputPath, {
+				encoding: "utf-8"
+			}),
+			crlfDelay: Infinity,
+			terminal: false
+		})
+
+		try {
+			for await (const line of rl) {
+				if (line.trim()) {
+					try {
+						const parsed: {
+							prop: string
+							data: T
+						} = JSON.parse(line)
+
+						if (parsed && typeof parsed === "object" && "prop" in parsed && "data" in parsed) {
+							record[parsed.prop] = parsed.data
+						}
+					} catch {
+						// Noop
+					}
+				}
+			}
+		} finally {
+			rl.close()
+		}
+
+		return record
+	}
+
 	public async saveLocalFileHashes(): Promise<void> {
 		await fs.ensureDir(this.statePath)
 
-		await writeFileAtomic(this.localFileHashesPath, serialize(this.sync.localFileHashes))
+		await this.writeLargeRecordSerializedAndAtomically(this.localFileHashesPath, this.sync.localFileHashes)
 	}
 
 	public async loadLocalFileHashes(): Promise<void> {
@@ -320,7 +421,7 @@ export class State {
 			return
 		}
 
-		this.sync.localFileHashes = deserialize(await fs.readFile(this.localFileHashesPath))
+		this.sync.localFileHashes = await this.readLargeRecordFromLineStream<string>(this.localFileHashesPath)
 	}
 
 	public async initialize(): Promise<void> {
@@ -336,19 +437,28 @@ export class State {
 	public async loadPreviousTrees(): Promise<void> {
 		await fs.ensureDir(this.statePath)
 
-		if (!(await fs.exists(this.previousLocalTreePath)) || !(await fs.exists(this.previousRemoteTreePath))) {
+		if (
+			!(await fs.exists(this.previousLocalTreePath)) ||
+			!(await fs.exists(this.previousRemoteTreePath)) ||
+			!(await fs.exists(this.previousRemoteTreePath)) ||
+			!(await fs.exists(this.previousRemoteUUIDsPath))
+		) {
 			return
 		}
 
-		this.sync.previousLocalTree = deserialize(await fs.readFile(this.previousLocalTreePath))
-		this.sync.previousRemoteTree = deserialize(await fs.readFile(this.previousRemoteTreePath))
+		this.sync.previousLocalTree.tree = await this.readLargeRecordFromLineStream<LocalItem>(this.previousLocalTreePath)
+		this.sync.previousLocalTree.inodes = await this.readLargeRecordFromLineStream<LocalItem>(this.previousLocalINodesPath)
+		this.sync.previousRemoteTree.tree = await this.readLargeRecordFromLineStream<RemoteItem>(this.previousRemoteTreePath)
+		this.sync.previousRemoteTree.uuids = await this.readLargeRecordFromLineStream<RemoteItem>(this.previousRemoteUUIDsPath)
 	}
 
 	public async savePreviousTrees(): Promise<void> {
 		await fs.ensureDir(this.statePath)
 
-		await writeFileAtomic(this.previousLocalTreePath, serialize(this.sync.previousLocalTree))
-		await writeFileAtomic(this.previousRemoteTreePath, serialize(this.sync.previousRemoteTree))
+		await this.writeLargeRecordSerializedAndAtomically(this.previousLocalTreePath, this.sync.previousLocalTree.tree)
+		await this.writeLargeRecordSerializedAndAtomically(this.previousLocalINodesPath, this.sync.previousLocalTree.inodes)
+		await this.writeLargeRecordSerializedAndAtomically(this.previousRemoteTreePath, this.sync.previousRemoteTree.tree)
+		await this.writeLargeRecordSerializedAndAtomically(this.previousRemoteUUIDsPath, this.sync.previousRemoteTree.uuids)
 	}
 
 	public async clear(): Promise<void> {
@@ -356,7 +466,9 @@ export class State {
 
 		await Promise.all([
 			fs.unlink(this.previousLocalTreePath),
+			fs.unlink(this.previousLocalINodesPath),
 			fs.unlink(this.previousRemoteTreePath),
+			fs.unlink(this.previousRemoteUUIDsPath),
 			fs.unlink(this.localFileHashesPath)
 		])
 	}

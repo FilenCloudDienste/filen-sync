@@ -16,14 +16,13 @@ import {
 	replacePathStartWithFromAndTo,
 	pathIncludesDotFile,
 	normalizeUTime
-	//fastHash
 } from "../../utils"
 import { v4 as uuidv4 } from "uuid"
 import { LOCAL_TRASH_NAME } from "../../constants"
 import { type LocalItem } from "./local"
 import writeFileAtomic from "write-file-atomic"
 
-export type RemoteItem = Prettify<DistributiveOmit<CloudItemTree, "parent" | "color"> & { path: string }>
+export type RemoteItem = Prettify<DistributiveOmit<CloudItemTree, "parent" | "color" | "favorited" | "timestamp"> & { path: string }>
 export type RemoteDirectoryTree = Record<string, RemoteItem>
 export type RemoteDirectoryUUIDs = Record<string, RemoteItem>
 export type RemoteTree = {
@@ -60,7 +59,6 @@ export class RemoteFileSystem {
 		uuids: {},
 		ignored: []
 	}
-	public previousTreeRawResponseHash: string = ""
 	private readonly mutex = new Semaphore(1)
 	private readonly mkdirMutex = new Semaphore(1)
 	public readonly itemsMutex = new Semaphore(1)
@@ -133,21 +131,6 @@ export class RemoteFileSystem {
 				changed: false
 			}
 		}
-
-		/*
-		// eslint-disable-next-line quotes
-		const rawEx = dir.raw.split('"randomBytes"')
-		const rawTreeHashed = fastHash(rawEx[0] ?? "")
-
-		// Compare API response with the previous dataset, this way we can save time computing the tree if it's the same
-		if (rawEx.length === 2 && this.previousTreeRawResponseHash === rawTreeHashed && this.getDirectoryTreeCache.timestamp !== 0) {
-			return {
-				result: this.getDirectoryTreeCache,
-				ignored: this.getDirectoryTreeCache.ignored,
-				changed: false
-			}
-		}
-		*/
 
 		const baseFolder = dir.folders[0]
 
@@ -414,7 +397,6 @@ export class RemoteFileSystem {
 			})
 		)
 
-		//this.previousTreeRawResponseHash = rawTreeHashed
 		this.getDirectoryTreeCache.timestamp = now
 
 		return {

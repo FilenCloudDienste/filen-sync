@@ -14,7 +14,6 @@ import Lock from "./lock"
 import pathModule from "path"
 import fs from "fs-extra"
 import { v4 as uuidv4 } from "uuid"
-import { runGC } from "./gc"
 
 /**
  * Sync
@@ -257,7 +256,10 @@ export class Sync {
 				this.worker.logger.log("error", "Not continueing sync cycle, got taskErrors or localTreeErrors", this.syncPair.localPath)
 				this.worker.logger.log(
 					"error",
-					{ taskErrors: this.taskErrors, localTreeErrors: this.localTreeErrors },
+					{
+						taskErrors: this.taskErrors,
+						localTreeErrors: this.localTreeErrors
+					},
 					this.syncPair.localPath
 				)
 
@@ -508,7 +510,7 @@ export class Sync {
 							}
 
 							if (didRemoteChanges) {
-								this.remoteFileSystem.previousTreeRawResponse = ""
+								this.remoteFileSystem.previousTreeRawResponseHash = ""
 								this.remoteFileSystem.getDirectoryTreeCache = {
 									timestamp: 0,
 									tree: {},
@@ -548,8 +550,6 @@ export class Sync {
 							syncPair: this.syncPair
 						})
 					}
-
-					runGC()
 
 					postMessageToMain({
 						type: "cycleSuccess",

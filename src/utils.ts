@@ -1,6 +1,6 @@
-import memoize from "lodash/memoize"
 import { DEFAULT_IGNORED } from "./constants"
 import pathModule from "path"
+import crypto from "crypto"
 
 /**
  * Chunk large Promise.all executions.
@@ -98,7 +98,7 @@ export function isNameOverMaxLength(name: string): boolean {
 	return name.length + 1 > 255
 }
 
-export const isValidPath = memoize((inputPath: string): boolean => {
+export function isValidPath(inputPath: string): boolean {
 	// eslint-disable-next-line no-control-regex
 	const illegalCharsWindows = /[<>:"/\\|?*\x00-\x1F]/
 	const reservedNamesWindows = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i
@@ -175,9 +175,9 @@ export const isValidPath = memoize((inputPath: string): boolean => {
 			return false
 		}
 	}
-})
+}
 
-export const isNameIgnoredByDefault = memoize((name: string): boolean => {
+export function isNameIgnoredByDefault(name: string): boolean {
 	const nameLowercase = name.toLowerCase().trim()
 	const extension = pathModule.extname(nameLowercase)
 	const extensionLowercase = extension.toLowerCase()
@@ -194,11 +194,11 @@ export const isNameIgnoredByDefault = memoize((name: string): boolean => {
 	}
 
 	return false
-})
+}
 
-export const isRelativePathIgnoredByDefault = memoize((path: string): boolean => {
+export function isRelativePathIgnoredByDefault(path: string): boolean {
 	return path.split("/").some(part => part.length > 0 && isNameIgnoredByDefault(part))
-})
+}
 
 export type SerializedError = {
 	name: string
@@ -269,9 +269,9 @@ export function replacePathStartWithFromAndTo(path: string, from: string, to: st
  * @param {string} path
  * @returns {boolean}
  */
-export const pathIncludesDotFile = memoize((path: string): boolean => {
+export function pathIncludesDotFile(path: string): boolean {
 	return path.split("/").some(part => part.length > 0 && part.trimStart().startsWith("."))
-})
+}
 
 export function normalizeUTime(time: number): number {
 	if (Number.isInteger(time)) {
@@ -293,4 +293,8 @@ export function normalizeUTime(time: number): number {
  */
 export function normalizeLastModifiedMsForComparison(time: number): number {
 	return Math.floor(time / 1000)
+}
+
+export function fastHash(input: string): string {
+	return crypto.createHash("md5").update(input).digest("hex")
 }

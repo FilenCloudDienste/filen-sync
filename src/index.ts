@@ -77,15 +77,13 @@ export class SyncWorker {
 				errors: []
 			}
 
-			sync.remoteFileSystem.previousTreeRawResponse = ""
+			sync.remoteFileSystem.previousTreeRawResponseHash = ""
 			sync.remoteFileSystem.getDirectoryTreeCache = {
 				timestamp: 0,
 				tree: {},
 				uuids: {},
 				ignored: []
 			}
-
-			sync.ignorer.cache = {}
 
 			break
 		}

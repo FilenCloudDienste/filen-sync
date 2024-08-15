@@ -7,7 +7,7 @@ import { type DistributiveOmit, type Prettify } from "../../types"
 import { postMessageToMain } from "../ipc"
 import {
 	convertTimestampToMs,
-	promiseAllSettledChunked,
+	promiseAllChunked,
 	isPathOverMaxLength,
 	isNameOverMaxLength,
 	isValidPath,
@@ -16,13 +16,14 @@ import {
 	replacePathStartWithFromAndTo,
 	pathIncludesDotFile,
 	normalizeUTime
+	//fastHash
 } from "../../utils"
 import { v4 as uuidv4 } from "uuid"
 import { LOCAL_TRASH_NAME } from "../../constants"
 import { type LocalItem } from "./local"
 import writeFileAtomic from "write-file-atomic"
 
-export type RemoteItem = Prettify<DistributiveOmit<CloudItemTree, "parent"> & { path: string }>
+export type RemoteItem = Prettify<DistributiveOmit<CloudItemTree, "parent" | "color"> & { path: string }>
 export type RemoteDirectoryTree = Record<string, RemoteItem>
 export type RemoteDirectoryUUIDs = Record<string, RemoteItem>
 export type RemoteTree = {
@@ -59,10 +60,11 @@ export class RemoteFileSystem {
 		uuids: {},
 		ignored: []
 	}
-	public previousTreeRawResponse: string = ""
+	public previousTreeRawResponseHash: string = ""
 	private readonly mutex = new Semaphore(1)
 	private readonly mkdirMutex = new Semaphore(1)
 	public readonly itemsMutex = new Semaphore(1)
+	public readonly listSemaphore = new Semaphore(64)
 	private deviceIdCache: string = ""
 
 	public constructor(sync: Sync) {
@@ -114,7 +116,7 @@ export class RemoteFileSystem {
 			uuid: this.sync.syncPair.remoteParentUUID,
 			deviceId,
 			skipCache,
-			includeRaw: true
+			includeRaw: false
 		})
 		const now = Date.now()
 
@@ -132,17 +134,20 @@ export class RemoteFileSystem {
 			}
 		}
 
+		/*
 		// eslint-disable-next-line quotes
 		const rawEx = dir.raw.split('"randomBytes"')
+		const rawTreeHashed = fastHash(rawEx[0] ?? "")
 
 		// Compare API response with the previous dataset, this way we can save time computing the tree if it's the same
-		if (rawEx.length === 2 && this.previousTreeRawResponse === rawEx[0] && this.getDirectoryTreeCache.timestamp !== 0) {
+		if (rawEx.length === 2 && this.previousTreeRawResponseHash === rawTreeHashed && this.getDirectoryTreeCache.timestamp !== 0) {
 			return {
 				result: this.getDirectoryTreeCache,
 				ignored: this.getDirectoryTreeCache.ignored,
 				changed: false
 			}
 		}
+		*/
 
 		const baseFolder = dir.folders[0]
 
@@ -278,8 +283,10 @@ export class RemoteFileSystem {
 			throw new Error("Could not build directory tree.")
 		}
 
-		await promiseAllSettledChunked(
+		await promiseAllChunked(
 			dir.files.map(async file => {
+				await this.listSemaphore.acquire()
+
 				try {
 					const decrypted = await this.sync.sdk.crypto().decrypt().fileMetadata({ metadata: file[5] })
 
@@ -401,11 +408,13 @@ export class RemoteFileSystem {
 				} catch (e) {
 					this.sync.worker.logger.log("error", e, "filesystems.remote.getDirectoryTree")
 					this.sync.worker.logger.log("error", e)
+				} finally {
+					this.listSemaphore.release()
 				}
 			})
 		)
 
-		this.previousTreeRawResponse = rawEx.length === 2 ? rawEx[0] ?? "" : ""
+		//this.previousTreeRawResponseHash = rawTreeHashed
 		this.getDirectoryTreeCache.timestamp = now
 
 		return {

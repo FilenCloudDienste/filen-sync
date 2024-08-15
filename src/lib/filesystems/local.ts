@@ -1,7 +1,7 @@
 import fs from "fs-extra"
 import watcher from "@parcel/watcher"
 import {
-	promiseAllSettledChunked,
+	promiseAllChunked,
 	isRelativePathIgnoredByDefault,
 	serializeError,
 	replacePathStartWithFromAndTo,
@@ -87,7 +87,7 @@ export class LocalFileSystem {
 	public readonly itemsMutex = new Semaphore(1)
 	public readonly mutex = new Semaphore(1)
 	public readonly mkdirMutex = new Semaphore(1)
-	public readonly listSemaphore = new Semaphore(256)
+	public readonly listSemaphore = new Semaphore(64)
 	public readonly watcherMutex = new Semaphore(1)
 
 	/**
@@ -136,7 +136,7 @@ export class LocalFileSystem {
 		this.getDirectoryTreeCache.ignored = []
 		this.getDirectoryTreeCache.errors = []
 
-		await promiseAllSettledChunked(
+		await promiseAllChunked(
 			dir.map(async entry => {
 				await this.listSemaphore.acquire()
 

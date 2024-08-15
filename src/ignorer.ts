@@ -10,7 +10,6 @@ export class Ignorer {
 	private sync: Sync
 	public instance = ignore()
 	public name: string = "ignorer"
-	public cache: Record<string, boolean> = {}
 
 	public constructor(sync: Sync, name: string = "ignorer") {
 		this.sync = sync
@@ -84,10 +83,6 @@ export class Ignorer {
 	}
 
 	public ignores(path: string): boolean {
-		if (this.cache[path]) {
-			return this.cache[path]!
-		}
-
 		const normalizedPath = path.startsWith("\\") ? path.slice(1) : path.startsWith("/") ? path.slice(1) : path
 
 		if (normalizedPath.length === 0) {
@@ -95,8 +90,6 @@ export class Ignorer {
 		}
 
 		const ig = this.instance.ignores(normalizedPath)
-
-		this.cache[path] = ig
 
 		return ig
 	}

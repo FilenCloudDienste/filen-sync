@@ -7,7 +7,6 @@ import { type LocalTree, type LocalItem } from "./filesystems/local"
 import { type DoneTask } from "./tasks"
 import { replacePathStartWithFromAndTo, normalizeUTime } from "../utils"
 import writeFileAtomic from "write-file-atomic"
-import { runGC } from "./gc"
 
 const STATE_VERSION = 1
 
@@ -327,15 +326,11 @@ export class State {
 	public async initialize(): Promise<void> {
 		await this.loadLocalFileHashes()
 		await this.loadPreviousTrees()
-
-		runGC()
 	}
 
 	public async save(): Promise<void> {
 		await this.saveLocalFileHashes()
 		await this.savePreviousTrees()
-
-		runGC()
 	}
 
 	public async loadPreviousTrees(): Promise<void> {

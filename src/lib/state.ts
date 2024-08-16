@@ -437,6 +437,18 @@ export class State {
 	public async loadPreviousTrees(): Promise<void> {
 		await fs.ensureDir(this.statePath)
 
+		// Clear leftover .tmp files from previous runs
+		const dir = await fs.readdir(this.statePath, {
+			recursive: false,
+			encoding: "utf-8"
+		})
+
+		for (const file of dir) {
+			if (file.endsWith(".tmp")) {
+				await fs.unlink(pathModule.join(this.statePath, file))
+			}
+		}
+
 		if (
 			!(await fs.exists(this.previousLocalTreePath)) ||
 			!(await fs.exists(this.previousRemoteTreePath)) ||

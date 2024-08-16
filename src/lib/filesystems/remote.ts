@@ -62,7 +62,7 @@ export class RemoteFileSystem {
 	private readonly mutex = new Semaphore(1)
 	private readonly mkdirMutex = new Semaphore(1)
 	public readonly itemsMutex = new Semaphore(1)
-	public readonly listSemaphore = new Semaphore(64)
+	public readonly listSemaphore = new Semaphore(128)
 	private deviceIdCache: string = ""
 
 	public constructor(sync: Sync) {

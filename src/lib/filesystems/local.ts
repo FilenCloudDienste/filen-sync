@@ -87,7 +87,7 @@ export class LocalFileSystem {
 	public readonly itemsMutex = new Semaphore(1)
 	public readonly mutex = new Semaphore(1)
 	public readonly mkdirMutex = new Semaphore(1)
-	public readonly listSemaphore = new Semaphore(64)
+	public readonly listSemaphore = new Semaphore(128)
 	public readonly watcherMutex = new Semaphore(1)
 
 	/**
@@ -269,6 +269,13 @@ export class LocalFileSystem {
 		)
 
 		this.getDirectoryTreeCache.timestamp = Date.now()
+
+		// Clear old local file hashes that are not present anymore
+		for (const path in this.sync.localFileHashes) {
+			if (!this.getDirectoryTreeCache.tree[path]) {
+				delete this.sync.localFileHashes[path]
+			}
+		}
 
 		return {
 			result: {

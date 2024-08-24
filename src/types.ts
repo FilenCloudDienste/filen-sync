@@ -309,6 +309,13 @@ export type SyncMessage =
 					}
 			  }
 			| {
+					type: "localDirectoryWatcherError"
+					data: {
+						error: SerializedError
+						uuid: string
+					}
+			  }
+			| {
 					type: "cycleStarted"
 			  }
 			| {

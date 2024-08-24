@@ -89,6 +89,7 @@ export class LocalFileSystem {
 	public readonly mkdirMutex = new Semaphore(1)
 	public readonly listSemaphore = new Semaphore(128)
 	public readonly watcherMutex = new Semaphore(1)
+	public watcherInstanceFallbackInterval: ReturnType<typeof setInterval> | undefined = undefined
 
 	/**
 	 * Creates an instance of LocalFileSystem.
@@ -323,6 +324,30 @@ export class LocalFileSystem {
 							: undefined
 				}
 			)
+
+			clearInterval(this.watcherInstanceFallbackInterval)
+		} catch (e) {
+			this.sync.worker.logger.log("error", e, "startDirectoryWatcher")
+			this.sync.worker.logger.log("error", e)
+
+			if (e instanceof Error) {
+				postMessageToMain({
+					type: "localDirectoryWatcherError",
+					syncPair: this.sync.syncPair,
+					data: {
+						error: serializeError(e),
+						uuid: uuidv4()
+					}
+				})
+			}
+
+			clearInterval(this.watcherInstanceFallbackInterval)
+
+			this.lastDirectoryChangeTimestamp = Date.now()
+
+			this.watcherInstanceFallbackInterval = setInterval(() => {
+				this.lastDirectoryChangeTimestamp = Date.now()
+			}, 60000)
 		} finally {
 			this.watcherMutex.release()
 		}
@@ -338,6 +363,8 @@ export class LocalFileSystem {
 	 */
 	public async stopDirectoryWatcher(): Promise<void> {
 		await this.watcherMutex.acquire()
+
+		clearInterval(this.watcherInstanceFallbackInterval)
 
 		try {
 			if (!this.watcherInstance) {

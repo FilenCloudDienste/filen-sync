@@ -1,6 +1,6 @@
 {
 	"name": "@filen/sync",
-	"version": "0.1.54",
+	"version": "0.1.55",
 	"description": "Filen Sync",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
@@ -24,7 +24,7 @@
 		"filen"
 	],
 	"engines": {
-		"node": ">=18"
+		"node": ">=20"
 	},
 	"author": "Filen",
 	"license": "AGPLv3",

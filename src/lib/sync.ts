@@ -194,11 +194,17 @@ export class Sync {
 	}
 
 	public async cleanup(): Promise<void> {
-		await this.localFileSystem.stopDirectoryWatcher()
+		try {
+			await Promise.all([this.localFileSystem.stopDirectoryWatcher(), this.deleteLocalSyncDbFiles()])
+
+			this.worker.logger.log("info", "Cleanup done", this.syncPair.localPath)
+		} catch (e) {
+			this.worker.logger.log("error", e, "sync.cleanup")
+			this.worker.logger.log("error", e)
+		}
 
 		this.isInitialized = false
-
-		this.worker.logger.log("info", "Cleanup done", this.syncPair.localPath)
+		this.removed = true
 
 		postMessageToMain({
 			type: "cycleExited",
@@ -212,7 +218,6 @@ export class Sync {
 
 	private async run(): Promise<void> {
 		if (this.removed) {
-			await this.deleteLocalSyncDbFiles()
 			await this.cleanup()
 
 			return

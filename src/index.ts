@@ -139,6 +139,10 @@ export class SyncWorker {
 	 * @returns {Promise<void>}
 	 */
 	public async updateSyncPairs(pairs: SyncPair[]): Promise<void> {
+		if (pairs.length === 0) {
+			return
+		}
+
 		await this.updateSyncPairsMutex.acquire()
 
 		try {
@@ -192,10 +196,12 @@ export class SyncWorker {
 		}
 	}
 
-	public updateRemoved(uuid: string, removed: boolean): void {
+	public async updateRemoved(uuid: string, removed: boolean): Promise<void> {
 		for (const syncUUID in this.syncs) {
 			if (syncUUID === uuid) {
 				this.syncs[syncUUID]!.removed = removed
+
+				await this.syncs[syncUUID]!.cleanup()
 
 				const abortControllers = this.syncs[syncUUID]!.abortControllers
 

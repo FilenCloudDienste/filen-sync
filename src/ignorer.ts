@@ -79,7 +79,13 @@ export class Ignorer {
 		const filePath = pathModule.join(this.sync.dbPath, this.name, `v${IGNORER_VERSION}`, this.sync.syncPair.uuid, "filenIgnore")
 
 		await fs.ensureDir(pathModule.dirname(filePath))
-		await fs.unlink(filePath)
+
+		await fs.rm(filePath, {
+			force: true,
+			maxRetries: 60 * 10,
+			recursive: true,
+			retryDelay: 100
+		})
 	}
 
 	public ignores(path: string): boolean {

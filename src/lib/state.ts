@@ -368,7 +368,12 @@ export class State {
 			})
 		} finally {
 			if (await fs.pathExists(tmpDestination)) {
-				await fs.unlink(tmpDestination)
+				await fs.rm(tmpDestination, {
+					force: true,
+					maxRetries: 60 * 10,
+					recursive: true,
+					retryDelay: 100
+				})
 			}
 		}
 	}
@@ -445,7 +450,12 @@ export class State {
 
 		for (const file of dir) {
 			if (file.endsWith(".tmp")) {
-				await fs.unlink(pathModule.join(this.statePath, file))
+				await fs.rm(pathModule.join(this.statePath, file), {
+					force: true,
+					maxRetries: 60 * 10,
+					recursive: true,
+					retryDelay: 100
+				})
 			}
 		}
 
@@ -477,11 +487,36 @@ export class State {
 		await fs.ensureDir(this.statePath)
 
 		await Promise.all([
-			fs.unlink(this.previousLocalTreePath),
-			fs.unlink(this.previousLocalINodesPath),
-			fs.unlink(this.previousRemoteTreePath),
-			fs.unlink(this.previousRemoteUUIDsPath),
-			fs.unlink(this.localFileHashesPath)
+			fs.rm(this.previousLocalTreePath, {
+				force: true,
+				maxRetries: 60 * 10,
+				recursive: true,
+				retryDelay: 100
+			}),
+			fs.rm(this.previousLocalINodesPath, {
+				force: true,
+				maxRetries: 60 * 10,
+				recursive: true,
+				retryDelay: 100
+			}),
+			fs.rm(this.previousRemoteTreePath, {
+				force: true,
+				maxRetries: 60 * 10,
+				recursive: true,
+				retryDelay: 100
+			}),
+			fs.rm(this.previousRemoteUUIDsPath, {
+				force: true,
+				maxRetries: 60 * 10,
+				recursive: true,
+				retryDelay: 100
+			}),
+			fs.rm(this.localFileHashesPath, {
+				force: true,
+				maxRetries: 60 * 10,
+				recursive: true,
+				retryDelay: 100
+			})
 		])
 	}
 }

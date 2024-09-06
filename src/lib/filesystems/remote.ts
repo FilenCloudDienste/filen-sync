@@ -104,7 +104,13 @@ export class RemoteFileSystem {
 		const deviceIdFile = pathModule.join(this.sync.dbPath, "deviceId", `v${DEVICE_ID_VERSION}`, this.sync.syncPair.uuid)
 
 		await fs.ensureDir(pathModule.dirname(deviceIdFile))
-		await fs.unlink(deviceIdFile)
+
+		await fs.rm(deviceIdFile, {
+			force: true,
+			maxRetries: 60 * 10,
+			recursive: true,
+			retryDelay: 100
+		})
 	}
 
 	public async getDirectoryTree(skipCache: boolean = false): Promise<{

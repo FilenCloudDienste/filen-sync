@@ -25,10 +25,12 @@ import writeFileAtomic from "write-file-atomic"
 export type RemoteItem = Prettify<DistributiveOmit<CloudItemTree, "parent" | "color" | "favorited" | "timestamp"> & { path: string }>
 export type RemoteDirectoryTree = Record<string, RemoteItem>
 export type RemoteDirectoryUUIDs = Record<string, RemoteItem>
+
 export type RemoteTree = {
 	tree: RemoteDirectoryTree
 	uuids: RemoteDirectoryUUIDs
 }
+
 export type RemoteTreeIgnoredReason =
 	| "dotFile"
 	| "invalidPath"
@@ -38,6 +40,7 @@ export type RemoteTreeIgnoredReason =
 	| "defaultIgnore"
 	| "empty"
 	| "duplicate"
+
 export type RemoteTreeIgnored = {
 	localPath: string
 	relativePath: string

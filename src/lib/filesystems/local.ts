@@ -19,6 +19,7 @@ import { type CloudItem, PauseSignal } from "@filen/sdk"
 import { postMessageToMain } from "../ipc"
 import { Semaphore } from "../../semaphore"
 import { v4 as uuidv4 } from "uuid"
+import { type Watcher } from "node-watch"
 
 const pipelineAsync = promisify(pipeline)
 
@@ -33,16 +34,19 @@ export type LocalItem = {
 
 export type LocalDirectoryTree = Record<string, LocalItem>
 export type LocalDirectoryINodes = Record<number, LocalItem>
+
 export type LocalTree = {
 	tree: LocalDirectoryTree
 	inodes: LocalDirectoryINodes
 }
+
 export type LocalTreeError = {
 	localPath: string
 	relativePath: string
 	error: Error
 	uuid: string
 }
+
 export type LocalTreeIgnoredReason =
 	| "dotFile"
 	| "filenIgnore"
@@ -52,6 +56,7 @@ export type LocalTreeIgnoredReason =
 	| "invalidType"
 	| "duplicate"
 	| "permissions"
+
 export type LocalTreeIgnored = {
 	localPath: string
 	relativePath: string
@@ -83,7 +88,8 @@ export class LocalFileSystem {
 		errors: []
 	}
 	public watcherRunning = false
-	private watcherInstance: watcher.AsyncSubscription | null = null
+	private watcherInstanceParcel: watcher.AsyncSubscription | null = null
+	private watcherInstanceNode: Watcher | null = null
 	public readonly itemsMutex = new Semaphore(1)
 	public readonly mutex = new Semaphore(1)
 	public readonly mkdirMutex = new Semaphore(1)
@@ -301,11 +307,11 @@ export class LocalFileSystem {
 		await this.watcherMutex.acquire()
 
 		try {
-			if (this.watcherInstance) {
+			if (this.watcherInstanceParcel || this.watcherInstanceNode) {
 				return
 			}
 
-			this.watcherInstance = await watcher.subscribe(
+			this.watcherInstanceParcel = await watcher.subscribe(
 				this.sync.syncPair.localPath,
 				(err, events) => {
 					if (!err && events && events.length > 0) {
@@ -313,7 +319,6 @@ export class LocalFileSystem {
 					}
 				},
 				{
-					ignore: [".filen.trash.local"],
 					backend:
 						process.platform === "win32"
 							? "windows"
@@ -324,6 +329,21 @@ export class LocalFileSystem {
 							: undefined
 				}
 			)
+
+			/*
+			this.watcherInstanceNode = nodeWatch(
+				this.sync.syncPair.localPath,
+				{
+					persistent: true,
+					recursive: true,
+					encoding: "utf8",
+					delay: 1000
+				},
+				() => {
+					this.lastDirectoryChangeTimestamp = Date.now()
+				}
+			)
+			*/
 
 			clearInterval(this.watcherInstanceFallbackInterval)
 		} catch (e) {
@@ -367,13 +387,17 @@ export class LocalFileSystem {
 		clearInterval(this.watcherInstanceFallbackInterval)
 
 		try {
-			if (!this.watcherInstance) {
-				return
+			if (this.watcherInstanceParcel) {
+				await this.watcherInstanceParcel.unsubscribe()
+
+				this.watcherInstanceParcel = null
 			}
 
-			await this.watcherInstance.unsubscribe()
+			if (this.watcherInstanceNode && !this.watcherInstanceNode.isClosed()) {
+				this.watcherInstanceNode.close()
 
-			this.watcherInstance = null
+				this.watcherInstanceNode = null
+			}
 		} finally {
 			this.watcherMutex.release()
 		}

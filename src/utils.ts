@@ -98,22 +98,25 @@ export function isNameOverMaxLength(name: string): boolean {
 	return name.length + 1 > 255
 }
 
-export function isValidPath(inputPath: string): boolean {
-	// eslint-disable-next-line no-control-regex
-	const illegalCharsWindows = /[<>:"/\\|?*\x00-\x1F]/
-	const reservedNamesWindows = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i
-	// eslint-disable-next-line no-control-regex, no-useless-escape
-	const illegalCharsMacOS = /[\/:\x00]/
-	// eslint-disable-next-line no-control-regex
-	const illegalCharsLinux = /[\x00]/
+// eslint-disable-next-line no-control-regex
+export const illegalCharsWindows = /[<>:"/\\|?*\x00-\x1F]/
+export const reservedNamesWindows = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i
+// eslint-disable-next-line no-control-regex, no-useless-escape
+export const illegalCharsMacOS = /[\/:\x00]/
+// eslint-disable-next-line no-control-regex
+export const illegalCharsLinux = /[\x00]/
 
+export function isValidPath(inputPath: string): boolean {
 	if (process.platform === "win32") {
 		inputPath = inputPath.replace(/\\/g, "/")
 	}
 
-	if (inputPath.includes("..")) {
+	/*if (
+		(process.platform === "win32" && inputPath.includes("\\..")) ||
+		((process.platform === "linux" || process.platform === "darwin") && inputPath.includes("/.."))
+	) {
 		return false
-	}
+	}*/
 
 	const parts = inputPath.split("/")
 

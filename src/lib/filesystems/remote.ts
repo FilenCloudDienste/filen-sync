@@ -22,7 +22,10 @@ import { LOCAL_TRASH_NAME } from "../../constants"
 import { type LocalItem } from "./local"
 import writeFileAtomic from "write-file-atomic"
 
-export type RemoteItem = Prettify<DistributiveOmit<CloudItemTree, "parent" | "color" | "favorited" | "timestamp"> & { path: string }>
+export type RemoteItemBase = Prettify<DistributiveOmit<CloudItemTree, "parent" | "color" | "favorited" | "timestamp"> & { path: string }>
+export type RemoteItem =
+	| (RemoteItemBase & { type: "file" })
+	| (Prettify<DistributiveOmit<RemoteItemBase, "lastModified">> & { type: "directory" })
 export type RemoteDirectoryTree = Record<string, RemoteItem>
 export type RemoteDirectoryUUIDs = Record<string, RemoteItem>
 

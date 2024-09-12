@@ -230,8 +230,8 @@ export class Deltas {
 				// We also check if the previous inode does not exist in the current tree, and if so, we skip it (only in cloud -> local modes. It should always be deleted in local -> cloud modes if it exists remotely).
 				if (
 					!currentLocalItem &&
-					previousLocalItem &&
-					(this.sync.mode !== "localToCloud" ? !currentLocalTree.inodes[previousLocalItem.inode] : true)
+					previousLocalItem //&&
+					//(this.sync.mode !== "localToCloud" ? !currentLocalTree.inodes[previousLocalItem.inode] : true)
 				) {
 					const delta: Delta = {
 						type: previousLocalItem.type === "directory" ? "deleteRemoteDirectory" : "deleteRemoteFile",
@@ -265,8 +265,8 @@ export class Deltas {
 				// We also check if the previous UUID does not exist in the current tree, and if so, we skip it (only in local -> cloud modes. It should always be deleted in cloud -> local modes if it exists locally).
 				if (
 					!currentRemoteItem &&
-					previousRemoteItem &&
-					(this.sync.mode !== "cloudToLocal" ? !currentRemoteTree.uuids[previousRemoteItem.uuid] : true)
+					previousRemoteItem //&&
+					//(this.sync.mode !== "cloudToLocal" ? !currentRemoteTree.uuids[previousRemoteItem.uuid] : true)
 				) {
 					const delta: Delta = {
 						type: previousRemoteItem.type === "directory" ? "deleteLocalDirectory" : "deleteLocalFile",
@@ -301,9 +301,9 @@ export class Deltas {
 				if (
 					!currentRemoteItem &&
 					currentLocalItem &&
-					(this.sync.mode !== "localBackup" && this.sync.mode !== "localToCloud"
-						? !previousLocalTree.inodes[currentLocalItem.inode]
-						: true) &&
+					//(this.sync.mode !== "localBackup" && this.sync.mode !== "localToCloud"
+					//	? !previousLocalTree.inodes[currentLocalItem.inode]
+					//	: true) &&
 					// Does an item with the same path and type already exist in the current remote tree (probably uploaded by something else prior)?
 					!(currentRemoteTree.tree[path] && currentRemoteTree.tree[path]!.type === currentLocalItem.type)
 				) {
@@ -358,9 +358,9 @@ export class Deltas {
 				if (
 					!currentLocalItem &&
 					currentRemoteItem &&
-					(this.sync.mode !== "cloudBackup" && this.sync.mode !== "cloudToLocal"
-						? !previousRemoteTree.uuids[currentRemoteItem.uuid]
-						: true) &&
+					//(this.sync.mode !== "cloudBackup" && this.sync.mode !== "cloudToLocal"
+					//	? !previousRemoteTree.uuids[currentRemoteItem.uuid]
+					//	: true) &&
 					// Does an item with the same path and type already exist in the current local tree (probably downloaded by something else prior)?
 					!(currentLocalTree.tree[path] && currentLocalTree.tree[path]!.type === currentRemoteItem.type)
 				) {

@@ -600,7 +600,7 @@ export class LocalFileSystem {
 			) {
 				await fs.rename(fromLocalPath, toLocalPath)
 			} else {
-				if (toRelativePath.startsWith(fromRelativePath)) {
+				if (toRelativePath.startsWith(fromRelativePath + pathModule.sep)) {
 					throw new Error("Invalid paths.")
 				}
 

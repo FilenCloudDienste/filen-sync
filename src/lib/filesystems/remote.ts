@@ -478,7 +478,11 @@ export class RemoteFileSystem {
 			const basename = pathModule.posix.basename(relativePath)
 
 			if (parentPath === "/" || parentPath === "." || parentPath.length <= 0) {
-				const uuid = await this.sync.sdk.cloud().createDirectory({ name: basename, parent: this.sync.syncPair.remoteParentUUID })
+				const uuid = await this.sync.sdk.cloud().createDirectory({
+					name: basename,
+					parent: this.sync.syncPair.remoteParentUUID,
+					renameIfExists: true
+				})
 
 				await this.itemsMutex.acquire()
 
@@ -524,7 +528,11 @@ export class RemoteFileSystem {
 
 					const parentIsBase = partParentPath === "/" || partParentPath === "." || partParentPath === ""
 					const parentUUID = parentIsBase ? this.sync.syncPair.remoteParentUUID : parentItem.uuid
-					const uuid = await this.sync.sdk.cloud().createDirectory({ name: partBasename, parent: parentUUID })
+					const uuid = await this.sync.sdk.cloud().createDirectory({
+						name: partBasename,
+						parent: parentUUID,
+						renameIfExists: true
+					})
 
 					await this.itemsMutex.acquire()
 
@@ -714,7 +722,7 @@ export class RemoteFileSystem {
 					})
 				}
 			} else {
-				if (toRelativePath.startsWith(fromRelativePath)) {
+				if (toRelativePath.startsWith(fromRelativePath + "/")) {
 					throw new Error("Invalid paths.")
 				}
 
@@ -1037,7 +1045,7 @@ export class RemoteFileSystem {
 				return false
 			}
 
-			const { exists, existsUUID } = await this.sync.sdk.cloud().fileExists({
+			const { exists, uuid: existsUUID } = await this.sync.sdk.cloud().fileExists({
 				name: item.name,
 				parent: parent.uuid
 			})

@@ -314,7 +314,7 @@ export function tryingToSyncDesktop(path: string): boolean {
 	)
 }
 
-export async function isPathSyncedByICloud(path: string): Promise<boolean> {
+export async function pathSyncedByICloud(path: string): Promise<boolean> {
 	if (process.platform !== "darwin") {
 		return false
 	}
@@ -337,8 +337,27 @@ export async function isPathSyncedByICloud(path: string): Promise<boolean> {
 				stdout.toLowerCase().includes("com.apple.cloud") ||
 					stdout.toLowerCase().includes("com.apple.icloud") ||
 					stdout.toLowerCase().includes("com.apple.fileprovider") ||
-					stdout.toLowerCase().includes("com.apple.file-provider")
+					stdout.toLowerCase().includes("com.apple.file-provider") ||
+					stdout.toLowerCase().includes("com.apple.cloudDocs")
 			)
 		})
 	})
+}
+
+export async function isPathSyncedByICloud(path: string): Promise<boolean> {
+	if (process.platform !== "darwin") {
+		return false
+	}
+
+	let currentPath = path
+
+	while (currentPath !== "/" && currentPath !== "." && currentPath.length > 0) {
+		if (await pathSyncedByICloud(currentPath)) {
+			return true
+		}
+
+		currentPath = pathModule.dirname(currentPath)
+	}
+
+	return false
 }

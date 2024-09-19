@@ -1,6 +1,7 @@
 import { DEFAULT_IGNORED } from "./constants"
 import pathModule from "path"
 import crypto from "crypto"
+import { exec } from "child_process"
 
 /**
  * Chunk large Promise.all executions.
@@ -300,4 +301,44 @@ export function normalizeLastModifiedMsForComparison(time: number): number {
 
 export function fastHash(input: string): string {
 	return crypto.createHash("md5").update(input).digest("hex")
+}
+
+export function tryingToSyncDesktop(path: string): boolean {
+	if (process.platform !== "darwin") {
+		return false
+	}
+
+	return (
+		path.trim().toLowerCase() === `/users/${process.env.USER ?? "user"}/desktop` ||
+		path.trim().toLowerCase() === `/users/${process.env.USER ?? "user"}/desktop/`
+	)
+}
+
+export async function isPathSyncedByICloud(path: string): Promise<boolean> {
+	if (process.platform !== "darwin") {
+		return false
+	}
+
+	return await new Promise<boolean>((resolve, reject) => {
+		exec(`xattr "${path}"`, (err, stdout, stderr) => {
+			if (err) {
+				reject(err)
+
+				return
+			}
+
+			if (stderr) {
+				reject(stderr)
+
+				return
+			}
+
+			resolve(
+				stdout.toLowerCase().includes("com.apple.cloud") ||
+					stdout.toLowerCase().includes("com.apple.icloud") ||
+					stdout.toLowerCase().includes("com.apple.fileprovider") ||
+					stdout.toLowerCase().includes("com.apple.file-provider")
+			)
+		})
+	})
 }

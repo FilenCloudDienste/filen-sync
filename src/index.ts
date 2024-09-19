@@ -4,6 +4,7 @@ import FilenSDK, { type FilenSDKConfig } from "@filen/sdk"
 import { Semaphore } from "./semaphore"
 import { SYNC_INTERVAL } from "./constants"
 import Logger from "./lib/logger"
+import { tryingToSyncDesktop, isPathSyncedByICloud } from "./utils"
 
 /**
  * SyncWorker
@@ -150,6 +151,14 @@ export class SyncWorker {
 
 			for (const pair of pairs) {
 				if (!this.syncs[pair.uuid]) {
+					if (await isPathSyncedByICloud(pair.localPath)) {
+						throw new Error(`Cannot sync local path "${pair.localPath}": Already synced by iCloud.`)
+					}
+
+					if (tryingToSyncDesktop(pair.localPath)) {
+						throw new Error(`Cannot sync local path "${pair.localPath}": Desktop sync not allowed.`)
+					}
+
 					this.syncs[pair.uuid] = new Sync({
 						syncPair: pair,
 						worker: this

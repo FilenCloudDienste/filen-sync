@@ -319,16 +319,16 @@ export async function pathSyncedByICloud(path: string): Promise<boolean> {
 		return false
 	}
 
-	return await new Promise<boolean>((resolve, reject) => {
+	return await new Promise<boolean>(resolve => {
 		exec(`xattr "${path}"`, (err, stdout, stderr) => {
 			if (err) {
-				reject(err)
+				resolve(false)
 
 				return
 			}
 
 			if (stderr) {
-				reject(stderr)
+				resolve(false)
 
 				return
 			}

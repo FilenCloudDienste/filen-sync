@@ -1,7 +1,6 @@
 import fs from "fs-extra"
 import watcher from "@parcel/watcher"
 import {
-	promiseAllChunked,
 	isRelativePathIgnoredByDefault,
 	serializeError,
 	replacePathStartWithFromAndTo,
@@ -20,6 +19,7 @@ import { postMessageToMain } from "../ipc"
 import { Semaphore } from "../../semaphore"
 import { v4 as uuidv4 } from "uuid"
 import { type Watcher } from "node-watch"
+import FastGlob, { type Entry } from "fast-glob"
 
 const pipelineAsync = promisify(pipeline)
 
@@ -114,76 +114,117 @@ export class LocalFileSystem {
 		ignored: LocalTreeIgnored[]
 		changed: boolean
 	}> {
-		if (
-			this.lastDirectoryChangeTimestamp > 0 &&
-			this.getDirectoryTreeCache.timestamp > 0 &&
-			this.lastDirectoryChangeTimestamp < this.getDirectoryTreeCache.timestamp
-		) {
-			return {
-				result: {
-					tree: this.getDirectoryTreeCache.tree,
-					inodes: this.getDirectoryTreeCache.inodes
-				},
-				errors: this.getDirectoryTreeCache.errors,
-				ignored: this.getDirectoryTreeCache.ignored,
-				changed: false
-			}
-		}
+		return new Promise<{
+			result: LocalTree
+			errors: LocalTreeError[]
+			ignored: LocalTreeIgnored[]
+			changed: boolean
+			// eslint-disable-next-line no-async-promise-executor
+		}>(async (resolve, reject) => {
+			try {
+				if (
+					this.lastDirectoryChangeTimestamp > 0 &&
+					this.getDirectoryTreeCache.timestamp > 0 &&
+					this.lastDirectoryChangeTimestamp < this.getDirectoryTreeCache.timestamp
+				) {
+					resolve({
+						result: {
+							tree: this.getDirectoryTreeCache.tree,
+							inodes: this.getDirectoryTreeCache.inodes
+						},
+						errors: this.getDirectoryTreeCache.errors,
+						ignored: this.getDirectoryTreeCache.ignored,
+						changed: false
+					})
 
-		const isWindows = process.platform === "win32"
-		const pathsAdded: Record<string, boolean> = {}
+					return
+				}
 
-		const dir = await fs.readdir(this.sync.syncPair.localPath, {
-			recursive: true,
-			encoding: "utf-8"
-		})
+				this.getDirectoryTreeCache.tree = {}
+				this.getDirectoryTreeCache.inodes = {}
+				this.getDirectoryTreeCache.ignored = []
+				this.getDirectoryTreeCache.errors = []
 
-		this.getDirectoryTreeCache.tree = {}
-		this.getDirectoryTreeCache.inodes = {}
-		this.getDirectoryTreeCache.ignored = []
-		this.getDirectoryTreeCache.errors = []
+				const pathsAdded: Record<string, boolean> = {}
+				let didError = false
+				let didErrorErr: Error = new Error("Could not read local directory.")
+				const stream = FastGlob.stream("**/*", {
+					dot: true,
+					onlyDirectories: false,
+					onlyFiles: false,
+					throwErrorOnBrokenSymbolicLink: false,
+					cwd: this.sync.syncPair.localPath,
+					followSymbolicLinks: false,
+					deep: Infinity,
+					fs,
+					ignore: [".filen.trash.local/**/*"],
+					suppressErrors: false,
+					stats: true,
+					unique: true,
+					objectMode: true
+				})
 
-		await promiseAllChunked(
-			dir.map(async entry => {
-				await this.listSemaphore.acquire()
+				stream.on("error", err => {
+					didError = true
+					didErrorErr = err
 
-				try {
-					const entryPath = `/${isWindows ? entry.replace(/\\/g, "/") : entry}`
+					reject(err)
+				})
 
-					if (entryPath.includes(LOCAL_TRASH_NAME)) {
-						return
+				if (didError) {
+					this.getDirectoryTreeCache.tree = {}
+					this.getDirectoryTreeCache.inodes = {}
+					this.getDirectoryTreeCache.ignored = []
+					this.getDirectoryTreeCache.errors = []
+					this.getDirectoryTreeCache.timestamp = 0
+
+					reject(didErrorErr)
+
+					return
+				}
+
+				for await (const entry of stream) {
+					if (didError) {
+						break
 					}
 
-					const itemPath = pathModule.join(this.sync.syncPair.localPath, entry)
+					const entryItem = entry as unknown as Required<Entry>
+					const entryPath = "/" + entryItem.path
+
+					if (entryPath.includes(LOCAL_TRASH_NAME)) {
+						continue
+					}
+
+					const itemPath = pathModule.join(this.sync.syncPair.localPath, entryItem.path)
 
 					if (isRelativePathIgnoredByDefault(entryPath)) {
 						this.getDirectoryTreeCache.ignored.push({
 							localPath: itemPath,
-							relativePath: entry,
+							relativePath: entryItem.path,
 							reason: "defaultIgnore"
 						})
 
-						return
+						continue
 					}
 
 					if (this.sync.excludeDotFiles && pathIncludesDotFile(entryPath)) {
 						this.getDirectoryTreeCache.ignored.push({
 							localPath: itemPath,
-							relativePath: entry,
+							relativePath: entryItem.path,
 							reason: "dotFile"
 						})
 
-						return
+						continue
 					}
 
-					if (this.sync.ignorer.ignores(entry)) {
+					if (this.sync.ignorer.ignores(entryItem.path)) {
 						this.getDirectoryTreeCache.ignored.push({
 							localPath: itemPath,
-							relativePath: entry,
+							relativePath: entryItem.path,
 							reason: "filenIgnore"
 						})
 
-						return
+						continue
 					}
 
 					try {
@@ -191,108 +232,109 @@ export class LocalFileSystem {
 					} catch {
 						this.getDirectoryTreeCache.ignored.push({
 							localPath: itemPath,
-							relativePath: entry,
+							relativePath: entryItem.path,
 							reason: "permissions"
 						})
 
-						return
+						continue
 					}
 
-					try {
-						const stats = await fs.lstat(itemPath)
+					if (
+						entryItem.dirent.isBlockDevice() ||
+						entryItem.dirent.isCharacterDevice() ||
+						entryItem.dirent.isFIFO() ||
+						entryItem.dirent.isSocket()
+					) {
+						this.getDirectoryTreeCache.ignored.push({
+							localPath: itemPath,
+							relativePath: entryItem.path,
+							reason: "invalidType"
+						})
 
-						if (stats.isBlockDevice() || stats.isCharacterDevice() || stats.isFIFO() || stats.isSocket()) {
-							this.getDirectoryTreeCache.ignored.push({
-								localPath: itemPath,
-								relativePath: entry,
-								reason: "invalidType"
-							})
-
-							return
-						}
-
-						if (stats.isSymbolicLink()) {
-							this.getDirectoryTreeCache.ignored.push({
-								localPath: itemPath,
-								relativePath: entry,
-								reason: "symlink"
-							})
-
-							return
-						}
-
-						if (stats.isFile() && stats.size <= 0) {
-							this.getDirectoryTreeCache.ignored.push({
-								localPath: itemPath,
-								relativePath: entry,
-								reason: "empty"
-							})
-
-							return
-						}
-
-						const lowercasePath = entryPath.toLowerCase()
-
-						if (pathsAdded[lowercasePath]) {
-							this.getDirectoryTreeCache.ignored.push({
-								localPath: itemPath,
-								relativePath: entry,
-								reason: "duplicate"
-							})
-
-							return
-						}
-
-						pathsAdded[lowercasePath] = true
-
-						const item: LocalItem = {
-							lastModified: normalizeUTime(stats.mtimeMs), // Sometimes comes as a float, but we need an int
-							type: stats.isDirectory() ? "directory" : "file",
-							path: entryPath,
-							creation: normalizeUTime(stats.birthtimeMs), // Sometimes comes as a float, but we need an int
-							size: stats.size,
-							inode: stats.ino
-						}
-
-						this.getDirectoryTreeCache.tree[entryPath] = item
-						this.getDirectoryTreeCache.inodes[item.inode] = item
-					} catch (e) {
-						this.sync.worker.logger.log("error", e, "filesystems.local.getDirectoryTree")
-						this.sync.worker.logger.log("error", e)
-
-						if (e instanceof Error) {
-							this.getDirectoryTreeCache.errors.push({
-								localPath: itemPath,
-								relativePath: entryPath,
-								error: e,
-								uuid: uuidv4()
-							})
-						}
+						continue
 					}
-				} finally {
-					this.listSemaphore.release()
+
+					if (entryItem.dirent.isSymbolicLink()) {
+						this.getDirectoryTreeCache.ignored.push({
+							localPath: itemPath,
+							relativePath: entryItem.path,
+							reason: "symlink"
+						})
+
+						continue
+					}
+
+					if (entryItem.dirent.isFile() && entryItem.stats.size <= 0) {
+						this.getDirectoryTreeCache.ignored.push({
+							localPath: itemPath,
+							relativePath: entryItem.path,
+							reason: "empty"
+						})
+
+						continue
+					}
+
+					const lowercasePath = entryPath.toLowerCase()
+
+					if (pathsAdded[lowercasePath]) {
+						this.getDirectoryTreeCache.ignored.push({
+							localPath: itemPath,
+							relativePath: entryItem.path,
+							reason: "duplicate"
+						})
+
+						continue
+					}
+
+					pathsAdded[lowercasePath] = true
+
+					const item: LocalItem = {
+						lastModified: normalizeUTime(entryItem.stats.mtimeMs), // Sometimes comes as a float, but we need an int
+						type: entryItem.dirent.isDirectory() ? "directory" : "file",
+						path: entryPath,
+						creation: normalizeUTime(entryItem.stats.birthtimeMs), // Sometimes comes as a float, but we need an int
+						size: entryItem.stats.size,
+						inode: entryItem.stats.ino
+					}
+
+					this.getDirectoryTreeCache.tree[entryPath] = item
+					this.getDirectoryTreeCache.inodes[item.inode] = item
 				}
-			})
-		)
 
-		this.getDirectoryTreeCache.timestamp = Date.now()
+				if (didError) {
+					this.getDirectoryTreeCache.tree = {}
+					this.getDirectoryTreeCache.inodes = {}
+					this.getDirectoryTreeCache.ignored = []
+					this.getDirectoryTreeCache.errors = []
+					this.getDirectoryTreeCache.timestamp = 0
 
-		// Clear old local file hashes that are not present anymore
-		for (const path in this.sync.localFileHashes) {
-			if (!this.getDirectoryTreeCache.tree[path]) {
-				delete this.sync.localFileHashes[path]
+					reject(didErrorErr)
+
+					return
+				}
+
+				this.getDirectoryTreeCache.timestamp = Date.now()
+
+				// Clear old local file hashes that are not present anymore
+				for (const path in this.sync.localFileHashes) {
+					if (!this.getDirectoryTreeCache.tree[path]) {
+						delete this.sync.localFileHashes[path]
+					}
+				}
+
+				resolve({
+					result: {
+						tree: this.getDirectoryTreeCache.tree,
+						inodes: this.getDirectoryTreeCache.inodes
+					},
+					errors: this.getDirectoryTreeCache.errors,
+					ignored: this.getDirectoryTreeCache.ignored,
+					changed: true
+				})
+			} catch (e) {
+				reject(e)
 			}
-		}
-
-		return {
-			result: {
-				tree: this.getDirectoryTreeCache.tree,
-				inodes: this.getDirectoryTreeCache.inodes
-			},
-			errors: this.getDirectoryTreeCache.errors,
-			ignored: this.getDirectoryTreeCache.ignored,
-			changed: true
-		}
+		})
 	}
 
 	/**

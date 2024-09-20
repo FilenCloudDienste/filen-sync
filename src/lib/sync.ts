@@ -8,12 +8,13 @@ import Tasks, { type TaskError } from "./tasks"
 import State from "./state"
 import { postMessageToMain } from "./ipc"
 import Ignorer from "../ignorer"
-import { serializeError, promiseAllChunked } from "../utils"
+import { serializeError } from "../utils"
 import type SyncWorker from ".."
 import Lock from "./lock"
 import pathModule from "path"
 import fs from "fs-extra"
 import { v4 as uuidv4 } from "uuid"
+import FastGlob from "fast-glob"
 
 /**
  * Sync
@@ -138,26 +139,31 @@ export class Sync {
 
 				if (await fs.exists(localTrashPath)) {
 					const now = Date.now()
-					const dir = await fs.readdir(localTrashPath, {
-						recursive: false,
-						encoding: "utf-8"
+					const dir = await FastGlob.async("**/*", {
+						dot: true,
+						onlyDirectories: false,
+						onlyFiles: true,
+						throwErrorOnBrokenSymbolicLink: false,
+						cwd: localTrashPath,
+						followSymbolicLinks: false,
+						deep: 0,
+						fs,
+						suppressErrors: false,
+						stats: true,
+						unique: true,
+						objectMode: true
 					})
 
-					await promiseAllChunked(
-						dir.map(async entry => {
-							const entryPath = pathModule.join(localTrashPath, entry)
-							const stat = await fs.stat(entryPath)
-
-							if (stat.atimeMs + 86400000 * 30 < now) {
-								await fs.rm(entryPath, {
-									force: true,
-									maxRetries: 60 * 10,
-									recursive: true,
-									retryDelay: 100
-								})
-							}
-						})
-					)
+					for (const entry of dir) {
+						if (entry.stats && entry.stats.atimeMs + 86400000 * 30 < now) {
+							await fs.rm(pathModule.join(localTrashPath, entry.path), {
+								force: true,
+								maxRetries: 60 * 10,
+								recursive: true,
+								retryDelay: 100
+							})
+						}
+					}
 				}
 			} catch (e) {
 				this.worker.logger.log("error", e, "sync.cleanupLocalTrash")

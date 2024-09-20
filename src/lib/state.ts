@@ -7,6 +7,7 @@ import { type DoneTask } from "./tasks"
 import { replacePathStartWithFromAndTo, normalizeUTime } from "../utils"
 import readline from "readline"
 import { v4 as uuidv4 } from "uuid"
+import FastGlob from "fast-glob"
 
 const STATE_VERSION = 2
 
@@ -442,15 +443,24 @@ export class State {
 	public async loadPreviousTrees(): Promise<void> {
 		await fs.ensureDir(this.statePath)
 
-		// Clear leftover .tmp files from previous runs
-		const dir = await fs.readdir(this.statePath, {
-			recursive: false,
-			encoding: "utf-8"
+		const dir = await FastGlob.async("**/*", {
+			dot: true,
+			onlyDirectories: false,
+			onlyFiles: true,
+			throwErrorOnBrokenSymbolicLink: false,
+			cwd: this.statePath,
+			followSymbolicLinks: false,
+			deep: 0,
+			fs,
+			suppressErrors: false,
+			stats: false,
+			unique: true,
+			objectMode: false
 		})
 
-		for (const file of dir) {
-			if (file.endsWith(".tmp")) {
-				await fs.rm(pathModule.join(this.statePath, file), {
+		for (const entry of dir) {
+			if (entry.trim().endsWith(".tmp")) {
+				await fs.rm(pathModule.join(this.statePath, entry), {
 					force: true,
 					maxRetries: 60 * 10,
 					recursive: true,

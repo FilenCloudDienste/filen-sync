@@ -1,6 +1,6 @@
 {
 	"name": "@filen/sync",
-	"version": "0.1.66",
+	"version": "0.1.67",
 	"description": "Filen Sync",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
@@ -13,6 +13,7 @@
 		"clear": "rimraf ./dist",
 		"build": "npm run clear && npm run lint && npm run tsc",
 		"dev": "tsx ./dev/index.ts",
+		"dev:test": "tsx ./dev/test.ts",
 		"yalc": "npm run build && yalc push",
 		"install:filen": "npm install @filen/sdk@latest"
 	},
@@ -54,6 +55,7 @@
 	"dependencies": {
 		"@filen/sdk": "^0.1.167",
 		"@parcel/watcher": "^2.4.1",
+		"fast-glob": "^3.3.2",
 		"fs-extra": "^11.2.0",
 		"ignore": "^5.3.1",
 		"node-watch": "^0.7.4",

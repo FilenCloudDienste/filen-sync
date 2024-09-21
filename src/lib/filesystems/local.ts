@@ -157,7 +157,7 @@ export class LocalFileSystem {
 					followSymbolicLinks: false,
 					deep: Infinity,
 					fs,
-					ignore: [".filen.trash.local/**/*"],
+					ignore: [".filen.trash.local/**/*", "$RECYCLE.BIN/**/*", "System Volume Information/**/*"],
 					suppressErrors: false,
 					stats: true,
 					unique: true,

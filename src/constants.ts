@@ -36,17 +36,26 @@ export const DEFAULT_IGNORED = {
 	],
 	extensions: [".tmp", ".temp", ".ffs_tmp", ".temporary", ".crdownload", ".~cr", ".thumbdata"],
 	absoluteGlobs: [
-		"C:/$WINDOWS.~BT/**/*",
-		"C:/$Windows.~WS/**/*",
-		"C:/$WinREAgent/**/*",
-		"C:/Windows/**/*",
-		"C:/OneDriveTemp/**/*",
-		"C:/PerfLogs/**/*",
-		"C:/ProgramData/**/*",
-		"C:/Program Files/**/*",
-		"C:/Program Files (x86)/**/*",
+		"*:/$WINDOWS.~BT/**/*",
+		"*:/$RECYCLE.BIN/**/*",
+		"*:/$Windows.~WS/**/*",
+		"*:/$WinREAgent/**/*",
+		"*:/Windows/**/*",
+		"*:/OneDriveTemp/**/*",
+		"*:/PerfLogs/**/*",
+		"*:/ProgramData/**/*",
+		"*:/Program Files/**/*",
+		"*:/Program Files (x86)/**/*",
 		"/share/Trash/**/*",
-		"C:/Users/*/AppData/**/*"
+		"*:/Users/*/AppData/**/*",
+		"*:/System Volume Information/**/*"
 	],
-	relativeGlobs: [".filen.trash.local/**/*", "$RECYCLE.BIN/**/*", ".Trash/**/*", ".local/share/Trash/**/*", "local/share/Trash/**/*"]
+	relativeGlobs: [
+		".filen.trash.local/**/*",
+		"$RECYCLE.BIN/**/*",
+		".Trash/**/*",
+		".local/share/Trash/**/*",
+		"local/share/Trash/**/*",
+		"System Volume Information/**/*"
+	]
 }

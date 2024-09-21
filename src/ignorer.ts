@@ -45,6 +45,9 @@ export class Ignorer {
 	}
 
 	public async initialize(passedContent?: string): Promise<void> {
+		this.sync.localFileSystem.ignoredCache.clear()
+		this.sync.remoteFileSystem.ignoredCache.clear()
+
 		let content: string = ""
 		const filePath = pathModule.join(this.sync.dbPath, this.name, `v${IGNORER_VERSION}`, this.sync.syncPair.uuid, "filenIgnore")
 

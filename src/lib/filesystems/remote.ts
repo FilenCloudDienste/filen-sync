@@ -70,6 +70,7 @@ export class RemoteFileSystem {
 	public readonly itemsMutex = new Semaphore(1)
 	public readonly listSemaphore = new Semaphore(128)
 	private deviceIdCache: string = ""
+	public ignoredCache = new Map<string, { ignored: true; reason: RemoteTreeIgnoredReason } | { ignored: false }>()
 
 	public constructor(sync: Sync) {
 		this.sync = sync
@@ -107,13 +108,184 @@ export class RemoteFileSystem {
 		const deviceIdFile = pathModule.join(this.sync.dbPath, "deviceId", `v${DEVICE_ID_VERSION}`, this.sync.syncPair.uuid)
 
 		await fs.ensureDir(pathModule.dirname(deviceIdFile))
-
 		await fs.rm(deviceIdFile, {
 			force: true,
 			maxRetries: 60 * 10,
 			recursive: true,
 			retryDelay: 100
 		})
+	}
+
+	public isPathIgnored({
+		absolutePath,
+		relativePath,
+		name,
+		type
+	}: {
+		absolutePath: string
+		relativePath: string
+		name: string
+		type: "file" | "directory"
+	}): { ignored: true; reason: RemoteTreeIgnoredReason } | { ignored: false } {
+		const key = absolutePath + ":" + type
+
+		if (this.ignoredCache.get(key)) {
+			return this.ignoredCache.get(key)!
+		}
+
+		if (type === "directory") {
+			if (isPathOverMaxLength(absolutePath)) {
+				this.ignoredCache.set(key, {
+					ignored: true,
+					reason: "pathLength"
+				})
+
+				return {
+					ignored: true,
+					reason: "pathLength"
+				}
+			}
+
+			if (isNameOverMaxLength(name)) {
+				this.ignoredCache.set(key, {
+					ignored: true,
+					reason: "nameLength"
+				})
+
+				return {
+					ignored: true,
+					reason: "nameLength"
+				}
+			}
+
+			if (!isValidPath(absolutePath)) {
+				this.ignoredCache.set(key, {
+					ignored: true,
+					reason: "invalidPath"
+				})
+
+				return {
+					ignored: true,
+					reason: "invalidPath"
+				}
+			}
+
+			if (isRelativePathIgnoredByDefault(relativePath)) {
+				this.ignoredCache.set(key, {
+					ignored: true,
+					reason: "defaultIgnore"
+				})
+
+				return {
+					ignored: true,
+					reason: "defaultIgnore"
+				}
+			}
+
+			if (this.sync.ignorer.ignores(relativePath)) {
+				this.ignoredCache.set(key, {
+					ignored: true,
+					reason: "filenIgnore"
+				})
+
+				return {
+					ignored: true,
+					reason: "filenIgnore"
+				}
+			}
+
+			if (this.sync.excludeDotFiles && pathIncludesDotFile(relativePath)) {
+				this.ignoredCache.set(key, {
+					ignored: true,
+					reason: "dotFile"
+				})
+
+				return {
+					ignored: true,
+					reason: "dotFile"
+				}
+			}
+		} else {
+			if (isPathOverMaxLength(absolutePath)) {
+				this.ignoredCache.set(key, {
+					ignored: true,
+					reason: "pathLength"
+				})
+
+				return {
+					ignored: true,
+					reason: "pathLength"
+				}
+			}
+
+			if (isNameOverMaxLength(name)) {
+				this.ignoredCache.set(key, {
+					ignored: true,
+					reason: "nameLength"
+				})
+
+				return {
+					ignored: true,
+					reason: "nameLength"
+				}
+			}
+
+			if (!isValidPath(absolutePath)) {
+				this.ignoredCache.set(key, {
+					ignored: true,
+					reason: "invalidPath"
+				})
+
+				return {
+					ignored: true,
+					reason: "invalidPath"
+				}
+			}
+
+			if (isRelativePathIgnoredByDefault(relativePath)) {
+				this.ignoredCache.set(key, {
+					ignored: true,
+					reason: "defaultIgnore"
+				})
+
+				return {
+					ignored: true,
+					reason: "defaultIgnore"
+				}
+			}
+
+			if (this.sync.ignorer.ignores(relativePath)) {
+				this.ignoredCache.set(key, {
+					ignored: true,
+					reason: "filenIgnore"
+				})
+
+				return {
+					ignored: true,
+					reason: "filenIgnore"
+				}
+			}
+
+			if (this.sync.excludeDotFiles && pathIncludesDotFile(relativePath)) {
+				this.ignoredCache.set(key, {
+					ignored: true,
+					reason: "dotFile"
+				})
+
+				return {
+					ignored: true,
+					reason: "dotFile"
+				}
+			}
+		}
+
+		this.ignoredCache.set(key, {
+			ignored: false
+		})
+
+		return {
+			ignored: false
+		}
 	}
 
 	public async getDirectoryTree(skipCache: boolean = false): Promise<{
@@ -180,66 +352,6 @@ export class RemoteFileSystem {
 					continue
 				}
 
-				if (isPathOverMaxLength(localPath)) {
-					this.getDirectoryTreeCache.ignored.push({
-						localPath,
-						relativePath: folderPath,
-						reason: "pathLength"
-					})
-
-					continue
-				}
-
-				if (isNameOverMaxLength(decrypted.name)) {
-					this.getDirectoryTreeCache.ignored.push({
-						localPath,
-						relativePath: folderPath,
-						reason: "nameLength"
-					})
-
-					continue
-				}
-
-				if (!isValidPath(localPath)) {
-					this.getDirectoryTreeCache.ignored.push({
-						localPath,
-						relativePath: folderPath,
-						reason: "invalidPath"
-					})
-
-					continue
-				}
-
-				if (isRelativePathIgnoredByDefault(folderPath)) {
-					this.getDirectoryTreeCache.ignored.push({
-						localPath,
-						relativePath: folderPath,
-						reason: "defaultIgnore"
-					})
-
-					continue
-				}
-
-				if (this.sync.ignorer.ignores(folderPath)) {
-					this.getDirectoryTreeCache.ignored.push({
-						localPath,
-						relativePath: folderPath,
-						reason: "filenIgnore"
-					})
-
-					continue
-				}
-
-				if (this.sync.excludeDotFiles && pathIncludesDotFile(folderPath)) {
-					this.getDirectoryTreeCache.ignored.push({
-						localPath,
-						relativePath: folderPath,
-						reason: "dotFile"
-					})
-
-					continue
-				}
-
 				const lowercasePath = folderPath.toLowerCase()
 
 				if (pathsAdded[lowercasePath]) {
@@ -255,6 +367,23 @@ export class RemoteFileSystem {
 				pathsAdded[lowercasePath] = true
 
 				if (folderPath.length === 0) {
+					continue
+				}
+
+				const ignored = this.isPathIgnored({
+					absolutePath: localPath,
+					relativePath: folderPath,
+					name: decrypted.name,
+					type: "directory"
+				})
+
+				if (ignored.ignored) {
+					this.getDirectoryTreeCache.ignored.push({
+						localPath,
+						relativePath: folderPath,
+						reason: ignored.reason
+					})
+
 					continue
 				}
 
@@ -297,76 +426,6 @@ export class RemoteFileSystem {
 						return
 					}
 
-					if (decrypted.size <= 0) {
-						this.getDirectoryTreeCache.ignored.push({
-							localPath,
-							relativePath: filePath,
-							reason: "empty"
-						})
-
-						return
-					}
-
-					if (isPathOverMaxLength(localPath)) {
-						this.getDirectoryTreeCache.ignored.push({
-							localPath,
-							relativePath: filePath,
-							reason: "pathLength"
-						})
-
-						return
-					}
-
-					if (isNameOverMaxLength(decrypted.name)) {
-						this.getDirectoryTreeCache.ignored.push({
-							localPath,
-							relativePath: filePath,
-							reason: "nameLength"
-						})
-
-						return
-					}
-
-					if (!isValidPath(localPath)) {
-						this.getDirectoryTreeCache.ignored.push({
-							localPath,
-							relativePath: filePath,
-							reason: "invalidPath"
-						})
-
-						return
-					}
-
-					if (isRelativePathIgnoredByDefault(filePath)) {
-						this.getDirectoryTreeCache.ignored.push({
-							localPath,
-							relativePath: filePath,
-							reason: "defaultIgnore"
-						})
-
-						return
-					}
-
-					if (this.sync.ignorer.ignores(filePath)) {
-						this.getDirectoryTreeCache.ignored.push({
-							localPath,
-							relativePath: filePath,
-							reason: "filenIgnore"
-						})
-
-						return
-					}
-
-					if (this.sync.excludeDotFiles && pathIncludesDotFile(filePath)) {
-						this.getDirectoryTreeCache.ignored.push({
-							localPath,
-							relativePath: filePath,
-							reason: "dotFile"
-						})
-
-						return
-					}
-
 					const lowercasePath = filePath.toLowerCase()
 
 					if (pathsAdded[lowercasePath]) {
@@ -380,6 +439,33 @@ export class RemoteFileSystem {
 					}
 
 					pathsAdded[lowercasePath] = true
+
+					if (decrypted.size <= 0) {
+						this.getDirectoryTreeCache.ignored.push({
+							localPath,
+							relativePath: filePath,
+							reason: "empty"
+						})
+
+						return
+					}
+
+					const ignored = this.isPathIgnored({
+						absolutePath: localPath,
+						relativePath: filePath,
+						name: decrypted.name,
+						type: "directory"
+					})
+
+					if (ignored.ignored) {
+						this.getDirectoryTreeCache.ignored.push({
+							localPath,
+							relativePath: filePath,
+							reason: ignored.reason
+						})
+
+						return
+					}
 
 					const item: RemoteItem = {
 						type: "file",

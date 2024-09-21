@@ -97,6 +97,7 @@ export class LocalFileSystem {
 	public readonly listSemaphore = new Semaphore(128)
 	public readonly watcherMutex = new Semaphore(1)
 	public watcherInstanceFallbackInterval: ReturnType<typeof setInterval> | undefined = undefined
+	public ignoredCache = new Map<string, { ignored: true; reason: LocalTreeIgnoredReason } | { ignored: false }>()
 
 	/**
 	 * Creates an instance of LocalFileSystem.
@@ -107,6 +108,59 @@ export class LocalFileSystem {
 	 */
 	public constructor(sync: Sync) {
 		this.sync = sync
+	}
+
+	public isPathIgnored(entry: Required<Entry>): { ignored: true; reason: LocalTreeIgnoredReason } | { ignored: false } {
+		if (this.ignoredCache.get(entry.path)) {
+			return this.ignoredCache.get(entry.path)!
+		}
+
+		const entryPath = "/" + entry.path
+		const absolutePath = pathModule.join(this.sync.syncPair.localPath, entry.path)
+
+		if (isRelativePathIgnoredByDefault(entryPath) || isAbsolutePathIgnoredByDefault(absolutePath)) {
+			this.ignoredCache.set(entry.path, {
+				ignored: true,
+				reason: "defaultIgnore"
+			})
+
+			return {
+				ignored: true,
+				reason: "defaultIgnore"
+			}
+		}
+
+		if (this.sync.excludeDotFiles && pathIncludesDotFile(entryPath)) {
+			this.ignoredCache.set(entry.path, {
+				ignored: true,
+				reason: "dotFile"
+			})
+
+			return {
+				ignored: true,
+				reason: "dotFile"
+			}
+		}
+
+		if (this.sync.ignorer.ignores(entry.path)) {
+			this.ignoredCache.set(entry.path, {
+				ignored: true,
+				reason: "filenIgnore"
+			})
+
+			return {
+				ignored: true,
+				reason: "filenIgnore"
+			}
+		}
+
+		this.ignoredCache.set(entry.path, {
+			ignored: false
+		})
+
+		return {
+			ignored: false
+		}
 	}
 
 	public async getDirectoryTree(): Promise<{
@@ -196,49 +250,20 @@ export class LocalFileSystem {
 						continue
 					}
 
-					const itemPath = pathModule.join(this.sync.syncPair.localPath, entryItem.path)
+					const absolutePath = pathModule.join(this.sync.syncPair.localPath, entryItem.path)
+					const lowercasePath = entryPath.toLowerCase()
 
-					if (isRelativePathIgnoredByDefault(entryPath) || isAbsolutePathIgnoredByDefault(itemPath)) {
+					if (pathsAdded[lowercasePath]) {
 						this.getDirectoryTreeCache.ignored.push({
-							localPath: itemPath,
-							relativePath: entryItem.path,
-							reason: "defaultIgnore"
+							localPath: absolutePath,
+							relativePath: entryPath,
+							reason: "duplicate"
 						})
 
 						continue
 					}
 
-					if (this.sync.excludeDotFiles && pathIncludesDotFile(entryPath)) {
-						this.getDirectoryTreeCache.ignored.push({
-							localPath: itemPath,
-							relativePath: entryItem.path,
-							reason: "dotFile"
-						})
-
-						continue
-					}
-
-					if (this.sync.ignorer.ignores(entryItem.path)) {
-						this.getDirectoryTreeCache.ignored.push({
-							localPath: itemPath,
-							relativePath: entryItem.path,
-							reason: "filenIgnore"
-						})
-
-						continue
-					}
-
-					try {
-						await fs.access(itemPath, fs.constants.R_OK | fs.constants.W_OK)
-					} catch {
-						this.getDirectoryTreeCache.ignored.push({
-							localPath: itemPath,
-							relativePath: entryItem.path,
-							reason: "permissions"
-						})
-
-						continue
-					}
+					pathsAdded[lowercasePath] = true
 
 					if (
 						entryItem.dirent.isBlockDevice() ||
@@ -247,8 +272,8 @@ export class LocalFileSystem {
 						entryItem.dirent.isSocket()
 					) {
 						this.getDirectoryTreeCache.ignored.push({
-							localPath: itemPath,
-							relativePath: entryItem.path,
+							localPath: absolutePath,
+							relativePath: entryPath,
 							reason: "invalidType"
 						})
 
@@ -257,8 +282,8 @@ export class LocalFileSystem {
 
 					if (entryItem.dirent.isSymbolicLink()) {
 						this.getDirectoryTreeCache.ignored.push({
-							localPath: itemPath,
-							relativePath: entryItem.path,
+							localPath: absolutePath,
+							relativePath: entryPath,
 							reason: "symlink"
 						})
 
@@ -267,27 +292,37 @@ export class LocalFileSystem {
 
 					if (entryItem.dirent.isFile() && entryItem.stats.size <= 0) {
 						this.getDirectoryTreeCache.ignored.push({
-							localPath: itemPath,
-							relativePath: entryItem.path,
+							localPath: absolutePath,
+							relativePath: entryPath,
 							reason: "empty"
 						})
 
 						continue
 					}
 
-					const lowercasePath = entryPath.toLowerCase()
-
-					if (pathsAdded[lowercasePath]) {
+					try {
+						await fs.access(absolutePath, fs.constants.R_OK | fs.constants.W_OK)
+					} catch {
 						this.getDirectoryTreeCache.ignored.push({
-							localPath: itemPath,
-							relativePath: entryItem.path,
-							reason: "duplicate"
+							localPath: absolutePath,
+							relativePath: entryPath,
+							reason: "permissions"
 						})
 
 						continue
 					}
 
-					pathsAdded[lowercasePath] = true
+					const ignored = this.isPathIgnored(entry as unknown as Required<Entry>)
+
+					if (ignored.ignored) {
+						this.getDirectoryTreeCache.ignored.push({
+							localPath: absolutePath,
+							relativePath: entryPath,
+							reason: ignored.reason
+						})
+
+						continue
+					}
 
 					const item: LocalItem = {
 						lastModified: normalizeUTime(entryItem.stats.mtimeMs), // Sometimes comes as a float, but we need an int

@@ -84,6 +84,9 @@ export class SyncWorker {
 				ignored: []
 			}
 
+			sync.localFileSystem.ignoredCache.clear()
+			sync.remoteFileSystem.ignoredCache.clear()
+
 			break
 		}
 	}
@@ -201,14 +204,17 @@ export class SyncWorker {
 			if (syncUUID === uuid) {
 				this.syncs[syncUUID]!.removed = removed
 
-				await this.syncs[syncUUID]!.cleanup()
+				if (removed) {
+					await this.syncs[syncUUID]!.cleanup()
 
-				const abortControllers = this.syncs[syncUUID]!.abortControllers
+					this.syncs[syncUUID]!.localFileSystem.ignoredCache.clear()
+					this.syncs[syncUUID]!.remoteFileSystem.ignoredCache.clear()
 
-				for (const controller in abortControllers) {
-					const abortController = abortControllers[controller]!
+					const abortControllers = this.syncs[syncUUID]!.abortControllers
 
-					if (removed) {
+					for (const controller in abortControllers) {
+						const abortController = abortControllers[controller]!
+
 						if (!abortController.signal.aborted) {
 							abortController.abort()
 						}
@@ -225,6 +231,9 @@ export class SyncWorker {
 			if (syncUUID === uuid) {
 				this.syncs[syncUUID]!.excludeDotFiles = excludeDotFiles
 
+				this.syncs[syncUUID]!.localFileSystem.ignoredCache.clear()
+				this.syncs[syncUUID]!.remoteFileSystem.ignoredCache.clear()
+
 				break
 			}
 		}
@@ -235,6 +244,9 @@ export class SyncWorker {
 			if (syncUUID === uuid) {
 				this.syncs[syncUUID]!.mode = mode
 
+				this.syncs[syncUUID]!.localFileSystem.ignoredCache.clear()
+				this.syncs[syncUUID]!.remoteFileSystem.ignoredCache.clear()
+
 				break
 			}
 		}
@@ -244,6 +256,9 @@ export class SyncWorker {
 		for (const syncUUID in this.syncs) {
 			if (syncUUID === uuid) {
 				this.syncs[syncUUID]!.ignorer.update(content)
+
+				this.syncs[syncUUID]!.localFileSystem.ignoredCache.clear()
+				this.syncs[syncUUID]!.remoteFileSystem.ignoredCache.clear()
 
 				break
 			}

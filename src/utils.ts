@@ -2,6 +2,7 @@ import { DEFAULT_IGNORED } from "./constants"
 import pathModule from "path"
 import crypto from "crypto"
 import { exec } from "child_process"
+import micromatch from "micromatch"
 
 /**
  * Chunk large Promise.all executions.
@@ -201,7 +202,14 @@ export function isNameIgnoredByDefault(name: string): boolean {
 }
 
 export function isRelativePathIgnoredByDefault(path: string): boolean {
-	return path.split("/").some(part => part.length > 0 && isNameIgnoredByDefault(part))
+	return (
+		path.split("/").some(part => part.length > 0 && isNameIgnoredByDefault(part)) ||
+		micromatch.isMatch(path, DEFAULT_IGNORED.relativeGlobs)
+	)
+}
+
+export function isAbsolutePathIgnoredByDefault(path: string): boolean {
+	return micromatch.isMatch(path, DEFAULT_IGNORED.absoluteGlobs)
 }
 
 export type SerializedError = {

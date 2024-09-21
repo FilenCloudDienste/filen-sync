@@ -1,6 +1,6 @@
 {
 	"name": "@filen/sync",
-	"version": "0.1.68",
+	"version": "0.1.69",
 	"description": "Filen Sync",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
@@ -37,6 +37,7 @@
 		"@jest/globals": "^29.7.0",
 		"@types/fs-extra": "^11.0.4",
 		"@types/jest": "^29.5.12",
+		"@types/micromatch": "^4.0.9",
 		"@types/mime-types": "^2.1.4",
 		"@types/uuid": "^9.0.8",
 		"@types/write-file-atomic": "^4.0.3",
@@ -58,6 +59,7 @@
 		"fast-glob": "^3.3.2",
 		"fs-extra": "^11.2.0",
 		"ignore": "^5.3.1",
+		"micromatch": "^4.0.8",
 		"node-watch": "^0.7.4",
 		"pino": "^9.3.2",
 		"rotating-file-stream": "^3.2.3",

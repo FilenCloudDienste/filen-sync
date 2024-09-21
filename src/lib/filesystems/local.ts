@@ -5,7 +5,8 @@ import {
 	serializeError,
 	replacePathStartWithFromAndTo,
 	pathIncludesDotFile,
-	normalizeUTime
+	normalizeUTime,
+	isAbsolutePathIgnoredByDefault
 } from "../../utils"
 import pathModule from "path"
 import process from "process"
@@ -197,7 +198,7 @@ export class LocalFileSystem {
 
 					const itemPath = pathModule.join(this.sync.syncPair.localPath, entryItem.path)
 
-					if (isRelativePathIgnoredByDefault(entryPath)) {
+					if (isRelativePathIgnoredByDefault(entryPath) || isAbsolutePathIgnoredByDefault(itemPath)) {
 						this.getDirectoryTreeCache.ignored.push({
 							localPath: itemPath,
 							relativePath: entryItem.path,

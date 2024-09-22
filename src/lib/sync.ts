@@ -94,6 +94,8 @@ export class Sync {
 		const localSmokeTest = await this.localFileSystem.isPathWritable(this.syncPair.localPath)
 
 		if (!localSmokeTest) {
+			await this.localFileSystem.stopDirectoryWatcher()
+
 			this.worker.logger.log(
 				"error",
 				"Local smoke test failed, path not existing or not readable or writable",
@@ -184,7 +186,7 @@ export class Sync {
 		try {
 			await this.smokeTest()
 
-			await Promise.all([this.localFileSystem.startDirectoryWatcher(), this.state.initialize(), this.ignorer.initialize()])
+			await Promise.all([this.state.initialize(), this.ignorer.initialize()])
 
 			this.worker.logger.log("info", "Initialized", this.syncPair.localPath)
 
@@ -301,6 +303,10 @@ export class Sync {
 
 				return
 			}
+
+			// It will only start it once. We call it here every run in case it hasn't been started yet for some reason.
+			// This is useful for example after a failed local smoke test.
+			await this.localFileSystem.startDirectoryWatcher()
 
 			postMessageToMain({
 				type: "cycleStarted",

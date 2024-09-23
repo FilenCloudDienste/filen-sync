@@ -747,15 +747,15 @@ export class LocalFileSystem {
 
 	/**
 	 * Upload a local file.
-	 * @date 3/2/2024 - 9:43:58 PM
 	 *
 	 * @public
 	 * @async
-	 * @param {{ relativePath: string }} param0
+	 * @param {{ relativePath: string, passedMD5Hash?: string }} param0
 	 * @param {string} param0.relativePath
+	 * @param {string} param0.passedMD5Hash
 	 * @returns {Promise<CloudItem>}
 	 */
-	public async upload({ relativePath }: { relativePath: string }): Promise<CloudItem> {
+	public async upload({ relativePath, passedMD5Hash }: { relativePath: string; passedMD5Hash?: string }): Promise<CloudItem> {
 		const localPath = pathModule.join(this.sync.syncPair.localPath, relativePath)
 		const signalKey = `upload:${relativePath}`
 		const stats = await fs.stat(localPath)
@@ -791,12 +791,14 @@ export class LocalFileSystem {
 				throw new Error(`Could not upload ${relativePath}: Parent path not found.`)
 			}
 
-			const hash = await this.createFileHash({
-				relativePath,
-				algorithm: "md5"
-			})
+			const md5Hash = passedMD5Hash
+				? passedMD5Hash
+				: await this.createFileHash({
+						relativePath,
+						algorithm: "md5"
+				  })
 
-			this.sync.localFileHashes[relativePath] = hash
+			this.sync.localFileHashes[relativePath] = md5Hash
 
 			const item = await this.sync.sdk.cloud().uploadLocalFile({
 				source: localPath,

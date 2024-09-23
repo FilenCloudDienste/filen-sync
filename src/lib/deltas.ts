@@ -7,6 +7,7 @@ export type Delta = { path: string } & (
 	| {
 			type: "uploadFile"
 			size: number
+			md5Hash?: string
 	  }
 	| {
 			type: "createRemoteDirectory"
@@ -325,19 +326,23 @@ export class Deltas {
 					currentLocalItem &&
 					currentLocalItem.type === "file" &&
 					normalizeLastModifiedMsForComparison(currentLocalItem.lastModified) >
-						normalizeLastModifiedMsForComparison(currentRemoteItem.lastModified) &&
-					(await this.sync.localFileSystem.createFileHash({
+						normalizeLastModifiedMsForComparison(currentRemoteItem.lastModified)
+				) {
+					const md5Hash = await this.sync.localFileSystem.createFileHash({
 						relativePath: path,
 						algorithm: "md5"
-					})) !== this.sync.localFileHashes[currentLocalItem.path]
-				) {
-					deltas.push({
-						type: "uploadFile",
-						path,
-						size: currentLocalItem.size
 					})
 
-					pathsAdded[path] = true
+					if (md5Hash !== this.sync.localFileHashes[currentLocalItem.path]) {
+						deltas.push({
+							type: "uploadFile",
+							path,
+							size: currentLocalItem.size,
+							md5Hash
+						})
+
+						pathsAdded[path] = true
+					}
 				}
 			}
 		}

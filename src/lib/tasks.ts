@@ -484,7 +484,10 @@ export class Tasks {
 			case "uploadFile": {
 				try {
 					const [, stats] = await Promise.all([
-						this.sync.localFileSystem.upload({ relativePath: delta.path }),
+						this.sync.localFileSystem.upload({
+							relativePath: delta.path,
+							passedMD5Hash: delta.md5Hash
+						}),
 						fs.stat(pathModule.join(this.sync.syncPair.localPath, delta.path))
 					])
 					const item = this.sync.remoteFileSystem.getDirectoryTreeCache.tree[delta.path]

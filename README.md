@@ -22,10 +22,10 @@ npm install @filen/sync@latest
 2. Initialize sync pairs
 
 ```typescript
-import FilenSDK from "@filen/sdk"
+import { FilenSDK } from "@filen/sdk"
 import path from "path"
 import os from "os"
-import Sync from "@filen/sync"
+import { SyncWorker } from "@filen/sync"
 
 // Initialize a SDK instance (optional)
 const filen = new FilenSDK({
@@ -40,7 +40,7 @@ await filen.login({
 	twoFactorCode: "123456"
 })
 
-const sync = new Sync({
+const sync = new SyncWorker({
 	syncPairs: [
 		{
 			uuid: "UUIDV4", // Only used locally to identify the sync pair

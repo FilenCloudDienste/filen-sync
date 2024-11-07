@@ -133,149 +133,75 @@ export class RemoteFileSystem {
 			return this.ignoredCache.get(key)!
 		}
 
-		if (type === "directory") {
-			if (isPathOverMaxLength(absolutePath)) {
-				this.ignoredCache.set(key, {
-					ignored: true,
-					reason: "pathLength"
-				})
+		if (isPathOverMaxLength(absolutePath)) {
+			this.ignoredCache.set(key, {
+				ignored: true,
+				reason: "pathLength"
+			})
 
-				return {
-					ignored: true,
-					reason: "pathLength"
-				}
+			return {
+				ignored: true,
+				reason: "pathLength"
 			}
+		}
 
-			if (isNameOverMaxLength(name)) {
-				this.ignoredCache.set(key, {
-					ignored: true,
-					reason: "nameLength"
-				})
+		if (isNameOverMaxLength(name)) {
+			this.ignoredCache.set(key, {
+				ignored: true,
+				reason: "nameLength"
+			})
 
-				return {
-					ignored: true,
-					reason: "nameLength"
-				}
+			return {
+				ignored: true,
+				reason: "nameLength"
 			}
+		}
 
-			if (!isValidPath(absolutePath)) {
-				this.ignoredCache.set(key, {
-					ignored: true,
-					reason: "invalidPath"
-				})
+		if (!isValidPath(absolutePath)) {
+			this.ignoredCache.set(key, {
+				ignored: true,
+				reason: "invalidPath"
+			})
 
-				return {
-					ignored: true,
-					reason: "invalidPath"
-				}
+			return {
+				ignored: true,
+				reason: "invalidPath"
 			}
+		}
 
-			if (isRelativePathIgnoredByDefault(relativePath)) {
-				this.ignoredCache.set(key, {
-					ignored: true,
-					reason: "defaultIgnore"
-				})
+		if (isRelativePathIgnoredByDefault(relativePath)) {
+			this.ignoredCache.set(key, {
+				ignored: true,
+				reason: "defaultIgnore"
+			})
 
-				return {
-					ignored: true,
-					reason: "defaultIgnore"
-				}
+			return {
+				ignored: true,
+				reason: "defaultIgnore"
 			}
+		}
 
-			if (this.sync.ignorer.ignores(relativePath)) {
-				this.ignoredCache.set(key, {
-					ignored: true,
-					reason: "filenIgnore"
-				})
+		if (this.sync.ignorer.ignores(relativePath)) {
+			this.ignoredCache.set(key, {
+				ignored: true,
+				reason: "filenIgnore"
+			})
 
-				return {
-					ignored: true,
-					reason: "filenIgnore"
-				}
+			return {
+				ignored: true,
+				reason: "filenIgnore"
 			}
+		}
 
-			if (this.sync.excludeDotFiles && pathIncludesDotFile(relativePath)) {
-				this.ignoredCache.set(key, {
-					ignored: true,
-					reason: "dotFile"
-				})
+		if (this.sync.excludeDotFiles && pathIncludesDotFile(relativePath)) {
+			this.ignoredCache.set(key, {
+				ignored: true,
+				reason: "dotFile"
+			})
 
-				return {
-					ignored: true,
-					reason: "dotFile"
-				}
-			}
-		} else {
-			if (isPathOverMaxLength(absolutePath)) {
-				this.ignoredCache.set(key, {
-					ignored: true,
-					reason: "pathLength"
-				})
-
-				return {
-					ignored: true,
-					reason: "pathLength"
-				}
-			}
-
-			if (isNameOverMaxLength(name)) {
-				this.ignoredCache.set(key, {
-					ignored: true,
-					reason: "nameLength"
-				})
-
-				return {
-					ignored: true,
-					reason: "nameLength"
-				}
-			}
-
-			if (!isValidPath(absolutePath)) {
-				this.ignoredCache.set(key, {
-					ignored: true,
-					reason: "invalidPath"
-				})
-
-				return {
-					ignored: true,
-					reason: "invalidPath"
-				}
-			}
-
-			if (isRelativePathIgnoredByDefault(relativePath)) {
-				this.ignoredCache.set(key, {
-					ignored: true,
-					reason: "defaultIgnore"
-				})
-
-				return {
-					ignored: true,
-					reason: "defaultIgnore"
-				}
-			}
-
-			if (this.sync.ignorer.ignores(relativePath)) {
-				this.ignoredCache.set(key, {
-					ignored: true,
-					reason: "filenIgnore"
-				})
-
-				return {
-					ignored: true,
-					reason: "filenIgnore"
-				}
-			}
-
-			if (this.sync.excludeDotFiles && pathIncludesDotFile(relativePath)) {
-				this.ignoredCache.set(key, {
-					ignored: true,
-					reason: "dotFile"
-				})
-
-				return {
-					ignored: true,
-					reason: "dotFile"
-				}
+			return {
+				ignored: true,
+				reason: "dotFile"
 			}
 		}
 

@@ -6,7 +6,10 @@ import {
 	replacePathStartWithFromAndTo,
 	pathIncludesDotFile,
 	normalizeUTime,
-	isAbsolutePathIgnoredByDefault
+	isAbsolutePathIgnoredByDefault,
+	isPathOverMaxLength,
+	isNameOverMaxLength,
+	isValidPath
 } from "../../utils"
 import pathModule from "path"
 import process from "process"
@@ -57,6 +60,9 @@ export type LocalTreeIgnoredReason =
 	| "invalidType"
 	| "duplicate"
 	| "permissions"
+	| "pathLength"
+	| "invalidPath"
+	| "nameLength"
 
 export type LocalTreeIgnored = {
 	localPath: string
@@ -94,7 +100,6 @@ export class LocalFileSystem {
 	public readonly itemsMutex = new Semaphore(1)
 	public readonly mutex = new Semaphore(1)
 	public readonly mkdirMutex = new Semaphore(1)
-	public readonly listSemaphore = new Semaphore(128)
 	public readonly watcherMutex = new Semaphore(1)
 	public watcherInstanceFallbackInterval: ReturnType<typeof setInterval> | undefined = undefined
 	public ignoredCache = new Map<string, { ignored: true; reason: LocalTreeIgnoredReason } | { ignored: false }>()
@@ -115,8 +120,44 @@ export class LocalFileSystem {
 			return this.ignoredCache.get(entry.path)!
 		}
 
-		const entryPath = "/" + entry.path
+		const entryPath = entry.path.startsWith("/") ? entry.path : "/" + entry.path
 		const absolutePath = pathModule.join(this.sync.syncPair.localPath, entry.path)
+
+		if (isPathOverMaxLength(absolutePath)) {
+			this.ignoredCache.set(entry.path, {
+				ignored: true,
+				reason: "pathLength"
+			})
+
+			return {
+				ignored: true,
+				reason: "pathLength"
+			}
+		}
+
+		if (isNameOverMaxLength(entry.name)) {
+			this.ignoredCache.set(entry.path, {
+				ignored: true,
+				reason: "nameLength"
+			})
+
+			return {
+				ignored: true,
+				reason: "nameLength"
+			}
+		}
+
+		if (!isValidPath(absolutePath)) {
+			this.ignoredCache.set(entry.path, {
+				ignored: true,
+				reason: "invalidPath"
+			})
+
+			return {
+				ignored: true,
+				reason: "invalidPath"
+			}
+		}
 
 		if (isRelativePathIgnoredByDefault(entryPath) || isAbsolutePathIgnoredByDefault(absolutePath)) {
 			this.ignoredCache.set(entry.path, {
@@ -215,7 +256,7 @@ export class LocalFileSystem {
 					ignore: [".filen.trash.local/**/*", "$RECYCLE.BIN/**/*", "System Volume Information/**/*"],
 					suppressErrors: false,
 					stats: true,
-					unique: true,
+					unique: false,
 					objectMode: true
 				})
 

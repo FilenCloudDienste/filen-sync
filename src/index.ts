@@ -205,7 +205,9 @@ export class SyncWorker {
 				this.syncs[syncUUID]!.removed = removed
 
 				if (removed) {
-					await this.syncs[syncUUID]!.cleanup()
+					await this.syncs[syncUUID]!.cleanup({
+						deleteLocalDbFiles: true
+					})
 
 					this.syncs[syncUUID]!.localFileSystem.ignoredCache.clear()
 					this.syncs[syncUUID]!.remoteFileSystem.ignoredCache.clear()

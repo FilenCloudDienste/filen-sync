@@ -320,6 +320,8 @@ export class State {
 
 		const tmpDestination = pathModule.join(pathModule.dirname(destination), `${uuidv4()}.tmp`)
 
+		console.log({ destination, size: Object.keys(record).length, tmpDestination })
+
 		try {
 			// eslint-disable-next-line no-async-promise-executor
 			await new Promise<void>(async (resolve, reject) => {

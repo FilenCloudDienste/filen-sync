@@ -50,7 +50,6 @@ export class Sync {
 	public excludeDotFiles: boolean
 	public readonly worker: SyncWorker
 	public removed: boolean = false
-	public saveStateOnNoChanges = true
 	public readonly lock: Lock
 	public taskErrors: TaskError[] = []
 	public localTrashDisabled: boolean
@@ -201,9 +200,12 @@ export class Sync {
 		}
 	}
 
-	public async cleanup(): Promise<void> {
+	public async cleanup({ deleteLocalDbFiles = false }: { deleteLocalDbFiles?: boolean }): Promise<void> {
 		try {
-			await Promise.all([this.localFileSystem.stopDirectoryWatcher(), this.deleteLocalSyncDbFiles()])
+			await Promise.all([
+				this.localFileSystem.stopDirectoryWatcher(),
+				deleteLocalDbFiles ? this.deleteLocalSyncDbFiles() : Promise.resolve()
+			])
 
 			this.worker.logger.log("info", "Cleanup done", this.syncPair.localPath)
 		} catch (e) {
@@ -226,7 +228,9 @@ export class Sync {
 
 	private async run(): Promise<void> {
 		if (this.removed) {
-			await this.cleanup()
+			await this.cleanup({
+				deleteLocalDbFiles: true
+			})
 
 			return
 		}
@@ -234,7 +238,9 @@ export class Sync {
 		try {
 			if (this.taskErrors.length > 0 || this.localTreeErrors.length > 0) {
 				if (this.worker.runOnce) {
-					await this.cleanup()
+					await this.cleanup({
+						deleteLocalDbFiles: false
+					})
 
 					return
 				}
@@ -281,7 +287,9 @@ export class Sync {
 
 			if (this.paused) {
 				if (this.worker.runOnce) {
-					await this.cleanup()
+					await this.cleanup({
+						deleteLocalDbFiles: false
+					})
 
 					return
 				}
@@ -382,31 +390,6 @@ export class Sync {
 					})
 
 					if (!currentLocalTree.changed && !currentRemoteTree.changed) {
-						/*if (this.taskErrors.length === 0) {
-							postMessageToMain({
-								type: "cycleSavingStateStarted",
-								syncPair: this.syncPair
-							})
-
-							this.previousLocalTree = currentLocalTree.result
-							this.previousRemoteTree = currentRemoteTree.result
-
-							// We only save the state once if there are no changes.
-							// This helps reducing the cpu and disk footprint when there are continuously no changes.
-							if (this.saveStateOnNoChanges) {
-								this.saveStateOnNoChanges = false
-
-								await this.state.save()
-							}
-
-							runGC()
-
-							postMessageToMain({
-								type: "cycleSavingStateDone",
-								syncPair: this.syncPair
-							})
-						}*/
-
 						postMessageToMain({
 							type: "cycleSuccess",
 							syncPair: this.syncPair
@@ -557,7 +540,6 @@ export class Sync {
 
 						this.previousLocalTree = currentLocalTree.result
 						this.previousRemoteTree = currentRemoteTree.result
-						this.saveStateOnNoChanges = true
 
 						await this.state.save()
 
@@ -601,7 +583,9 @@ export class Sync {
 			}
 		} finally {
 			if (this.worker.runOnce || this.removed) {
-				await this.cleanup()
+				await this.cleanup({
+					deleteLocalDbFiles: this.removed
+				})
 			} else {
 				postMessageToMain({
 					type: "cycleRestarting",

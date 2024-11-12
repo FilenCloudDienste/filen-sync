@@ -1,6 +1,6 @@
 {
 	"name": "@filen/sync",
-	"version": "0.1.76",
+	"version": "0.1.77",
 	"description": "Filen Sync",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
@@ -39,7 +39,7 @@
 		"@types/jest": "^29.5.12",
 		"@types/micromatch": "^4.0.9",
 		"@types/mime-types": "^2.1.4",
-		"@types/uuid": "^9.0.8",
+		"@types/uuid": "^10.0.0",
 		"@types/write-file-atomic": "^4.0.3",
 		"@typescript-eslint/eslint-plugin": "^6.20.0",
 		"@typescript-eslint/parser": "^6.20.0",
@@ -55,15 +55,15 @@
 	},
 	"dependencies": {
 		"@filen/sdk": "^0.1.175",
-		"@parcel/watcher": "^2.4.1",
+		"@parcel/watcher": "^2.5.0",
 		"fast-glob": "^3.3.2",
 		"fs-extra": "^11.2.0",
-		"ignore": "^5.3.1",
+		"ignore": "^6.0.2",
 		"micromatch": "^4.0.8",
 		"node-watch": "^0.7.4",
-		"pino": "^9.3.2",
-		"rotating-file-stream": "^3.2.3",
-		"uuid": "^10.0.0",
-		"write-file-atomic": "^5.0.1"
+		"pino": "^9.5.0",
+		"rotating-file-stream": "^3.2.5",
+		"uuid": "^11.0.3",
+		"write-file-atomic": "^6.0.0"
 	}
 }

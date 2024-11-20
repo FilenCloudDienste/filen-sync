@@ -48,7 +48,7 @@ export class Ignorer {
 		this.sync.localFileSystem.ignoredCache.clear()
 		this.sync.remoteFileSystem.ignoredCache.clear()
 
-		let content: string = ""
+		let content: string[] = []
 		const filePath = pathModule.join(this.sync.dbPath, this.name, `v${IGNORER_VERSION}`, this.sync.syncPair.uuid, "filenIgnore")
 
 		await fs.ensureDir(pathModule.dirname(filePath))
@@ -58,9 +58,9 @@ export class Ignorer {
 				encoding: "utf-8"
 			})
 
-			content = passedContent
+			content = passedContent.split("\n").map(line => line.trim())
 		} else {
-			content = await this.fetch()
+			content = (await this.fetch()).split("\n").map(line => line.trim())
 		}
 
 		this.instance = ignore()

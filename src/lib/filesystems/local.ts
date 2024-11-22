@@ -14,7 +14,7 @@ import {
 import pathModule from "path"
 import process from "process"
 import type Sync from "../sync"
-import { SYNC_INTERVAL, LOCAL_TRASH_NAME } from "../../constants"
+import { SYNC_INTERVAL, LOCAL_TRASH_NAME, DEFAULT_IGNORED } from "../../constants"
 import crypto from "crypto"
 import { pipeline } from "stream"
 import { promisify } from "util"
@@ -253,7 +253,17 @@ export class LocalFileSystem {
 					followSymbolicLinks: false,
 					deep: Infinity,
 					fs,
-					ignore: [".filen.trash.local/**/*", "$RECYCLE.BIN/**/*", "System Volume Information/**/*"],
+					ignore: [
+						"**/.filen.trash.local/**/*",
+						"**/$RECYCLE.BIN/**/*",
+						"**/System Volume Information/**/*",
+						...DEFAULT_IGNORED.relativeGlobs.map(glob => `**/${glob}`),
+						...DEFAULT_IGNORED.absoluteGlobs.map(glob => {
+							const normalized = glob.replace("*:", "")
+
+							return `**${normalized.startsWith("/") ? "" : "/"}${normalized}`
+						})
+					],
 					suppressErrors: false,
 					stats: true,
 					unique: false,

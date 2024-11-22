@@ -34,7 +34,7 @@ export const DEFAULT_IGNORED = {
 		"COM8",
 		"COM9"
 	],
-	extensions: [".tmp", ".temp", ".ffs_tmp", ".temporary", ".crdownload", ".~cr", ".thumbdata"],
+	extensions: [".tmp", ".temp", ".ffs_tmp", ".temporary", ".crdownload", ".~cr", ".thumbdata", ".crswap"],
 	absoluteGlobs: [
 		"*:/$WINDOWS.~BT/**/*",
 		"*:/$RECYCLE.BIN/**/*",
@@ -47,7 +47,7 @@ export const DEFAULT_IGNORED = {
 		"*:/Program Files/**/*",
 		"*:/Program Files (x86)/**/*",
 		"/share/Trash/**/*",
-		"*:/Users/*/AppData/**/*",
+		"*:/Users/**/AppData/**/*",
 		"*:/System Volume Information/**/*"
 	],
 	relativeGlobs: [

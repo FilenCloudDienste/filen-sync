@@ -15,7 +15,7 @@ import micromatch from "micromatch"
  * @param {number} [chunkSize=10000]
  * @returns {Promise<T[]>}
  */
-export async function promiseAllChunked<T>(promises: Promise<T>[], chunkSize = 100000): Promise<T[]> {
+export async function promiseAllChunked<T>(promises: Promise<T>[], chunkSize = 10000): Promise<T[]> {
 	const results: T[] = []
 
 	for (let i = 0; i < promises.length; i += chunkSize) {
@@ -35,10 +35,10 @@ export async function promiseAllChunked<T>(promises: Promise<T>[], chunkSize = 1
  * @async
  * @template T
  * @param {Promise<T>[]} promises
- * @param {number} [chunkSize=100000]
+ * @param {number} [chunkSize=10000]
  * @returns {Promise<T[]>}
  */
-export async function promiseAllSettledChunked<T>(promises: Promise<T>[], chunkSize = 100000): Promise<T[]> {
+export async function promiseAllSettledChunked<T>(promises: Promise<T>[], chunkSize = 10000): Promise<T[]> {
 	const results: T[] = []
 
 	for (let i = 0; i < promises.length; i += chunkSize) {

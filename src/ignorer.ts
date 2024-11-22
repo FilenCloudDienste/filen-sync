@@ -10,6 +10,7 @@ export class Ignorer {
 	private sync: Sync
 	public instance = ignore()
 	public name: string = "ignorer"
+	public pattern: string[] = []
 
 	public constructor(sync: Sync, name: string = "ignorer") {
 		this.sync = sync
@@ -63,6 +64,7 @@ export class Ignorer {
 			content = (await this.fetch()).split("\n").map(line => line.trim())
 		}
 
+		this.pattern = content
 		this.instance = ignore()
 
 		if (content.length > 0) {

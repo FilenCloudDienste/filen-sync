@@ -132,7 +132,6 @@ export class Deltas {
 		// 6. Remote additions/filemodifications
 
 		// Local file/directory move/rename
-
 		if (this.sync.mode === "twoWay" || this.sync.mode === "localBackup" || this.sync.mode === "localToCloud") {
 			for (const inode in currentLocalTree.inodes) {
 				const currentItem = currentLocalTree.inodes[inode]
@@ -178,7 +177,6 @@ export class Deltas {
 		}
 
 		// Remote file/directory move/rename
-
 		if (this.sync.mode === "twoWay" || this.sync.mode === "cloudBackup" || this.sync.mode === "cloudToLocal") {
 			for (const uuid in currentRemoteTree.uuids) {
 				const currentItem = currentRemoteTree.uuids[uuid]
@@ -217,77 +215,130 @@ export class Deltas {
 		}
 
 		// Local deletions
-
 		if (this.sync.mode === "twoWay" || this.sync.mode === "localToCloud") {
-			for (const path in previousLocalTree.tree) {
-				if (pathsAdded[path] || erroredLocalPaths[path]) {
-					continue
+			// Only run current/previous comparisons if the sync already has saved state
+			if (this.sync.mode === "twoWay" && !this.sync.isPreviousSavedTreeStateEmpty) {
+				for (const path in previousLocalTree.tree) {
+					if (pathsAdded[path] || erroredLocalPaths[path]) {
+						continue
+					}
+
+					const previousLocalItem = previousLocalTree.tree[path]
+					const currentLocalItem = currentLocalTree.tree[path]
+
+					// If the item does not exist in the current tree but does in the previous one, it has been deleted.
+					// We also check if the previous inode does not exist in the current tree, and if so, we skip it (only in cloud -> local modes. It should always be deleted in local -> cloud modes if it exists remotely).
+					if (
+						!currentLocalItem &&
+						previousLocalItem //&&
+						//(this.sync.mode !== "localToCloud" ? !currentLocalTree.inodes[previousLocalItem.inode] : true)
+					) {
+						const delta: Delta = {
+							type: previousLocalItem.type === "directory" ? "deleteRemoteDirectory" : "deleteRemoteFile",
+							path
+						}
+
+						deltas.push(delta)
+
+						if (previousLocalItem.type === "directory") {
+							deletedRemoteDirectories.push(delta)
+						}
+
+						pathsAdded[path] = true
+						pathsAdded[previousLocalItem.path] = true
+					}
 				}
-
-				const previousLocalItem = previousLocalTree.tree[path]
-				const currentLocalItem = currentLocalTree.tree[path]
-
-				// If the item does not exist in the current tree but does in the previous one, it has been deleted.
-				// We also check if the previous inode does not exist in the current tree, and if so, we skip it (only in cloud -> local modes. It should always be deleted in local -> cloud modes if it exists remotely).
-				if (
-					!currentLocalItem &&
-					previousLocalItem //&&
-					//(this.sync.mode !== "localToCloud" ? !currentLocalTree.inodes[previousLocalItem.inode] : true)
-				) {
-					const delta: Delta = {
-						type: previousLocalItem.type === "directory" ? "deleteRemoteDirectory" : "deleteRemoteFile",
-						path
+			} else {
+				for (const path in currentRemoteTree.tree) {
+					if (pathsAdded[path] || erroredLocalPaths[path]) {
+						continue
 					}
 
-					deltas.push(delta)
+					const currentLocalItem = currentLocalTree.tree[path]
+					const currentRemoteItem = currentRemoteTree.tree[path]
 
-					if (previousLocalItem.type === "directory") {
-						deletedRemoteDirectories.push(delta)
+					// If the item does not exist in the current local tree but does in the remote one, it needs to be deleted remotely in localToCloud mode.
+					if (!currentLocalItem && currentRemoteItem) {
+						const delta: Delta = {
+							type: currentRemoteItem.type === "directory" ? "deleteRemoteDirectory" : "deleteRemoteFile",
+							path
+						}
+
+						deltas.push(delta)
+
+						if (currentRemoteItem.type === "directory") {
+							deletedRemoteDirectories.push(delta)
+						}
+
+						pathsAdded[path] = true
 					}
-
-					pathsAdded[path] = true
-					pathsAdded[previousLocalItem.path] = true
 				}
 			}
 		}
 
 		// Remote deletions
-
 		if (this.sync.mode === "twoWay" || this.sync.mode === "cloudToLocal") {
-			for (const path in previousRemoteTree.tree) {
-				if (pathsAdded[path]) {
-					continue
+			// Only run current/previous comparisons if the sync already has saved state
+			if (this.sync.mode === "twoWay" && !this.sync.isPreviousSavedTreeStateEmpty) {
+				for (const path in previousRemoteTree.tree) {
+					if (pathsAdded[path]) {
+						continue
+					}
+
+					const previousRemoteItem = previousRemoteTree.tree[path]
+					const currentRemoteItem = currentRemoteTree.tree[path]
+
+					// If the item does not exist in the current tree but does in the previous one, it has been deleted.
+					// We also check if the previous UUID does not exist in the current tree, and if so, we skip it (only in local -> cloud modes. It should always be deleted in cloud -> local modes if it exists locally).
+					if (
+						!currentRemoteItem &&
+						previousRemoteItem //&&
+						//(this.sync.mode !== "cloudToLocal" ? !currentRemoteTree.uuids[previousRemoteItem.uuid] : true)
+					) {
+						const delta: Delta = {
+							type: previousRemoteItem.type === "directory" ? "deleteLocalDirectory" : "deleteLocalFile",
+							path
+						}
+
+						deltas.push(delta)
+
+						if (previousRemoteItem.type === "directory") {
+							deletedLocalDirectories.push(delta)
+						}
+
+						pathsAdded[path] = true
+						pathsAdded[previousRemoteItem.path] = true
+					}
 				}
-
-				const previousRemoteItem = previousRemoteTree.tree[path]
-				const currentRemoteItem = currentRemoteTree.tree[path]
-
-				// If the item does not exist in the current tree but does in the previous one, it has been deleted.
-				// We also check if the previous UUID does not exist in the current tree, and if so, we skip it (only in local -> cloud modes. It should always be deleted in cloud -> local modes if it exists locally).
-				if (
-					!currentRemoteItem &&
-					previousRemoteItem //&&
-					//(this.sync.mode !== "cloudToLocal" ? !currentRemoteTree.uuids[previousRemoteItem.uuid] : true)
-				) {
-					const delta: Delta = {
-						type: previousRemoteItem.type === "directory" ? "deleteLocalDirectory" : "deleteLocalFile",
-						path
+			} else {
+				for (const path in currentLocalTree.tree) {
+					if (pathsAdded[path]) {
+						continue
 					}
 
-					deltas.push(delta)
+					const currentLocalItem = currentLocalTree.tree[path]
+					const currentRemoteItem = currentRemoteTree.tree[path]
 
-					if (previousRemoteItem.type === "directory") {
-						deletedLocalDirectories.push(delta)
+					// If the item does not exist in the current remote tree but does in the local one, it needs to be deleted locally in cloudToLocal mode.
+					if (!currentRemoteItem && currentLocalItem) {
+						const delta: Delta = {
+							type: currentLocalItem.type === "directory" ? "deleteLocalDirectory" : "deleteLocalFile",
+							path
+						}
+
+						deltas.push(delta)
+
+						if (currentLocalItem.type === "directory") {
+							deletedLocalDirectories.push(delta)
+						}
+
+						pathsAdded[path] = true
 					}
-
-					pathsAdded[path] = true
-					pathsAdded[previousRemoteItem.path] = true
 				}
 			}
 		}
 
-		// Local additions/filemodifications
-
+		// Local additions/fileModifications
 		if (this.sync.mode === "twoWay" || this.sync.mode === "localBackup" || this.sync.mode === "localToCloud") {
 			for (const path in currentLocalTree.tree) {
 				if (pathsAdded[path] || erroredLocalPaths[path]) {
@@ -348,7 +399,6 @@ export class Deltas {
 		}
 
 		// Remote additions/changes
-
 		if (this.sync.mode === "twoWay" || this.sync.mode === "cloudBackup" || this.sync.mode === "cloudToLocal") {
 			for (const path in currentRemoteTree.tree) {
 				if (pathsAdded[path]) {

@@ -55,6 +55,7 @@ export class Sync {
 	public localTrashDisabled: boolean
 	public localTreeErrors: LocalTreeError[] = []
 	public cleaningLocalTrash: boolean = false
+	public isPreviousSavedTreeStateEmpty: boolean = true
 
 	/**
 	 * Creates an instance of Sync.

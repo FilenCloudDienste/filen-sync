@@ -475,9 +475,12 @@ export class State {
 			!(await fs.exists(this.previousRemoteTreePath)) ||
 			!(await fs.exists(this.previousRemoteUUIDsPath))
 		) {
+			this.sync.isPreviousSavedTreeStateEmpty = true
+
 			return
 		}
 
+		this.sync.isPreviousSavedTreeStateEmpty = false
 		this.sync.previousLocalTree.tree = await this.readLargeRecordFromLineStream<LocalItem>(this.previousLocalTreePath)
 		this.sync.previousLocalTree.inodes = await this.readLargeRecordFromLineStream<LocalItem>(this.previousLocalINodesPath)
 		this.sync.previousRemoteTree.tree = await this.readLargeRecordFromLineStream<RemoteItem>(this.previousRemoteTreePath)
@@ -491,6 +494,8 @@ export class State {
 		await this.writeLargeRecordSerializedAndAtomically(this.previousLocalINodesPath, this.sync.previousLocalTree.inodes)
 		await this.writeLargeRecordSerializedAndAtomically(this.previousRemoteTreePath, this.sync.previousRemoteTree.tree)
 		await this.writeLargeRecordSerializedAndAtomically(this.previousRemoteUUIDsPath, this.sync.previousRemoteTree.uuids)
+
+		this.sync.isPreviousSavedTreeStateEmpty = false
 	}
 
 	public async clear(): Promise<void> {

@@ -216,8 +216,7 @@ export class Deltas {
 
 		// Local deletions
 		if (this.sync.mode === "twoWay" || this.sync.mode === "localToCloud") {
-			// Only run current/previous comparisons if the sync already has saved state
-			if (this.sync.mode === "twoWay" && !this.sync.isPreviousSavedTreeStateEmpty) {
+			if (this.sync.mode === "twoWay") {
 				for (const path in previousLocalTree.tree) {
 					if (pathsAdded[path] || erroredLocalPaths[path]) {
 						continue
@@ -278,8 +277,7 @@ export class Deltas {
 
 		// Remote deletions
 		if (this.sync.mode === "twoWay" || this.sync.mode === "cloudToLocal") {
-			// Only run current/previous comparisons if the sync already has saved state
-			if (this.sync.mode === "twoWay" && !this.sync.isPreviousSavedTreeStateEmpty) {
+			if (this.sync.mode === "twoWay") {
 				for (const path in previousRemoteTree.tree) {
 					if (pathsAdded[path]) {
 						continue

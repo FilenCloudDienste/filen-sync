@@ -82,10 +82,10 @@ export function isPathOverMaxLength(path: string): boolean {
 	} else if (process.platform === "darwin") {
 		return path.length + 1 > 1024
 	} else if (process.platform === "win32") {
-		return path.length + 1 > 260
+		return path.length + 1 > 512
 	}
 
-	return path.length + 1 > 260
+	return path.length + 1 > 512
 }
 
 export function isNameOverMaxLength(name: string): boolean {

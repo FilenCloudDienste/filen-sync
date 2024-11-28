@@ -420,6 +420,7 @@ export class Sync {
 
 					const confirmLocalDeletion = this.previousLocalTree.size > 0 && currentLocalTree.result.size === 0
 					const confirmRemoteDeletion = this.previousRemoteTree.size > 0 && currentRemoteTree.result.size === 0
+					let skipSyncDueToConfirmDeletionRestart = false
 
 					// If the previous tree has nodes and the current one is empty, we should prompt the user to confirm deletion
 					if (
@@ -429,190 +430,194 @@ export class Sync {
 					) {
 						this.deletionConfirmationResult = "waiting"
 
-						const result = await new Promise<"delete" | "restart">(resolve => {
+						const sendConfirmationMessage = () => {
+							postMessageToMain({
+								type: "confirmDeletion",
+								syncPair: this.syncPair,
+								data: {
+									where:
+										confirmLocalDeletion && confirmRemoteDeletion ? "both" : confirmLocalDeletion ? "local" : "remote",
+									previous:
+										confirmLocalDeletion && confirmRemoteDeletion
+											? this.previousLocalTree.size + this.previousRemoteTree.size
+											: confirmLocalDeletion
+											? this.previousLocalTree.size
+											: this.previousRemoteTree.size,
+									current:
+										confirmLocalDeletion && confirmRemoteDeletion
+											? currentLocalTree.result.size + currentRemoteTree.result.size
+											: confirmLocalDeletion
+											? currentLocalTree.result.size
+											: currentRemoteTree.result.size
+								}
+							})
+						}
+
+						sendConfirmationMessage()
+
+						await new Promise<void>(resolve => {
 							const interval = setInterval(() => {
 								if (this.deletionConfirmationResult !== "waiting") {
 									clearInterval(interval)
 
-									resolve(this.deletionConfirmationResult)
+									resolve()
 								} else {
-									postMessageToMain({
-										type: "confirmDeletion",
-										syncPair: this.syncPair,
-										data: {
-											where:
-												confirmLocalDeletion && confirmRemoteDeletion
-													? "both"
-													: confirmLocalDeletion
-													? "local"
-													: "remote",
-											previous:
-												confirmLocalDeletion && confirmRemoteDeletion
-													? this.previousLocalTree.size + this.previousRemoteTree.size
-													: confirmLocalDeletion
-													? this.previousLocalTree.size
-													: this.previousRemoteTree.size,
-											current:
-												confirmLocalDeletion && confirmRemoteDeletion
-													? currentLocalTree.result.size + currentRemoteTree.result.size
-													: confirmLocalDeletion
-													? currentLocalTree.result.size
-													: currentRemoteTree.result.size
-										}
-									})
+									sendConfirmationMessage()
 								}
 							}, 1000)
 						})
 
-						if (result === "restart") {
-							return
+						if (this.deletionConfirmationResult === "waiting" || this.deletionConfirmationResult === "restart") {
+							skipSyncDueToConfirmDeletionRestart = true
 						}
 					}
 
-					postMessageToMain({
-						type: "cycleProcessingDeltasStarted",
-						syncPair: this.syncPair
-					})
+					if (!skipSyncDueToConfirmDeletionRestart) {
+						postMessageToMain({
+							type: "cycleProcessingDeltasStarted",
+							syncPair: this.syncPair
+						})
 
-					const deltas = await this.deltas.process({
-						currentLocalTree: currentLocalTree.result,
-						currentRemoteTree: currentRemoteTree.result,
-						previousLocalTree: this.previousLocalTree,
-						previousRemoteTree: this.previousRemoteTree,
-						currentLocalTreeErrors: currentLocalTree.errors
-					})
+						const deltas = await this.deltas.process({
+							currentLocalTree: currentLocalTree.result,
+							currentRemoteTree: currentRemoteTree.result,
+							previousLocalTree: this.previousLocalTree,
+							previousRemoteTree: this.previousRemoteTree,
+							currentLocalTreeErrors: currentLocalTree.errors
+						})
 
-					postMessageToMain({
-						type: "deltasCount",
-						syncPair: this.syncPair,
-						data: {
-							count: deltas.length
-						}
-					})
+						postMessageToMain({
+							type: "deltasCount",
+							syncPair: this.syncPair,
+							data: {
+								count: deltas.length
+							}
+						})
 
-					postMessageToMain({
-						type: "deltasSize",
-						syncPair: this.syncPair,
-						data: {
-							size: deltas.reduce(
-								(prev, delta) => prev + (delta.type === "uploadFile" || delta.type === "downloadFile" ? delta.size : 0),
-								0
-							)
-						}
-					})
+						postMessageToMain({
+							type: "deltasSize",
+							syncPair: this.syncPair,
+							data: {
+								size: deltas.reduce(
+									(prev, delta) => prev + (delta.type === "uploadFile" || delta.type === "downloadFile" ? delta.size : 0),
+									0
+								)
+							}
+						})
 
-					postMessageToMain({
-						type: "cycleProcessingDeltasDone",
-						syncPair: this.syncPair
-					})
+						postMessageToMain({
+							type: "cycleProcessingDeltasDone",
+							syncPair: this.syncPair
+						})
 
-					postMessageToMain({
-						type: "cycleProcessingTasksStarted",
-						syncPair: this.syncPair
-					})
+						postMessageToMain({
+							type: "cycleProcessingTasksStarted",
+							syncPair: this.syncPair
+						})
 
-					const { doneTasks, errors } = await this.tasks.process({ deltasSorted: deltas })
+						const { doneTasks, errors } = await this.tasks.process({ deltasSorted: deltas })
 
-					postMessageToMain({
-						type: "cycleProcessingTasksDone",
-						syncPair: this.syncPair
-					})
+						postMessageToMain({
+							type: "cycleProcessingTasksDone",
+							syncPair: this.syncPair
+						})
 
-					postMessageToMain({
-						type: "taskErrors",
-						syncPair: this.syncPair,
-						data: {
-							errors: errors.map(e => ({
-								...e,
-								error: serializeError(e.error)
-							}))
-						}
-					})
+						postMessageToMain({
+							type: "taskErrors",
+							syncPair: this.syncPair,
+							data: {
+								errors: errors.map(e => ({
+									...e,
+									error: serializeError(e.error)
+								}))
+							}
+						})
 
-					this.taskErrors = errors
+						this.taskErrors = errors
 
-					if (this.taskErrors.length === 0) {
-						if (doneTasks.length > 0) {
+						if (this.taskErrors.length === 0) {
+							if (doneTasks.length > 0) {
+								postMessageToMain({
+									type: "cycleApplyingStateStarted",
+									syncPair: this.syncPair
+								})
+
+								const didLocalChanges = doneTasks.some(
+									task =>
+										task.type === "createLocalDirectory" ||
+										task.type === "deleteLocalDirectory" ||
+										task.type === "deleteLocalFile" ||
+										task.type === "renameLocalDirectory" ||
+										task.type === "renameLocalFile"
+								)
+								const didRemoteChanges = doneTasks.some(
+									task =>
+										task.type === "renameRemoteDirectory" ||
+										task.type === "renameRemoteFile" ||
+										task.type === "createRemoteDirectory" ||
+										task.type === "deleteRemoteDirectory" ||
+										task.type === "deleteRemoteFile"
+								)
+
+								// Here we reset the internal local/remote tree changed times so we rescan after we did changes for consistency
+								if (didLocalChanges) {
+									this.localFileSystem.lastDirectoryChangeTimestamp = Date.now() - SYNC_INTERVAL * 2
+									this.localFileSystem.getDirectoryTreeCache = {
+										timestamp: 0,
+										tree: {},
+										inodes: {},
+										ignored: [],
+										errors: [],
+										size: 0
+									}
+								}
+
+								if (didRemoteChanges) {
+									this.remoteFileSystem.getDirectoryTreeCache = {
+										timestamp: 0,
+										tree: {},
+										uuids: {},
+										ignored: [],
+										size: 0
+									}
+								}
+
+								const applied = this.state.applyDoneTasksToState({
+									doneTasks,
+									currentLocalTree: currentLocalTree.result,
+									currentRemoteTree: currentRemoteTree.result
+								})
+
+								currentLocalTree.result = applied.currentLocalTree
+								currentRemoteTree.result = applied.currentRemoteTree
+
+								postMessageToMain({
+									type: "cycleApplyingStateDone",
+									syncPair: this.syncPair
+								})
+							}
+
 							postMessageToMain({
-								type: "cycleApplyingStateStarted",
+								type: "cycleSavingStateStarted",
 								syncPair: this.syncPair
 							})
 
-							const didLocalChanges = doneTasks.some(
-								task =>
-									task.type === "createLocalDirectory" ||
-									task.type === "deleteLocalDirectory" ||
-									task.type === "deleteLocalFile" ||
-									task.type === "renameLocalDirectory" ||
-									task.type === "renameLocalFile"
-							)
-							const didRemoteChanges = doneTasks.some(
-								task =>
-									task.type === "renameRemoteDirectory" ||
-									task.type === "renameRemoteFile" ||
-									task.type === "createRemoteDirectory" ||
-									task.type === "deleteRemoteDirectory" ||
-									task.type === "deleteRemoteFile"
-							)
+							this.previousLocalTree = currentLocalTree.result
+							this.previousRemoteTree = currentRemoteTree.result
 
-							// Here we reset the internal local/remote tree changed times so we rescan after we did changes for consistency
-							if (didLocalChanges) {
-								this.localFileSystem.lastDirectoryChangeTimestamp = Date.now() - SYNC_INTERVAL * 2
-								this.localFileSystem.getDirectoryTreeCache = {
-									timestamp: 0,
-									tree: {},
-									inodes: {},
-									ignored: [],
-									errors: [],
-									size: 0
-								}
-							}
-
-							if (didRemoteChanges) {
-								this.remoteFileSystem.getDirectoryTreeCache = {
-									timestamp: 0,
-									tree: {},
-									uuids: {},
-									ignored: [],
-									size: 0
-								}
-							}
-
-							const applied = this.state.applyDoneTasksToState({
-								doneTasks,
-								currentLocalTree: currentLocalTree.result,
-								currentRemoteTree: currentRemoteTree.result
-							})
-
-							currentLocalTree.result = applied.currentLocalTree
-							currentRemoteTree.result = applied.currentRemoteTree
+							await this.state.save()
 
 							postMessageToMain({
-								type: "cycleApplyingStateDone",
+								type: "cycleSavingStateDone",
 								syncPair: this.syncPair
 							})
 						}
 
 						postMessageToMain({
-							type: "cycleSavingStateStarted",
-							syncPair: this.syncPair
-						})
-
-						this.previousLocalTree = currentLocalTree.result
-						this.previousRemoteTree = currentRemoteTree.result
-
-						await this.state.save()
-
-						postMessageToMain({
-							type: "cycleSavingStateDone",
+							type: "cycleSuccess",
 							syncPair: this.syncPair
 						})
 					}
-
-					postMessageToMain({
-						type: "cycleSuccess",
-						syncPair: this.syncPair
-					})
 				}
 			} finally {
 				postMessageToMain({

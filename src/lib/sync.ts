@@ -59,7 +59,7 @@ export class Sync {
 	public cleaningLocalTrash: boolean = false
 	public isPreviousSavedTreeStateEmpty: boolean = true
 	public requireConfirmationOnLargeDeletion: boolean
-	public needsDeletionConfirmation: boolean = false
+	public deletionConfirmationResult: "delete" | "restart" | "waiting" = "waiting"
 
 	/**
 	 * Creates an instance of Sync.
@@ -427,14 +427,14 @@ export class Sync {
 						((confirmLocalDeletion && (this.mode === "twoWay" || this.mode === "localToCloud")) ||
 							(confirmRemoteDeletion && (this.mode === "twoWay" || this.mode === "cloudToLocal")))
 					) {
-						this.needsDeletionConfirmation = true
+						this.deletionConfirmationResult = "waiting"
 
-						await new Promise<void>(resolve => {
+						const result = await new Promise<"delete" | "restart">(resolve => {
 							const interval = setInterval(() => {
-								if (!this.needsDeletionConfirmation) {
+								if (this.deletionConfirmationResult !== "waiting") {
 									clearInterval(interval)
 
-									resolve()
+									resolve(this.deletionConfirmationResult)
 								} else {
 									postMessageToMain({
 										type: "confirmDeletion",
@@ -463,6 +463,10 @@ export class Sync {
 								}
 							}, 1000)
 						})
+
+						if (result === "restart") {
+							return
+						}
 					}
 
 					postMessageToMain({

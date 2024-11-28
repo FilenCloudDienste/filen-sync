@@ -327,10 +327,10 @@ export class SyncWorker {
 		}
 	}
 
-	public confirmDeletion(uuid: string): void {
+	public confirmDeletion(uuid: string, result: "delete" | "restart"): void {
 		for (const syncUUID in this.syncs) {
 			if (syncUUID === uuid) {
-				this.syncs[syncUUID]!.needsDeletionConfirmation = false
+				this.syncs[syncUUID]!.deletionConfirmationResult = result
 
 				break
 			}

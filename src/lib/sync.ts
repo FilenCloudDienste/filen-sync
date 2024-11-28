@@ -32,11 +32,13 @@ export class Sync {
 	public readonly deltas: Deltas
 	public previousLocalTree: LocalTree = {
 		tree: {},
-		inodes: {}
+		inodes: {},
+		size: 0
 	}
 	public previousRemoteTree: RemoteTree = {
 		tree: {},
-		uuids: {}
+		uuids: {},
+		size: 0
 	}
 	public localFileHashes: Record<string, string> = {}
 	public readonly tasks: Tasks
@@ -56,6 +58,8 @@ export class Sync {
 	public localTreeErrors: LocalTreeError[] = []
 	public cleaningLocalTrash: boolean = false
 	public isPreviousSavedTreeStateEmpty: boolean = true
+	public requireConfirmationOnLargeDeletion: boolean
+	public needsDeletionConfirmation: boolean = false
 
 	/**
 	 * Creates an instance of Sync.
@@ -75,6 +79,8 @@ export class Sync {
 		this.dbPath = worker.dbPath
 		this.sdk = worker.sdk
 		this.localTrashDisabled = syncPair.localTrashDisabled
+		this.requireConfirmationOnLargeDeletion =
+			typeof syncPair.requireConfirmationOnLargeDeletion === "boolean" ? syncPair.requireConfirmationOnLargeDeletion : false
 		this.localFileSystem = new LocalFileSystem(this)
 		this.remoteFileSystem = new RemoteFileSystem(this)
 		this.deltas = new Deltas(this)
@@ -412,6 +418,53 @@ export class Sync {
 						}
 					})
 
+					const confirmLocalDeletion = this.previousLocalTree.size > 0 && currentLocalTree.result.size === 0
+					const confirmRemoteDeletion = this.previousRemoteTree.size > 0 && currentRemoteTree.result.size === 0
+
+					// If the previous tree has nodes and the current one is empty, we should prompt the user to confirm deletion
+					if (
+						this.requireConfirmationOnLargeDeletion &&
+						((confirmLocalDeletion && (this.mode === "twoWay" || this.mode === "localToCloud")) ||
+							(confirmRemoteDeletion && (this.mode === "twoWay" || this.mode === "cloudToLocal")))
+					) {
+						this.needsDeletionConfirmation = true
+
+						await new Promise<void>(resolve => {
+							const interval = setInterval(() => {
+								if (!this.needsDeletionConfirmation) {
+									clearInterval(interval)
+
+									resolve()
+								} else {
+									postMessageToMain({
+										type: "confirmDeletion",
+										syncPair: this.syncPair,
+										data: {
+											where:
+												confirmLocalDeletion && confirmRemoteDeletion
+													? "both"
+													: confirmLocalDeletion
+													? "local"
+													: "remote",
+											previous:
+												confirmLocalDeletion && confirmRemoteDeletion
+													? this.previousLocalTree.size + this.previousRemoteTree.size
+													: confirmLocalDeletion
+													? this.previousLocalTree.size
+													: this.previousRemoteTree.size,
+											current:
+												confirmLocalDeletion && confirmRemoteDeletion
+													? currentLocalTree.result.size + currentRemoteTree.result.size
+													: confirmLocalDeletion
+													? currentLocalTree.result.size
+													: currentRemoteTree.result.size
+										}
+									})
+								}
+							}, 1000)
+						})
+					}
+
 					postMessageToMain({
 						type: "cycleProcessingDeltasStarted",
 						syncPair: this.syncPair
@@ -506,7 +559,8 @@ export class Sync {
 									tree: {},
 									inodes: {},
 									ignored: [],
-									errors: []
+									errors: [],
+									size: 0
 								}
 							}
 
@@ -515,7 +569,8 @@ export class Sync {
 									timestamp: 0,
 									tree: {},
 									uuids: {},
-									ignored: []
+									ignored: [],
+									size: 0
 								}
 							}
 

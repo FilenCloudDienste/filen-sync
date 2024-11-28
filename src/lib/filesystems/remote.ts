@@ -32,6 +32,7 @@ export type RemoteDirectoryUUIDs = Record<string, RemoteItem>
 export type RemoteTree = {
 	tree: RemoteDirectoryTree
 	uuids: RemoteDirectoryUUIDs
+	size: number
 }
 
 export type RemoteTreeIgnoredReason =
@@ -59,11 +60,13 @@ export class RemoteFileSystem {
 		tree: RemoteDirectoryTree
 		uuids: RemoteDirectoryUUIDs
 		ignored: RemoteTreeIgnored[]
+		size: number
 	} = {
 		timestamp: 0,
 		tree: {},
 		uuids: {},
-		ignored: []
+		ignored: [],
+		size: 0
 	}
 	private readonly mutex = new Semaphore(1)
 	private readonly mkdirMutex = new Semaphore(1)
@@ -256,10 +259,12 @@ export class RemoteFileSystem {
 
 		const folderNames: Record<string, string> = { base: "/" }
 		const pathsAdded: Record<string, boolean> = {}
+		let size = 0
 
 		this.getDirectoryTreeCache.ignored = []
 		this.getDirectoryTreeCache.tree = {}
 		this.getDirectoryTreeCache.uuids = {}
+		this.getDirectoryTreeCache.size = 0
 
 		for (const folder of dir.folders) {
 			try {
@@ -323,6 +328,8 @@ export class RemoteFileSystem {
 
 				this.getDirectoryTreeCache.tree[folderPath] = item
 				this.getDirectoryTreeCache.uuids[folder[0]] = item
+
+				size += 1
 			} catch (e) {
 				this.sync.worker.logger.log("error", e, "filesystems.remote.getDirectoryTree")
 				this.sync.worker.logger.log("error", e)
@@ -412,6 +419,8 @@ export class RemoteFileSystem {
 
 					this.getDirectoryTreeCache.tree[filePath] = item
 					this.getDirectoryTreeCache.uuids[item.uuid] = item
+
+					size += 1
 				} catch (e) {
 					this.sync.worker.logger.log("error", e, "filesystems.remote.getDirectoryTree")
 					this.sync.worker.logger.log("error", e)
@@ -421,12 +430,14 @@ export class RemoteFileSystem {
 			})
 		)
 
+		this.getDirectoryTreeCache.size = size
 		this.getDirectoryTreeCache.timestamp = now
 
 		return {
 			result: {
 				tree: this.getDirectoryTreeCache.tree,
-				uuids: this.getDirectoryTreeCache.uuids
+				uuids: this.getDirectoryTreeCache.uuids,
+				size: this.getDirectoryTreeCache.size
 			},
 			ignored: this.getDirectoryTreeCache.ignored,
 			changed: true

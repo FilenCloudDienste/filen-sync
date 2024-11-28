@@ -15,6 +15,7 @@ export type SyncPair = {
 	excludeDotFiles: boolean
 	paused: boolean
 	localTrashDisabled: boolean
+	requireConfirmationOnLargeDeletion?: boolean
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -288,6 +289,14 @@ export type SyncMessage =
 					type: "deltasSize"
 					data: {
 						size: number
+					}
+			  }
+			| {
+					type: "confirmDeletion"
+					data: {
+						where: "local" | "remote" | "both"
+						previous: number
+						current: number
 					}
 			  }
 			| {

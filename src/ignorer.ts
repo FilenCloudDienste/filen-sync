@@ -34,15 +34,9 @@ export class Ignorer {
 			return ""
 		}
 
-		const readContent = await fs.readFile(filePath, {
+		return await fs.readFile(filePath, {
 			encoding: "utf-8"
 		})
-
-		if (readContent.length === 0) {
-			return ""
-		}
-
-		return readContent
 	}
 
 	public async initialize(passedContent?: string): Promise<void> {

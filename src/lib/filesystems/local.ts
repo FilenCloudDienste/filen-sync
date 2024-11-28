@@ -42,6 +42,7 @@ export type LocalDirectoryINodes = Record<number, LocalItem>
 export type LocalTree = {
 	tree: LocalDirectoryTree
 	inodes: LocalDirectoryINodes
+	size: number
 }
 
 export type LocalTreeError = {
@@ -87,12 +88,14 @@ export class LocalFileSystem {
 		inodes: LocalDirectoryINodes
 		ignored: LocalTreeIgnored[]
 		errors: LocalTreeError[]
+		size: number
 	} = {
 		timestamp: 0,
 		tree: {},
 		inodes: {},
 		ignored: [],
-		errors: []
+		errors: [],
+		size: 0
 	}
 	public watcherRunning = false
 	private watcherInstanceParcel: watcher.AsyncSubscription | null = null
@@ -226,7 +229,8 @@ export class LocalFileSystem {
 					resolve({
 						result: {
 							tree: this.getDirectoryTreeCache.tree,
-							inodes: this.getDirectoryTreeCache.inodes
+							inodes: this.getDirectoryTreeCache.inodes,
+							size: this.getDirectoryTreeCache.size
 						},
 						errors: this.getDirectoryTreeCache.errors,
 						ignored: this.getDirectoryTreeCache.ignored,
@@ -240,8 +244,10 @@ export class LocalFileSystem {
 				this.getDirectoryTreeCache.inodes = {}
 				this.getDirectoryTreeCache.ignored = []
 				this.getDirectoryTreeCache.errors = []
+				this.getDirectoryTreeCache.size = 0
 
 				const pathsAdded: Record<string, boolean> = {}
+				let size = 0
 				let didError = false
 				let didErrorErr: Error = new Error("Could not read local directory.")
 				const stream = FastGlob.stream("**/*", {
@@ -386,6 +392,8 @@ export class LocalFileSystem {
 
 					this.getDirectoryTreeCache.tree[entryPath] = item
 					this.getDirectoryTreeCache.inodes[item.inode] = item
+
+					size += 1
 				}
 
 				if (didError) {
@@ -400,6 +408,7 @@ export class LocalFileSystem {
 					return
 				}
 
+				this.getDirectoryTreeCache.size = size
 				this.getDirectoryTreeCache.timestamp = Date.now()
 
 				// Clear old local file hashes that are not present anymore
@@ -412,7 +421,8 @@ export class LocalFileSystem {
 				resolve({
 					result: {
 						tree: this.getDirectoryTreeCache.tree,
-						inodes: this.getDirectoryTreeCache.inodes
+						inodes: this.getDirectoryTreeCache.inodes,
+						size: this.getDirectoryTreeCache.size
 					},
 					errors: this.getDirectoryTreeCache.errors,
 					ignored: this.getDirectoryTreeCache.ignored,

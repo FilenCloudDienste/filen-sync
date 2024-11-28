@@ -480,11 +480,16 @@ export class State {
 			return
 		}
 
+		const previousLocalTree = await this.readLargeRecordFromLineStream<LocalItem>(this.previousLocalTreePath)
+		const previousRemoteTree = await this.readLargeRecordFromLineStream<RemoteItem>(this.previousRemoteTreePath)
+
 		this.sync.isPreviousSavedTreeStateEmpty = false
-		this.sync.previousLocalTree.tree = await this.readLargeRecordFromLineStream<LocalItem>(this.previousLocalTreePath)
+		this.sync.previousLocalTree.tree = previousLocalTree
 		this.sync.previousLocalTree.inodes = await this.readLargeRecordFromLineStream<LocalItem>(this.previousLocalINodesPath)
-		this.sync.previousRemoteTree.tree = await this.readLargeRecordFromLineStream<RemoteItem>(this.previousRemoteTreePath)
+		this.sync.previousRemoteTree.tree = previousRemoteTree
 		this.sync.previousRemoteTree.uuids = await this.readLargeRecordFromLineStream<RemoteItem>(this.previousRemoteUUIDsPath)
+		this.sync.previousLocalTree.size = Object.keys(previousLocalTree).length
+		this.sync.previousRemoteTree.size = Object.keys(previousRemoteTree).length
 	}
 
 	public async savePreviousTrees(): Promise<void> {

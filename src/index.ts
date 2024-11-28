@@ -74,14 +74,16 @@ export class SyncWorker {
 				tree: {},
 				inodes: {},
 				ignored: [],
-				errors: []
+				errors: [],
+				size: 0
 			}
 
 			sync.remoteFileSystem.getDirectoryTreeCache = {
 				timestamp: 0,
 				tree: {},
 				uuids: {},
-				ignored: []
+				ignored: [],
+				size: 0
 			}
 
 			sync.localFileSystem.ignoredCache.clear()
@@ -319,6 +321,16 @@ export class SyncWorker {
 				if (pauseSignal && pauseSignal.isPaused()) {
 					pauseSignal.resume()
 				}
+
+				break
+			}
+		}
+	}
+
+	public confirmDeletion(uuid: string): void {
+		for (const syncUUID in this.syncs) {
+			if (syncUUID === uuid) {
+				this.syncs[syncUUID]!.needsDeletionConfirmation = false
 
 				break
 			}

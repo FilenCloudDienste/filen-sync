@@ -97,7 +97,10 @@ export class Sync {
 			throw new Error("Aborted")
 		}
 
-		const localSmokeTest = await this.localFileSystem.isPathWritable(this.syncPair.localPath)
+		const localSmokeTest =
+			this.mode === "cloudBackup" || this.mode === "cloudToLocal" || this.mode === "twoWay"
+				? await this.localFileSystem.isPathWritable(this.syncPair.localPath)
+				: await this.localFileSystem.isPathReadable(this.syncPair.localPath)
 
 		if (!localSmokeTest) {
 			await this.localFileSystem.stopDirectoryWatcher()
@@ -418,16 +421,67 @@ export class Sync {
 						}
 					})
 
-					const confirmLocalDeletion = this.previousLocalTree.size > 0 && currentLocalTree.result.size === 0
-					const confirmRemoteDeletion = this.previousRemoteTree.size > 0 && currentRemoteTree.result.size === 0
+					postMessageToMain({
+						type: "cycleProcessingDeltasStarted",
+						syncPair: this.syncPair
+					})
+
+					const {
+						deltas,
+						deleteLocalDirectoryCountRaw,
+						deleteLocalFileCountRaw,
+						deleteRemoteDirectoryCountRaw,
+						deleteRemoteFileCountRaw
+					} = await this.deltas.process({
+						currentLocalTree: currentLocalTree.result,
+						currentRemoteTree: currentRemoteTree.result,
+						previousLocalTree: this.previousLocalTree,
+						previousRemoteTree: this.previousRemoteTree,
+						currentLocalTreeErrors: currentLocalTree.errors
+					})
+
+					postMessageToMain({
+						type: "deltasCount",
+						syncPair: this.syncPair,
+						data: {
+							count: deltas.length
+						}
+					})
+
+					postMessageToMain({
+						type: "deltasSize",
+						syncPair: this.syncPair,
+						data: {
+							size: deltas.reduce(
+								(prev, delta) => prev + (delta.type === "uploadFile" || delta.type === "downloadFile" ? delta.size : 0),
+								0
+							)
+						}
+					})
+
+					postMessageToMain({
+						type: "cycleProcessingDeltasDone",
+						syncPair: this.syncPair
+					})
+
+					const confirmLocalDeletion =
+						this.previousLocalTree.size > 0 &&
+						currentLocalTree.result.size === 0 &&
+						deleteRemoteDirectoryCountRaw + deleteRemoteFileCountRaw > 0 &&
+						this.previousLocalTree.size <= deleteRemoteDirectoryCountRaw + deleteRemoteFileCountRaw &&
+						(this.mode === "twoWay" || this.mode === "localToCloud")
+
+					const confirmRemoteDeletion =
+						this.previousRemoteTree.size > 0 &&
+						currentRemoteTree.result.size === 0 &&
+						deleteLocalDirectoryCountRaw + deleteLocalFileCountRaw > 0
+					this.previousRemoteTree.size <= deleteLocalDirectoryCountRaw + deleteLocalFileCountRaw &&
+						(this.mode === "twoWay" || this.mode === "cloudToLocal")
+
 					let skipSyncDueToConfirmDeletionRestart = false
 
 					// If the previous tree has nodes and the current one is empty, we should prompt the user to confirm deletion
-					if (
-						this.requireConfirmationOnLargeDeletion &&
-						((confirmLocalDeletion && (this.mode === "twoWay" || this.mode === "localToCloud")) ||
-							(confirmRemoteDeletion && (this.mode === "twoWay" || this.mode === "cloudToLocal")))
-					) {
+					if (this.requireConfirmationOnLargeDeletion && (confirmLocalDeletion || confirmRemoteDeletion)) {
 						this.deletionConfirmationResult = "waiting"
 
 						const sendConfirmationMessage = () => {
@@ -473,43 +527,6 @@ export class Sync {
 					}
 
 					if (!skipSyncDueToConfirmDeletionRestart) {
-						postMessageToMain({
-							type: "cycleProcessingDeltasStarted",
-							syncPair: this.syncPair
-						})
-
-						const deltas = await this.deltas.process({
-							currentLocalTree: currentLocalTree.result,
-							currentRemoteTree: currentRemoteTree.result,
-							previousLocalTree: this.previousLocalTree,
-							previousRemoteTree: this.previousRemoteTree,
-							currentLocalTreeErrors: currentLocalTree.errors
-						})
-
-						postMessageToMain({
-							type: "deltasCount",
-							syncPair: this.syncPair,
-							data: {
-								count: deltas.length
-							}
-						})
-
-						postMessageToMain({
-							type: "deltasSize",
-							syncPair: this.syncPair,
-							data: {
-								size: deltas.reduce(
-									(prev, delta) => prev + (delta.type === "uploadFile" || delta.type === "downloadFile" ? delta.size : 0),
-									0
-								)
-							}
-						})
-
-						postMessageToMain({
-							type: "cycleProcessingDeltasDone",
-							syncPair: this.syncPair
-						})
-
 						postMessageToMain({
 							type: "cycleProcessingTasksStarted",
 							syncPair: this.syncPair

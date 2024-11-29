@@ -84,7 +84,7 @@ export class Deltas {
 	 * 		currentLocalTree: LocalTree
 	 * 		currentRemoteTree: RemoteTree
 	 * 		previousLocalTree: LocalTree
-	 * 		previousRemoteTree: RemoteTree,
+	 * 		previousRemoteTree: RemoteTree
 	 * 		currentLocalTreeErrors: LocalTreeError[]
 	 * 	}} param0
 	 * @param {LocalTree} param0.currentLocalTree
@@ -92,7 +92,13 @@ export class Deltas {
 	 * @param {LocalTree} param0.previousLocalTree
 	 * @param {RemoteTree} param0.previousRemoteTree
 	 * @param {{}} param0.currentLocalTreeErrors
-	 * @returns {Promise<Delta[]>}
+	 * @returns {Promise<{
+	 * 		deltas: Delta[],
+	 * 		deleteLocalDirectoryCountRaw: number
+	 * 		deleteLocalFileCountRaw: number
+	 * 		deleteRemoteDirectoryCountRaw: number
+	 * 		deleteRemoteFileCountRaw: number
+	 * 	}>}
 	 */
 	public async process({
 		currentLocalTree,
@@ -106,9 +112,21 @@ export class Deltas {
 		previousLocalTree: LocalTree
 		previousRemoteTree: RemoteTree
 		currentLocalTreeErrors: LocalTreeError[]
-	}): Promise<Delta[]> {
+	}): Promise<{
+		deltas: Delta[]
+		deleteLocalDirectoryCountRaw: number
+		deleteLocalFileCountRaw: number
+		deleteRemoteDirectoryCountRaw: number
+		deleteRemoteFileCountRaw: number
+	}> {
 		if (this.sync.removed) {
-			return []
+			return {
+				deltas: [],
+				deleteLocalDirectoryCountRaw: 0,
+				deleteLocalFileCountRaw: 0,
+				deleteRemoteDirectoryCountRaw: 0,
+				deleteRemoteFileCountRaw: 0
+			}
 		}
 
 		let deltas: Delta[] = []
@@ -118,6 +136,10 @@ export class Deltas {
 		const renamedLocalDirectories: Delta[] = []
 		const deletedRemoteDirectories: Delta[] = []
 		const deletedLocalDirectories: Delta[] = []
+		let deleteLocalDirectoryCountRaw = 0
+		let deleteLocalFileCountRaw = 0
+		let deleteRemoteDirectoryCountRaw = 0
+		let deleteRemoteFileCountRaw = 0
 
 		for (const error of currentLocalTreeErrors) {
 			erroredLocalPaths[error.relativePath] = true
@@ -241,6 +263,10 @@ export class Deltas {
 
 						if (previousLocalItem.type === "directory") {
 							deletedRemoteDirectories.push(delta)
+
+							deleteRemoteDirectoryCountRaw += 1
+						} else {
+							deleteRemoteFileCountRaw += 1
 						}
 
 						pathsAdded[path] = true
@@ -267,6 +293,10 @@ export class Deltas {
 
 						if (currentRemoteItem.type === "directory") {
 							deletedRemoteDirectories.push(delta)
+
+							deleteRemoteDirectoryCountRaw += 1
+						} else {
+							deleteRemoteFileCountRaw += 1
 						}
 
 						pathsAdded[path] = true
@@ -302,6 +332,10 @@ export class Deltas {
 
 						if (previousRemoteItem.type === "directory") {
 							deletedLocalDirectories.push(delta)
+
+							deleteLocalDirectoryCountRaw += 1
+						} else {
+							deleteLocalFileCountRaw += 1
 						}
 
 						pathsAdded[path] = true
@@ -328,6 +362,10 @@ export class Deltas {
 
 						if (currentLocalItem.type === "directory") {
 							deletedLocalDirectories.push(delta)
+
+							deleteLocalDirectoryCountRaw += 1
+						} else {
+							deleteLocalFileCountRaw += 1
 						}
 
 						pathsAdded[path] = true
@@ -551,7 +589,13 @@ export class Deltas {
 		}
 
 		// Work on deltas from "left to right" (ascending order, path length).
-		return deltas.sort((a, b) => a.path.split("/").length - b.path.split("/").length)
+		return {
+			deltas: deltas.sort((a, b) => a.path.split("/").length - b.path.split("/").length),
+			deleteLocalDirectoryCountRaw,
+			deleteLocalFileCountRaw,
+			deleteRemoteDirectoryCountRaw,
+			deleteRemoteFileCountRaw
+		}
 	}
 }
 

@@ -47,7 +47,6 @@ export const DEFAULT_IGNORED = {
 		"*:/Program Files/**/*",
 		"*:/Program Files (x86)/**/*",
 		"/share/Trash/**/*",
-		"*:/Users/**/AppData/**/*",
 		"*:/System Volume Information/**/*"
 	],
 	relativeGlobs: [

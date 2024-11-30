@@ -53,9 +53,15 @@ export class Ignorer {
 				encoding: "utf-8"
 			})
 
-			content = passedContent.split("\n").map(line => line.trim())
+			content = passedContent
+				.split("\n")
+				.map(line => line.trim())
+				.filter(line => line.length > 0)
 		} else {
-			content = (await this.fetch()).split("\n").map(line => line.trim())
+			content = (await this.fetch())
+				.split("\n")
+				.map(line => line.trim())
+				.filter(line => line.length > 0)
 		}
 
 		this.pattern = content

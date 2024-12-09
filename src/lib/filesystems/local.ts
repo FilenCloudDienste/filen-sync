@@ -373,12 +373,7 @@ export class LocalFileSystem {
 					}
 
 					try {
-						await fs.access(
-							absolutePath,
-							this.sync.mode === "cloudBackup" || this.sync.mode === "cloudToLocal" || this.sync.mode === "twoWay"
-								? fs.constants.W_OK | fs.constants.R_OK
-								: fs.constants.R_OK
-						)
+						await fs.access(absolutePath, fs.constants.R_OK)
 					} catch {
 						this.getDirectoryTreeCache.ignored.push({
 							localPath: absolutePath,

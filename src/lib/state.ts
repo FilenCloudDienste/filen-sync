@@ -452,13 +452,17 @@ export class State {
 			followSymbolicLinks: false,
 			deep: 0,
 			fs,
-			suppressErrors: false,
+			suppressErrors: true,
 			stats: false,
 			unique: true,
 			objectMode: false
 		})
 
 		for (const entry of dir) {
+			if (!entry) {
+				continue
+			}
+
 			if (entry.trim().endsWith(".tmp")) {
 				await fs.rm(pathModule.join(this.statePath, entry), {
 					force: true,

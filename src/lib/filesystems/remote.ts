@@ -71,7 +71,7 @@ export class RemoteFileSystem {
 	private readonly mutex = new Semaphore(1)
 	private readonly mkdirMutex = new Semaphore(1)
 	public readonly itemsMutex = new Semaphore(1)
-	public readonly listSemaphore = new Semaphore(128)
+	public readonly listSemaphore = new Semaphore(1024)
 	private deviceIdCache: string = ""
 	public ignoredCache = new Map<string, { ignored: true; reason: RemoteTreeIgnoredReason } | { ignored: false }>()
 

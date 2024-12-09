@@ -159,13 +159,17 @@ export class Sync {
 						followSymbolicLinks: false,
 						deep: 0,
 						fs,
-						suppressErrors: false,
+						suppressErrors: true,
 						stats: true,
 						unique: true,
 						objectMode: true
 					})
 
 					for (const entry of dir) {
+						if (!entry) {
+							return
+						}
+
 						if (entry.stats && entry.stats.atimeMs + 86400000 * 30 < now) {
 							await fs.rm(pathModule.join(localTrashPath, entry.path), {
 								force: true,

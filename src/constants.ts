@@ -9,7 +9,6 @@ export const DEFAULT_IGNORED = {
 		"desktop.ini",
 		"thumbs.db",
 		"ntuser.dat",
-		".trash",
 		".filen.trash.local",
 		"AUX",
 		"PRN",
@@ -46,15 +45,7 @@ export const DEFAULT_IGNORED = {
 		"*:/ProgramData/**/*",
 		"*:/Program Files/**/*",
 		"*:/Program Files (x86)/**/*",
-		"/share/Trash/**/*",
 		"*:/System Volume Information/**/*"
 	],
-	relativeGlobs: [
-		".filen.trash.local/**/*",
-		"$RECYCLE.BIN/**/*",
-		".Trash/**/*",
-		".local/share/Trash/**/*",
-		"local/share/Trash/**/*",
-		"System Volume Information/**/*"
-	]
+	relativeGlobs: [".filen.trash.local/**/*", "$RECYCLE.BIN/**/*", "System Volume Information/**/*"]
 }

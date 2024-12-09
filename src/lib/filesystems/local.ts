@@ -14,7 +14,7 @@ import {
 import pathModule from "path"
 import process from "process"
 import type Sync from "../sync"
-import { SYNC_INTERVAL, LOCAL_TRASH_NAME, DEFAULT_IGNORED } from "../../constants"
+import { SYNC_INTERVAL, LOCAL_TRASH_NAME } from "../../constants"
 import crypto from "crypto"
 import { pipeline } from "stream"
 import { promisify } from "util"
@@ -23,7 +23,7 @@ import { postMessageToMain } from "../ipc"
 import { Semaphore } from "../../semaphore"
 import { v4 as uuidv4 } from "uuid"
 import { type Watcher } from "node-watch"
-import FastGlob, { type Entry } from "fast-glob"
+import FastGlob from "fast-glob"
 
 const pipelineAsync = promisify(pipeline)
 
@@ -118,16 +118,16 @@ export class LocalFileSystem {
 		this.sync = sync
 	}
 
-	public isPathIgnored(entry: Required<Entry>): { ignored: true; reason: LocalTreeIgnoredReason } | { ignored: false } {
-		if (this.ignoredCache.get(entry.path)) {
-			return this.ignoredCache.get(entry.path)!
+	public isPathIgnored(
+		relativePath: string,
+		absolutePath: string
+	): { ignored: true; reason: LocalTreeIgnoredReason } | { ignored: false } {
+		if (this.ignoredCache.get(relativePath)) {
+			return this.ignoredCache.get(relativePath)!
 		}
 
-		const entryPath = entry.path.startsWith("/") ? entry.path : "/" + entry.path
-		const absolutePath = pathModule.join(this.sync.syncPair.localPath, entry.path)
-
 		if (isPathOverMaxLength(absolutePath)) {
-			this.ignoredCache.set(entry.path, {
+			this.ignoredCache.set(relativePath, {
 				ignored: true,
 				reason: "pathLength"
 			})
@@ -138,8 +138,8 @@ export class LocalFileSystem {
 			}
 		}
 
-		if (isNameOverMaxLength(entry.name)) {
-			this.ignoredCache.set(entry.path, {
+		if (isNameOverMaxLength(pathModule.basename(absolutePath))) {
+			this.ignoredCache.set(relativePath, {
 				ignored: true,
 				reason: "nameLength"
 			})
@@ -151,7 +151,7 @@ export class LocalFileSystem {
 		}
 
 		if (!isValidPath(absolutePath)) {
-			this.ignoredCache.set(entry.path, {
+			this.ignoredCache.set(relativePath, {
 				ignored: true,
 				reason: "invalidPath"
 			})
@@ -162,8 +162,8 @@ export class LocalFileSystem {
 			}
 		}
 
-		if (isRelativePathIgnoredByDefault(entryPath) || isAbsolutePathIgnoredByDefault(absolutePath)) {
-			this.ignoredCache.set(entry.path, {
+		if (isRelativePathIgnoredByDefault(relativePath) || isAbsolutePathIgnoredByDefault(absolutePath)) {
+			this.ignoredCache.set(relativePath, {
 				ignored: true,
 				reason: "defaultIgnore"
 			})
@@ -174,8 +174,8 @@ export class LocalFileSystem {
 			}
 		}
 
-		if (this.sync.excludeDotFiles && pathIncludesDotFile(entryPath)) {
-			this.ignoredCache.set(entry.path, {
+		if (this.sync.excludeDotFiles && pathIncludesDotFile(relativePath)) {
+			this.ignoredCache.set(relativePath, {
 				ignored: true,
 				reason: "dotFile"
 			})
@@ -186,8 +186,8 @@ export class LocalFileSystem {
 			}
 		}
 
-		if (this.sync.ignorer.ignores(entry.path)) {
-			this.ignoredCache.set(entry.path, {
+		if (this.sync.ignorer.ignores(relativePath)) {
+			this.ignoredCache.set(relativePath, {
 				ignored: true,
 				reason: "filenIgnore"
 			})
@@ -198,7 +198,7 @@ export class LocalFileSystem {
 			}
 		}
 
-		this.ignoredCache.set(entry.path, {
+		this.ignoredCache.set(relativePath, {
 			ignored: false
 		})
 
@@ -259,21 +259,10 @@ export class LocalFileSystem {
 					followSymbolicLinks: false,
 					deep: Infinity,
 					fs,
-					ignore: [
-						"**/.filen.trash.local/**/*",
-						"**/$RECYCLE.BIN/**/*",
-						"**/System Volume Information/**/*",
-						...DEFAULT_IGNORED.relativeGlobs.map(glob => `**/${glob}`),
-						...DEFAULT_IGNORED.absoluteGlobs.map(glob => {
-							const normalized = glob.replace("*:", "")
-
-							return `**${normalized.startsWith("/") ? "" : "/"}${normalized}`
-						})
-					],
-					suppressErrors: false,
-					stats: true,
+					suppressErrors: true,
+					stats: false,
 					unique: false,
-					objectMode: true
+					objectMode: false
 				})
 
 				stream.on("error", err => {
@@ -300,14 +289,19 @@ export class LocalFileSystem {
 						break
 					}
 
-					const entryItem = entry as unknown as Required<Entry>
-					const entryPath = "/" + entryItem.path
+					const entryItem = entry as unknown as string | null
+
+					if (!entryItem) {
+						continue
+					}
+
+					const entryPath = "/" + entryItem
 
 					if (entryPath.includes(LOCAL_TRASH_NAME)) {
 						continue
 					}
 
-					const absolutePath = pathModule.join(this.sync.syncPair.localPath, entryItem.path)
+					const absolutePath = pathModule.join(this.sync.syncPair.localPath, entryItem)
 					const lowercasePath = entryPath.toLowerCase()
 
 					if (pathsAdded[lowercasePath]) {
@@ -322,12 +316,33 @@ export class LocalFileSystem {
 
 					pathsAdded[lowercasePath] = true
 
-					if (
-						entryItem.dirent.isBlockDevice() ||
-						entryItem.dirent.isCharacterDevice() ||
-						entryItem.dirent.isFIFO() ||
-						entryItem.dirent.isSocket()
-					) {
+					const ignored = this.isPathIgnored(entryItem, absolutePath)
+
+					if (ignored.ignored) {
+						this.getDirectoryTreeCache.ignored.push({
+							localPath: absolutePath,
+							relativePath: entryPath,
+							reason: ignored.reason
+						})
+
+						continue
+					}
+
+					let stats: fs.Stats | null = null
+
+					try {
+						stats = await fs.stat(absolutePath)
+					} catch {
+						this.getDirectoryTreeCache.ignored.push({
+							localPath: absolutePath,
+							relativePath: entryPath,
+							reason: "permissions"
+						})
+
+						continue
+					}
+
+					if (stats.isBlockDevice() || stats.isCharacterDevice() || stats.isFIFO() || stats.isSocket()) {
 						this.getDirectoryTreeCache.ignored.push({
 							localPath: absolutePath,
 							relativePath: entryPath,
@@ -337,7 +352,7 @@ export class LocalFileSystem {
 						continue
 					}
 
-					if (entryItem.dirent.isSymbolicLink()) {
+					if (stats.isSymbolicLink()) {
 						this.getDirectoryTreeCache.ignored.push({
 							localPath: absolutePath,
 							relativePath: entryPath,
@@ -347,7 +362,7 @@ export class LocalFileSystem {
 						continue
 					}
 
-					if (entryItem.dirent.isFile() && entryItem.stats.size <= 0) {
+					if (stats.isFile() && stats.size <= 0) {
 						this.getDirectoryTreeCache.ignored.push({
 							localPath: absolutePath,
 							relativePath: entryPath,
@@ -374,25 +389,13 @@ export class LocalFileSystem {
 						continue
 					}
 
-					const ignored = this.isPathIgnored(entry as unknown as Required<Entry>)
-
-					if (ignored.ignored) {
-						this.getDirectoryTreeCache.ignored.push({
-							localPath: absolutePath,
-							relativePath: entryPath,
-							reason: ignored.reason
-						})
-
-						continue
-					}
-
 					const item: LocalItem = {
-						lastModified: normalizeUTime(entryItem.stats.mtimeMs), // Sometimes comes as a float, but we need an int
-						type: entryItem.dirent.isDirectory() ? "directory" : "file",
+						lastModified: normalizeUTime(stats.mtimeMs), // Sometimes comes as a float, but we need an int
+						type: stats.isDirectory() ? "directory" : "file",
 						path: entryPath,
-						creation: normalizeUTime(entryItem.stats.birthtimeMs), // Sometimes comes as a float, but we need an int
-						size: entryItem.stats.size,
-						inode: entryItem.stats.ino
+						creation: normalizeUTime(stats.birthtimeMs), // Sometimes comes as a float, but we need an int
+						size: stats.size,
+						inode: stats.ino
 					}
 
 					this.getDirectoryTreeCache.tree[entryPath] = item

@@ -39,10 +39,7 @@ export const DEFAULT_IGNORED = {
 		"*:/$RECYCLE.BIN/**/*",
 		"*:/$Windows.~WS/**/*",
 		"*:/$WinREAgent/**/*",
-		"*:/Windows/**/*",
 		"*:/OneDriveTemp/**/*",
-		"*:/PerfLogs/**/*",
-		"*:/ProgramData/**/*",
 		"*:/Program Files/**/*",
 		"*:/Program Files (x86)/**/*",
 		"*:/System Volume Information/**/*"

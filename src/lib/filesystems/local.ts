@@ -120,7 +120,8 @@ export class LocalFileSystem {
 
 	public isPathIgnored(
 		relativePath: string,
-		absolutePath: string
+		absolutePath: string,
+		type: "file" | "directory"
 	): { ignored: true; reason: LocalTreeIgnoredReason } | { ignored: false } {
 		if (this.ignoredCache.get(relativePath)) {
 			return this.ignoredCache.get(relativePath)!
@@ -186,7 +187,8 @@ export class LocalFileSystem {
 			}
 		}
 
-		if (this.sync.ignorer.ignores(relativePath)) {
+		const trailingSlash = type === "directory" ? "/" : ""
+		if (this.sync.ignorer.ignores(relativePath + trailingSlash)) {
 			this.ignoredCache.set(relativePath, {
 				ignored: true,
 				reason: "filenIgnore"
@@ -316,18 +318,6 @@ export class LocalFileSystem {
 
 					pathsAdded[lowercasePath] = true
 
-					const ignored = this.isPathIgnored(entryItem, absolutePath)
-
-					if (ignored.ignored) {
-						this.getDirectoryTreeCache.ignored.push({
-							localPath: absolutePath,
-							relativePath: entryPath,
-							reason: ignored.reason
-						})
-
-						continue
-					}
-
 					let stats: fs.Stats | null = null
 
 					try {
@@ -337,6 +327,18 @@ export class LocalFileSystem {
 							localPath: absolutePath,
 							relativePath: entryPath,
 							reason: "permissions"
+						})
+
+						continue
+					}
+
+					const ignored = this.isPathIgnored(entryItem, absolutePath, stats.isFile() ? "file" : "directory")
+
+					if (ignored.ignored) {
+						this.getDirectoryTreeCache.ignored.push({
+							localPath: absolutePath,
+							relativePath: entryPath,
+							reason: ignored.reason
 						})
 
 						continue

@@ -494,6 +494,7 @@ export class Deltas {
 			.sort((a, b) => a.path.split("/").length - b.path.split("/").length)
 			// Filter by ignored paths
 			.filter(delta => {
+				const trailingSlash = delta.type.endsWith("Directory") ? "/" : ""
 				if (
 					delta.type === "renameLocalDirectory" ||
 					delta.type === "renameLocalFile" ||
@@ -504,7 +505,7 @@ export class Deltas {
 						return false
 					}
 
-					if (this.sync.ignorer.ignores(delta.from) || this.sync.ignorer.ignores(delta.to)) {
+					if (this.sync.ignorer.ignores(delta.from + trailingSlash) || this.sync.ignorer.ignores(delta.to + trailingSlash)) {
 						return false
 					}
 				} else {
@@ -512,7 +513,7 @@ export class Deltas {
 						return false
 					}
 
-					if (this.sync.ignorer.ignores(delta.path)) {
+					if (this.sync.ignorer.ignores(delta.path + trailingSlash)) {
 						return false
 					}
 				}

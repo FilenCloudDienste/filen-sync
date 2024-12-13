@@ -184,7 +184,8 @@ export class RemoteFileSystem {
 			}
 		}
 
-		if (this.sync.ignorer.ignores(relativePath)) {
+		const trailingSlash = type === "directory" ? "/" : ""
+		if (this.sync.ignorer.ignores(relativePath + trailingSlash)) {
 			this.ignoredCache.set(key, {
 				ignored: true,
 				reason: "filenIgnore"

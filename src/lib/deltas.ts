@@ -494,7 +494,16 @@ export class Deltas {
 			.sort((a, b) => a.path.split("/").length - b.path.split("/").length)
 			// Filter by ignored paths
 			.filter(delta => {
-				const trailingSlash = delta.type.endsWith("Directory") ? "/" : ""
+				const trailingSlash =
+					delta.type === "renameLocalDirectory" ||
+					delta.type === "createLocalDirectory" ||
+					delta.type === "createRemoteDirectory" ||
+					delta.type === "deleteLocalDirectory" ||
+					delta.type === "renameRemoteDirectory" ||
+					delta.type === "deleteRemoteDirectory"
+						? "/"
+						: ""
+
 				if (
 					delta.type === "renameLocalDirectory" ||
 					delta.type === "renameLocalFile" ||

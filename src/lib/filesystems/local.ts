@@ -188,6 +188,7 @@ export class LocalFileSystem {
 		}
 
 		const trailingSlash = type === "directory" ? "/" : ""
+
 		if (this.sync.ignorer.ignores(relativePath + trailingSlash)) {
 			this.ignoredCache.set(relativePath, {
 				ignored: true,

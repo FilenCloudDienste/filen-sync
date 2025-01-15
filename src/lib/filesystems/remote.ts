@@ -815,13 +815,13 @@ export class RemoteFileSystem {
 
 			this.getDirectoryTreeCache.tree[toRelativePath] = {
 				...item,
-				name: pathModule.basename(toRelativePath),
+				name: pathModule.posix.basename(toRelativePath),
 				path: toRelativePath
 			}
 
 			this.getDirectoryTreeCache.uuids[item.uuid] = {
 				...item,
-				name: pathModule.basename(toRelativePath),
+				name: pathModule.posix.basename(toRelativePath),
 				path: toRelativePath
 			}
 
@@ -835,7 +835,7 @@ export class RemoteFileSystem {
 					if (oldItem) {
 						this.getDirectoryTreeCache.tree[newPath] = {
 							...oldItem,
-							name: pathModule.basename(newPath),
+							name: pathModule.posix.basename(newPath),
 							path: newPath
 						}
 
@@ -846,7 +846,7 @@ export class RemoteFileSystem {
 						if (oldItemUUID) {
 							this.getDirectoryTreeCache.uuids[oldItem.uuid] = {
 								...oldItemUUID,
-								name: pathModule.basename(newPath),
+								name: pathModule.posix.basename(newPath),
 								path: newPath
 							}
 						}

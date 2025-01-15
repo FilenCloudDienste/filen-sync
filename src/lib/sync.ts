@@ -603,6 +603,10 @@ export class Sync {
 									}
 								}
 
+								/* 
+
+								Removed due to redundancy. We do not need to apply the state again since we hold a reference to the FS (remote/local) "getDirectoryTreeCache" objects.
+								
 								const applied = this.state.applyDoneTasksToState({
 									doneTasks,
 									currentLocalTree: currentLocalTree.result,
@@ -611,6 +615,7 @@ export class Sync {
 
 								currentLocalTree.result = applied.currentLocalTree
 								currentRemoteTree.result = applied.currentRemoteTree
+								*/
 
 								postMessageToMain({
 									type: "cycleApplyingStateDone",
@@ -623,8 +628,9 @@ export class Sync {
 								syncPair: this.syncPair
 							})
 
-							this.previousLocalTree = currentLocalTree.result
-							this.previousRemoteTree = currentRemoteTree.result
+							// Deep cloning is needed, otherwise we just pass the reference
+							this.previousLocalTree = structuredClone(currentLocalTree.result)
+							this.previousRemoteTree = structuredClone(currentRemoteTree.result)
 
 							await this.state.save()
 

@@ -9,7 +9,8 @@ import {
 	isAbsolutePathIgnoredByDefault,
 	isPathOverMaxLength,
 	isNameOverMaxLength,
-	isValidPath
+	isValidPath,
+	promiseAllChunked
 } from "../../utils"
 import pathModule from "path"
 import process from "process"
@@ -251,9 +252,7 @@ export class LocalFileSystem {
 
 				const pathsAdded: Record<string, boolean> = {}
 				let size = 0
-				let didError = false
-				let didErrorErr: Error = new Error("Could not read local directory.")
-				const stream = FastGlob.stream("**/*", {
+				const entries = await FastGlob.glob("**/*", {
 					dot: true,
 					onlyDirectories: false,
 					onlyFiles: false,
@@ -268,151 +267,120 @@ export class LocalFileSystem {
 					objectMode: false
 				})
 
-				stream.on("error", err => {
-					didError = true
-					didErrorErr = err
+				await promiseAllChunked(
+					entries.map(async entry => {
+						const entryItem = entry as unknown as string | null
 
-					reject(err)
-				})
+						if (!entryItem) {
+							return
+						}
 
-				if (didError) {
-					this.getDirectoryTreeCache.tree = {}
-					this.getDirectoryTreeCache.inodes = {}
-					this.getDirectoryTreeCache.ignored = []
-					this.getDirectoryTreeCache.errors = []
-					this.getDirectoryTreeCache.timestamp = 0
+						const entryPath = "/" + entryItem
 
-					reject(didErrorErr)
+						if (entryPath.includes(LOCAL_TRASH_NAME)) {
+							return
+						}
 
-					return
-				}
+						const absolutePath = pathModule.join(this.sync.syncPair.localPath, entryItem)
+						const lowercasePath = entryPath.toLowerCase()
 
-				for await (const entry of stream) {
-					if (didError) {
-						break
-					}
+						if (pathsAdded[lowercasePath]) {
+							this.getDirectoryTreeCache.ignored.push({
+								localPath: absolutePath,
+								relativePath: entryPath,
+								reason: "duplicate"
+							})
 
-					const entryItem = entry as unknown as string | null
+							return
+						}
 
-					if (!entryItem) {
-						continue
-					}
+						pathsAdded[lowercasePath] = true
 
-					const entryPath = "/" + entryItem
+						let stats: fs.Stats | null = null
 
-					if (entryPath.includes(LOCAL_TRASH_NAME)) {
-						continue
-					}
+						try {
+							stats = await fs.stat(absolutePath)
+						} catch {
+							this.getDirectoryTreeCache.ignored.push({
+								localPath: absolutePath,
+								relativePath: entryPath,
+								reason: "permissions"
+							})
 
-					const absolutePath = pathModule.join(this.sync.syncPair.localPath, entryItem)
-					const lowercasePath = entryPath.toLowerCase()
+							return
+						}
 
-					if (pathsAdded[lowercasePath]) {
-						this.getDirectoryTreeCache.ignored.push({
-							localPath: absolutePath,
-							relativePath: entryPath,
-							reason: "duplicate"
-						})
+						const ignored = this.isPathIgnored(entryItem, absolutePath, stats.isFile() ? "file" : "directory")
 
-						continue
-					}
+						if (ignored.ignored) {
+							this.getDirectoryTreeCache.ignored.push({
+								localPath: absolutePath,
+								relativePath: entryPath,
+								reason: ignored.reason
+							})
 
-					pathsAdded[lowercasePath] = true
+							return
+						}
 
-					let stats: fs.Stats | null = null
+						if (stats.isBlockDevice() || stats.isCharacterDevice() || stats.isFIFO() || stats.isSocket()) {
+							this.getDirectoryTreeCache.ignored.push({
+								localPath: absolutePath,
+								relativePath: entryPath,
+								reason: "invalidType"
+							})
 
-					try {
-						stats = await fs.stat(absolutePath)
-					} catch {
-						this.getDirectoryTreeCache.ignored.push({
-							localPath: absolutePath,
-							relativePath: entryPath,
-							reason: "permissions"
-						})
+							return
+						}
 
-						continue
-					}
+						if (stats.isSymbolicLink()) {
+							this.getDirectoryTreeCache.ignored.push({
+								localPath: absolutePath,
+								relativePath: entryPath,
+								reason: "symlink"
+							})
 
-					const ignored = this.isPathIgnored(entryItem, absolutePath, stats.isFile() ? "file" : "directory")
+							return
+						}
 
-					if (ignored.ignored) {
-						this.getDirectoryTreeCache.ignored.push({
-							localPath: absolutePath,
-							relativePath: entryPath,
-							reason: ignored.reason
-						})
+						if (stats.isFile() && stats.size <= 0) {
+							this.getDirectoryTreeCache.ignored.push({
+								localPath: absolutePath,
+								relativePath: entryPath,
+								reason: "empty"
+							})
 
-						continue
-					}
+							return
+						}
 
-					if (stats.isBlockDevice() || stats.isCharacterDevice() || stats.isFIFO() || stats.isSocket()) {
-						this.getDirectoryTreeCache.ignored.push({
-							localPath: absolutePath,
-							relativePath: entryPath,
-							reason: "invalidType"
-						})
+						try {
+							await fs.access(absolutePath, fs.constants.R_OK)
+						} catch {
+							this.getDirectoryTreeCache.ignored.push({
+								localPath: absolutePath,
+								relativePath: entryPath,
+								reason: "permissions"
+							})
 
-						continue
-					}
+							return
+						}
 
-					if (stats.isSymbolicLink()) {
-						this.getDirectoryTreeCache.ignored.push({
-							localPath: absolutePath,
-							relativePath: entryPath,
-							reason: "symlink"
-						})
+						const item: LocalItem = {
+							lastModified: normalizeUTime(stats.mtimeMs), // Sometimes comes as a float, but we need an int
+							type: stats.isDirectory() ? "directory" : "file",
+							path: entryPath,
+							creation: normalizeUTime(stats.birthtimeMs), // Sometimes comes as a float, but we need an int
+							size: stats.size,
+							inode: stats.ino
+						}
 
-						continue
-					}
+						this.getDirectoryTreeCache.tree[entryPath] = item
+						this.getDirectoryTreeCache.inodes[item.inode] = item
 
-					if (stats.isFile() && stats.size <= 0) {
-						this.getDirectoryTreeCache.ignored.push({
-							localPath: absolutePath,
-							relativePath: entryPath,
-							reason: "empty"
-						})
-
-						continue
-					}
-
-					try {
-						await fs.access(absolutePath, fs.constants.R_OK)
-					} catch {
-						this.getDirectoryTreeCache.ignored.push({
-							localPath: absolutePath,
-							relativePath: entryPath,
-							reason: "permissions"
-						})
-
-						continue
-					}
-
-					const item: LocalItem = {
-						lastModified: normalizeUTime(stats.mtimeMs), // Sometimes comes as a float, but we need an int
-						type: stats.isDirectory() ? "directory" : "file",
-						path: entryPath,
-						creation: normalizeUTime(stats.birthtimeMs), // Sometimes comes as a float, but we need an int
-						size: stats.size,
-						inode: stats.ino
-					}
-
-					this.getDirectoryTreeCache.tree[entryPath] = item
-					this.getDirectoryTreeCache.inodes[item.inode] = item
-
-					size += 1
-				}
-
-				if (didError) {
-					this.getDirectoryTreeCache.tree = {}
-					this.getDirectoryTreeCache.inodes = {}
-					this.getDirectoryTreeCache.ignored = []
-					this.getDirectoryTreeCache.errors = []
-					this.getDirectoryTreeCache.timestamp = 0
-
-					reject(didErrorErr)
-
-					return
-				}
+						size += 1
+					}),
+					10000,
+					false
+				)
 
 				this.getDirectoryTreeCache.size = size
 				this.getDirectoryTreeCache.timestamp = Date.now()
@@ -560,7 +528,7 @@ export class LocalFileSystem {
 	 * @returns {Promise<void>}
 	 */
 	public async waitForLocalDirectoryChanges(): Promise<void> {
-		const waitTimeout = SYNC_INTERVAL * 2
+		const waitTimeout = SYNC_INTERVAL
 
 		if (Date.now() > this.lastDirectoryChangeTimestamp + waitTimeout) {
 			return
@@ -571,7 +539,7 @@ export class LocalFileSystem {
 			syncPair: this.sync.syncPair
 		})
 
-		const maxWaitTimeout = Date.now() + SYNC_INTERVAL * 10
+		const maxWaitTimeout = Date.now() + SYNC_INTERVAL * 3
 
 		await new Promise<void>(resolve => {
 			const wait = setInterval(() => {

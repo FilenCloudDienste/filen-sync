@@ -711,8 +711,8 @@ export class Tasks {
 			await process(delta)
 		}
 
-		await promiseAllChunked(deltasSorted.filter(delta => delta.type === "uploadFile").map(process))
-		await promiseAllChunked(deltasSorted.filter(delta => delta.type === "downloadFile").map(process))
+		await promiseAllChunked(deltasSorted.filter(delta => delta.type === "uploadFile").map(process), 10000, false)
+		await promiseAllChunked(deltasSorted.filter(delta => delta.type === "downloadFile").map(process), 10000, false)
 
 		return {
 			doneTasks: executed,

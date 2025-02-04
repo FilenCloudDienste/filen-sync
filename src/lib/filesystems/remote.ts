@@ -429,7 +429,9 @@ export class RemoteFileSystem {
 				} finally {
 					this.listSemaphore.release()
 				}
-			})
+			}),
+			10000,
+			false
 		)
 
 		this.getDirectoryTreeCache.size = size

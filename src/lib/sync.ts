@@ -367,6 +367,9 @@ export class Sync {
 					})
 				}, 1000)
 
+				// Init the ignorer on every run. We might have changes in the physical .filenignore file
+				await this.ignorer.initialize()
+
 				// eslint-disable-next-line prefer-const
 				let [currentLocalTree, currentRemoteTree] = await Promise.all([
 					this.localFileSystem.getDirectoryTree(),

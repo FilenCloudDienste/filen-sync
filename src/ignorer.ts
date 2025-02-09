@@ -11,7 +11,6 @@ export class Ignorer {
 	private sync: Sync
 	public instance = ignore()
 	public name: string = "ignorer"
-	public pattern: string[] = []
 	private readonly mutex = new Semaphore(1)
 
 	public constructor(sync: Sync, name: string = "ignorer") {
@@ -114,7 +113,6 @@ export class Ignorer {
 				.filter(line => line.length > 0)
 		}
 
-		this.pattern = content
 		this.instance = ignore()
 
 		if (content.length > 0) {

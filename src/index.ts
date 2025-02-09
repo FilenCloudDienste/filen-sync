@@ -256,13 +256,23 @@ export class SyncWorker {
 		}
 	}
 
-	public updateIgnorerContent(uuid: string, content?: string): void {
+	public async updateIgnorerContent(uuid: string, content?: string): Promise<void> {
 		for (const syncUUID in this.syncs) {
 			if (syncUUID === uuid) {
-				this.syncs[syncUUID]!.ignorer.update(content)
+				await this.syncs[syncUUID]!.ignorer.update(content)
 
 				this.syncs[syncUUID]!.localFileSystem.ignoredCache.clear()
 				this.syncs[syncUUID]!.remoteFileSystem.ignoredCache.clear()
+
+				break
+			}
+		}
+	}
+
+	public updateRequireConfirmationOnLargeDeletion(uuid: string, requireConfirmationOnLargeDeletion: boolean): void {
+		for (const syncUUID in this.syncs) {
+			if (syncUUID === uuid) {
+				this.syncs[syncUUID]!.requireConfirmationOnLargeDeletion = requireConfirmationOnLargeDeletion
 
 				break
 			}

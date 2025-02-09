@@ -3,6 +3,7 @@ import type Sync from "./lib/sync"
 import pathModule from "path"
 import fs from "fs-extra"
 import writeFileAtomic from "write-file-atomic"
+import { Semaphore } from "./semaphore"
 
 export const IGNORER_VERSION = 1
 
@@ -11,6 +12,7 @@ export class Ignorer {
 	public instance = ignore()
 	public name: string = "ignorer"
 	public pattern: string[] = []
+	private readonly mutex = new Semaphore(1)
 
 	public constructor(sync: Sync, name: string = "ignorer") {
 		this.sync = sync
@@ -18,25 +20,78 @@ export class Ignorer {
 	}
 
 	public async fetch(): Promise<string> {
-		const filePath = pathModule.join(this.sync.dbPath, this.name, `v${IGNORER_VERSION}`, this.sync.syncPair.uuid, "filenIgnore")
+		await this.mutex.acquire()
 
-		await fs.ensureDir(pathModule.dirname(filePath))
+		try {
+			const filePath = pathModule.join(this.sync.dbPath, this.name, `v${IGNORER_VERSION}`, this.sync.syncPair.uuid, "filenIgnore")
+			const physicalFilePath = pathModule.join(this.sync.syncPair.localPath, ".filenignore")
+			let content: string = ""
+			const [exists, physicalExists] = await Promise.all([fs.exists(filePath), fs.exists(physicalFilePath)])
 
-		const exists = await fs.exists(filePath)
+			if (exists) {
+				const stats = await fs.stat(filePath)
 
-		if (!exists) {
-			return ""
+				if (stats.size > 0) {
+					content += await fs.readFile(filePath, {
+						encoding: "utf-8"
+					})
+				}
+			}
+
+			if (physicalExists) {
+				const stats = await fs.stat(physicalFilePath)
+
+				if (stats.size > 0) {
+					content += `${content.length > 0 ? "\n" : ""}${await fs.readFile(physicalFilePath, {
+						encoding: "utf-8"
+					})}`
+				}
+			}
+
+			return content
+		} finally {
+			this.mutex.release()
 		}
+	}
 
-		const stats = await fs.stat(filePath)
+	public async write(content: string): Promise<void> {
+		await this.mutex.acquire()
 
-		if (stats.size === 0) {
-			return ""
+		try {
+			const filePath = pathModule.join(this.sync.syncPair.localPath, ".filenignore")
+
+			await fs.ensureDir(pathModule.dirname(filePath))
+
+			await writeFileAtomic(filePath, content, {
+				encoding: "utf-8"
+			})
+		} finally {
+			this.mutex.release()
 		}
+	}
 
-		return await fs.readFile(filePath, {
-			encoding: "utf-8"
-		})
+	public async clearFile(): Promise<void> {
+		await this.mutex.acquire()
+
+		try {
+			const filePath = pathModule.join(this.sync.dbPath, this.name, `v${IGNORER_VERSION}`, this.sync.syncPair.uuid, "filenIgnore")
+			const physicalFilePath = pathModule.join(this.sync.syncPair.localPath, ".filenignore")
+			const [exists, physicalExists] = await Promise.all([fs.exists(filePath), fs.exists(physicalFilePath)])
+
+			if (exists) {
+				await writeFileAtomic(filePath, "", {
+					encoding: "utf-8"
+				})
+			}
+
+			if (physicalExists) {
+				await writeFileAtomic(physicalFilePath, "", {
+					encoding: "utf-8"
+				})
+			}
+		} finally {
+			this.mutex.release()
+		}
 	}
 
 	public async initialize(passedContent?: string): Promise<void> {
@@ -44,14 +99,9 @@ export class Ignorer {
 		this.sync.remoteFileSystem.ignoredCache.clear()
 
 		let content: string[] = []
-		const filePath = pathModule.join(this.sync.dbPath, this.name, `v${IGNORER_VERSION}`, this.sync.syncPair.uuid, "filenIgnore")
-
-		await fs.ensureDir(pathModule.dirname(filePath))
 
 		if (typeof passedContent === "string") {
-			await writeFileAtomic(filePath, passedContent, {
-				encoding: "utf-8"
-			})
+			await this.write(passedContent)
 
 			content = passedContent
 				.split("\n")
@@ -78,19 +128,6 @@ export class Ignorer {
 
 	public clear(): void {
 		this.instance = ignore()
-	}
-
-	public async clearFile(): Promise<void> {
-		const filePath = pathModule.join(this.sync.dbPath, this.name, `v${IGNORER_VERSION}`, this.sync.syncPair.uuid, "filenIgnore")
-
-		await fs.ensureDir(pathModule.dirname(filePath))
-
-		await fs.rm(filePath, {
-			force: true,
-			maxRetries: 60 * 10,
-			recursive: true,
-			retryDelay: 100
-		})
 	}
 
 	public ignores(path: string): boolean {

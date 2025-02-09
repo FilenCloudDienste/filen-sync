@@ -252,7 +252,7 @@ export class LocalFileSystem {
 
 				const pathsAdded: Record<string, boolean> = {}
 				let size = 0
-				const entries = await FastGlob.glob("**/*", {
+				const entries = await FastGlob.async("**/*", {
 					dot: true,
 					onlyDirectories: false,
 					onlyFiles: false,

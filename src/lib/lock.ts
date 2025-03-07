@@ -18,6 +18,10 @@ export class Lock {
 		await this.mutex.acquire()
 
 		try {
+			if (this.lockAcquired) {
+				return
+			}
+
 			clearInterval(this.lockRefreshInterval)
 
 			if (!this.lockUUID) {
@@ -35,6 +39,8 @@ export class Lock {
 
 			this.lockRefreshInterval = setInterval(async () => {
 				if (!this.lockAcquired || !this.lockUUID) {
+					clearInterval(this.lockRefreshInterval)
+
 					return
 				}
 
@@ -61,11 +67,11 @@ export class Lock {
 		await this.mutex.acquire()
 
 		try {
+			clearInterval(this.lockRefreshInterval)
+
 			if (!this.lockAcquired || !this.lockUUID) {
 				return
 			}
-
-			clearInterval(this.lockRefreshInterval)
 
 			await this.sync.sdk
 				.user()

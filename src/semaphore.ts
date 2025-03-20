@@ -1,83 +1,122 @@
-export interface ISemaphore {
-	acquire(): Promise<void>
-	release(): void
-	count(): number
-	setMax(newMax: number): void
-	purge(): number
-}
-
 /**
- * Basic Semaphore implementation.
- * @date 2/15/2024 - 4:52:51 AM
+ * Semaphore
  *
- * @type {new (max: number) => ISemaphore}
+ * @export
+ * @class Semaphore
+ * @typedef {Semaphore}
  */
-export const Semaphore = function (this: ISemaphore, max: number) {
-	let counter = 0
-	let waiting: { resolve: (value: void | PromiseLike<void>) => void; err: (reason?: unknown) => void }[] = []
-	let maxCount = max || 1
+export class Semaphore {
+	private counter: number = 0
+	private waiting: Array<{
+		resolve: (value: void | PromiseLike<void>) => void
+		reject: (reason?: unknown) => void
+	}> = []
+	private maxCount: number
 
-	const take = function (): void {
-		if (waiting.length > 0 && counter < maxCount) {
-			counter++
-
-			const promise = waiting.shift()
-
-			if (!promise) {
-				return
-			}
-
-			promise.resolve()
-		}
+	/**
+	 * Creates an instance of Semaphore.
+	 *
+	 * @constructor
+	 * @public
+	 * @param {number} [max=1]
+	 */
+	public constructor(max: number = 1) {
+		this.maxCount = max
 	}
 
-	this.acquire = function (): Promise<void> {
-		if (counter < maxCount) {
-			counter++
+	/**
+	 * Acquire a lock.
+	 *
+	 * @public
+	 * @returns {Promise<void>}
+	 */
+	public acquire(): Promise<void> {
+		if (this.counter < this.maxCount) {
+			this.counter++
 
-			return new Promise<void>(resolve => {
-				resolve()
-			})
+			return Promise.resolve()
 		} else {
-			return new Promise<void>((resolve, err) => {
-				waiting.push({
-					resolve: resolve,
-					err: err
+			return new Promise<void>((resolve, reject) => {
+				this.waiting.push({
+					resolve,
+					reject
 				})
 			})
 		}
 	}
 
-	this.release = function (): void {
-		counter--
-
-		take()
-	}
-
-	this.count = function (): number {
-		return counter
-	}
-
-	this.setMax = function (newMax: number): void {
-		maxCount = newMax
-	}
-
-	this.purge = function (): number {
-		const unresolved = waiting.length
-
-		for (let i = 0; i < unresolved; i++) {
-			const w = waiting[i]
-
-			if (!w) {
-				continue
-			}
-
-			w.err("Task has been purged")
+	/**
+	 * Release a lock.
+	 *
+	 * @public
+	 */
+	public release(): void {
+		if (this.counter <= 0) {
+			return
 		}
 
-		counter = 0
-		waiting = []
+		this.counter--
+
+		this.processQueue()
+	}
+
+	/**
+	 * Returns the locks in the queue.
+	 *
+	 * @public
+	 * @returns {number}
+	 */
+	public count(): number {
+		return this.counter
+	}
+
+	/**
+	 * Set max number of concurrent locks.
+	 *
+	 * @public
+	 * @param {number} newMax
+	 */
+	public setMax(newMax: number): void {
+		this.maxCount = newMax
+
+		this.processQueue()
+	}
+
+	/**
+	 * Purge all waiting promises.
+	 *
+	 * @public
+	 * @returns {number}
+	 */
+	public purge(): number {
+		const unresolved = this.waiting.length
+
+		for (const waiter of this.waiting) {
+			waiter.reject("Task has been purged")
+		}
+
+		this.counter = 0
+		this.waiting = []
 
 		return unresolved
 	}
-} as unknown as { new (max: number): ISemaphore }
+
+	/**
+	 * Internal process queue.
+	 *
+	 * @private
+	 */
+	private processQueue(): void {
+		if (this.waiting.length > 0 && this.counter < this.maxCount) {
+			this.counter++
+
+			const waiter = this.waiting.shift()
+
+			if (waiter) {
+				waiter.resolve()
+			}
+		}
+	}
+}
+
+export default Semaphore

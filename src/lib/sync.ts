@@ -87,7 +87,10 @@ export class Sync {
 		this.tasks = new Tasks(this)
 		this.state = new State(this)
 		this.ignorer = new Ignorer(this, "ignorer")
-		this.lock = new Lock(this)
+		this.lock = new Lock({
+			sync: this,
+			resource: `sync-remoteParentUUID-${this.syncPair.remoteParentUUID}`
+		})
 
 		this.cleanupLocalTrash()
 	}

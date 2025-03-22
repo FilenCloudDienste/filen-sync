@@ -76,6 +76,7 @@ export class Lock {
 			this.lockRefreshInterval = setInterval(async () => {
 				if (this.acquiredCount === 0 || !this.lockUUID) {
 					clearInterval(this.lockRefreshInterval)
+
 					return
 				}
 
@@ -91,7 +92,7 @@ export class Lock {
 				} finally {
 					this.mutex.release()
 				}
-			}, 15000)
+			}, 5000)
 		} catch (err) {
 			if (didIncrement) {
 				this.acquiredCount--

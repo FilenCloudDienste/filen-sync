@@ -126,6 +126,8 @@ export type FakeCloudControls = {
 	addDir(path: string): string
 	addFile(path: string, content: string, options?: { mtimeMs?: number; creationMs?: number }): string
 	updateFile(path: string, content: string, options?: { mtimeMs?: number }): string
+	/** Change a file's mtime WITHOUT assigning a new uuid (metadata-only touch). */
+	touchRemote(path: string, mtimeMs: number): void
 	trashPath(path: string): void
 	deletePath(path: string): void
 	movePath(fromPath: string, toPath: string): void
@@ -969,6 +971,17 @@ export function createFakeCloud(initial: CloudSpec = {}, deps: { localFs: SyncFS
 			bump()
 
 			return uuid
+		},
+		touchRemote: (path: string, mtimeMs: number): void => {
+			const node = getByPath(path)
+
+			if (!node || node.type !== "file") {
+				return
+			}
+
+			node.lastModified = mtimeMs
+
+			bump()
 		},
 		trashPath: (path: string): void => {
 			const node = getByPath(path)

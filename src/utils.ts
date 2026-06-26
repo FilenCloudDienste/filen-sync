@@ -235,7 +235,7 @@ export function serializeError(error: Error): SerializedError {
 	return {
 		name: error.name,
 		message: error.message,
-		stack: error.stack,
+		...(error.stack !== undefined ? { stack: error.stack } : {}),
 		stringified: `${error.name}: ${error.message}`
 	}
 }
@@ -244,7 +244,10 @@ export function deserializeError(serializedError: SerializedError): Error {
 	const error = new Error(serializedError.message)
 
 	error.name = serializedError.name
-	error.stack = serializedError.stack
+
+	if (serializedError.stack !== undefined) {
+		error.stack = serializedError.stack
+	}
 
 	return error
 }
@@ -329,8 +332,8 @@ export function tryingToSyncDesktop(path: string): boolean {
 	}
 
 	return (
-		path.trim().toLowerCase() === `/users/${process.env.USER ?? "user"}/desktop` ||
-		path.trim().toLowerCase() === `/users/${process.env.USER ?? "user"}/desktop/`
+		path.trim().toLowerCase() === `/users/${process.env["USER"] ?? "user"}/desktop` ||
+		path.trim().toLowerCase() === `/users/${process.env["USER"] ?? "user"}/desktop/`
 	)
 }
 

@@ -9,7 +9,7 @@ export async function filenLogsPath(): Promise<string> {
 
 	switch (process.platform) {
 		case "win32":
-			configPath = pathModule.resolve(process.env.APPDATA!)
+			configPath = pathModule.resolve(process.env["APPDATA"]!)
 
 			break
 		case "darwin":
@@ -17,8 +17,8 @@ export async function filenLogsPath(): Promise<string> {
 
 			break
 		default:
-			configPath = process.env.XDG_CONFIG_HOME
-				? pathModule.resolve(process.env.XDG_CONFIG_HOME)
+			configPath = process.env["XDG_CONFIG_HOME"]
+				? pathModule.resolve(process.env["XDG_CONFIG_HOME"])
 				: pathModule.resolve(pathModule.join(os.homedir(), ".config/"))
 
 			break

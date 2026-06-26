@@ -414,8 +414,8 @@ export class RemoteFileSystem {
 						key: decrypted.key,
 						bucket: file[1],
 						region: file[2],
-						creation: decrypted.creation,
-						hash: decrypted.hash,
+						...(decrypted.creation !== undefined ? { creation: decrypted.creation } : {}),
+						...(decrypted.hash !== undefined ? { hash: decrypted.hash } : {}),
 						path: filePath
 					}
 
@@ -721,8 +721,8 @@ export class RemoteFileSystem {
 							size: item.size,
 							mime: item.mime,
 							lastModified: item.lastModified,
-							creation: item.creation,
-							hash: item.hash,
+							...(item.creation !== undefined ? { creation: item.creation } : {}),
+							...(item.hash !== undefined ? { hash: item.hash } : {}),
 							key: item.key
 					  } satisfies FileMetadata)
 					: ({
@@ -917,8 +917,8 @@ export class RemoteFileSystem {
 				to: tmpLocalPath,
 				key: item.key,
 				size: item.size,
-				pauseSignal: this.sync.pauseSignals[signalKey],
-				abortSignal: this.sync.abortControllers[signalKey]?.signal,
+				pauseSignal: this.sync.pauseSignals[signalKey]!,
+				abortSignal: this.sync.abortControllers[signalKey]!.signal,
 				onError: err => {
 					this.sync.worker.logger.log("error", err, "filesystems.remote.download")
 					this.sync.worker.logger.log("error", err)

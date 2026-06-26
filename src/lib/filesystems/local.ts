@@ -424,6 +424,15 @@ export class LocalFileSystem {
 				return
 			}
 
+			const backend =
+				process.platform === "win32"
+					? "windows"
+					: process.platform === "darwin"
+					? "fs-events"
+					: process.platform === "linux"
+					? "inotify"
+					: undefined
+
 			this.watcherInstanceParcel = await watcher.subscribe(
 				this.sync.syncPair.localPath,
 				(err, events) => {
@@ -431,16 +440,7 @@ export class LocalFileSystem {
 						this.lastDirectoryChangeTimestamp = Date.now()
 					}
 				},
-				{
-					backend:
-						process.platform === "win32"
-							? "windows"
-							: process.platform === "darwin"
-							? "fs-events"
-							: process.platform === "linux"
-							? "inotify"
-							: undefined
-				}
+				backend ? { backend } : {}
 			)
 
 			/*
@@ -790,7 +790,13 @@ export class LocalFileSystem {
 	 * @param {string} param0.passedMD5Hash
 	 * @returns {Promise<CloudItem>}
 	 */
-	public async upload({ relativePath, passedMD5Hash }: { relativePath: string; passedMD5Hash?: string }): Promise<CloudItem> {
+	public async upload({
+		relativePath,
+		passedMD5Hash
+	}: {
+		relativePath: string
+		passedMD5Hash?: string | undefined
+	}): Promise<CloudItem> {
 		const localPath = pathModule.join(this.sync.syncPair.localPath, relativePath)
 		const signalKey = `upload:${relativePath}`
 		const stats = await fs.stat(localPath)
@@ -839,8 +845,8 @@ export class LocalFileSystem {
 				source: localPath,
 				parent: parentUUID,
 				name: pathModule.basename(localPath),
-				pauseSignal: this.sync.pauseSignals[signalKey],
-				abortSignal: this.sync.abortControllers[signalKey]?.signal,
+				pauseSignal: this.sync.pauseSignals[signalKey]!,
+				abortSignal: this.sync.abortControllers[signalKey]!.signal,
 				onError: err => {
 					this.sync.worker.logger.log("error", err, "filesystems.local.upload")
 					this.sync.worker.logger.log("error", err)

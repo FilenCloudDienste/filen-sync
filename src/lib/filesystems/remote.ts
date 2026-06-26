@@ -2,7 +2,7 @@ import type Sync from "../sync"
 import { type CloudItemTree, type FSItemType, type FileMetadata, type FolderMetadata, PauseSignal, APIError } from "@filen/sdk"
 import pathModule from "path"
 import { Semaphore } from "../../semaphore"
-import fs from "fs-extra"
+import { type Stats } from "fs-extra"
 import { type DistributiveOmit, type Prettify } from "../../types"
 import { postMessageToMain } from "../ipc"
 import {
@@ -20,7 +20,6 @@ import {
 import { v4 as uuidv4 } from "uuid"
 import { LOCAL_TRASH_NAME } from "../../constants"
 import { type LocalItem } from "./local"
-import writeFileAtomic from "write-file-atomic"
 
 export type RemoteItemBase = Prettify<DistributiveOmit<CloudItemTree, "parent" | "color" | "favorited" | "timestamp"> & { path: string }>
 export type RemoteItem =
@@ -86,18 +85,18 @@ export class RemoteFileSystem {
 
 		const deviceIdFile = pathModule.join(this.sync.dbPath, "deviceId", `v${DEVICE_ID_VERSION}`, this.sync.syncPair.uuid)
 
-		await fs.ensureDir(pathModule.dirname(deviceIdFile))
+		await this.sync.environment.fs.ensureDir(pathModule.dirname(deviceIdFile))
 
 		let deviceId: string
 
-		if (!(await fs.exists(deviceIdFile))) {
+		if (!(await this.sync.environment.fs.exists(deviceIdFile))) {
 			deviceId = uuidv4()
 
-			await writeFileAtomic(deviceIdFile, deviceId, {
+			await this.sync.environment.writeFileAtomic(deviceIdFile, deviceId, {
 				encoding: "utf-8"
 			})
 		} else {
-			deviceId = await fs.readFile(deviceIdFile, {
+			deviceId = await this.sync.environment.fs.readFile(deviceIdFile, {
 				encoding: "utf-8"
 			})
 		}
@@ -110,8 +109,8 @@ export class RemoteFileSystem {
 	public async clearDeviceId(): Promise<void> {
 		const deviceIdFile = pathModule.join(this.sync.dbPath, "deviceId", `v${DEVICE_ID_VERSION}`, this.sync.syncPair.uuid)
 
-		await fs.ensureDir(pathModule.dirname(deviceIdFile))
-		await fs.rm(deviceIdFile, {
+		await this.sync.environment.fs.ensureDir(pathModule.dirname(deviceIdFile))
+		await this.sync.environment.fs.rm(deviceIdFile, {
 			force: true,
 			maxRetries: 60 * 10,
 			recursive: true,
@@ -870,9 +869,9 @@ export class RemoteFileSystem {
 	 * @async
 	 * @param {{ relativePath: string }} param0
 	 * @param {string} param0.relativePath
-	 * @returns {Promise<fs.Stats>}
+	 * @returns {Promise<Stats>}
 	 */
-	public async download({ relativePath }: { relativePath: string }): Promise<fs.Stats> {
+	public async download({ relativePath }: { relativePath: string }): Promise<Stats> {
 		const localPath = pathModule.posix.join(this.sync.syncPair.localPath, relativePath)
 		const tmpLocalPath = pathModule.join(this.sync.syncPair.localPath, LOCAL_TRASH_NAME, uuidv4())
 		const signalKey = `download:${relativePath}`
@@ -966,13 +965,13 @@ export class RemoteFileSystem {
 				}
 			})
 
-			await fs.move(tmpLocalPath, localPath, {
+			await this.sync.environment.fs.move(tmpLocalPath, localPath, {
 				overwrite: true
 			})
 
-			await fs.utimes(localPath, new Date(), new Date(convertTimestampToMs(item.lastModified)))
+			await this.sync.environment.fs.utimes(localPath, new Date(), new Date(convertTimestampToMs(item.lastModified)))
 
-			const stats = await fs.stat(localPath)
+			const stats = await this.sync.environment.fs.stat(localPath)
 			const localItem: LocalItem = {
 				type: "file",
 				inode: stats.ino,

@@ -1,8 +1,6 @@
 import ignore from "ignore"
 import type Sync from "./lib/sync"
 import pathModule from "path"
-import fs from "fs-extra"
-import writeFileAtomic from "write-file-atomic"
 import { Semaphore } from "./semaphore"
 
 export const IGNORER_VERSION = 1
@@ -25,23 +23,23 @@ export class Ignorer {
 			const filePath = pathModule.join(this.sync.dbPath, this.name, `v${IGNORER_VERSION}`, this.sync.syncPair.uuid, "filenIgnore")
 			const physicalFilePath = pathModule.join(this.sync.syncPair.localPath, ".filenignore")
 			let content: string = ""
-			const [exists, physicalExists] = await Promise.all([fs.exists(filePath), fs.exists(physicalFilePath)])
+			const [exists, physicalExists] = await Promise.all([this.sync.environment.fs.exists(filePath), this.sync.environment.fs.exists(physicalFilePath)])
 
 			if (exists) {
-				const stats = await fs.stat(filePath)
+				const stats = await this.sync.environment.fs.stat(filePath)
 
 				if (stats.size > 0) {
-					content += await fs.readFile(filePath, {
+					content += await this.sync.environment.fs.readFile(filePath, {
 						encoding: "utf-8"
 					})
 				}
 			}
 
 			if (physicalExists) {
-				const stats = await fs.stat(physicalFilePath)
+				const stats = await this.sync.environment.fs.stat(physicalFilePath)
 
 				if (stats.size > 0) {
-					content += `${content.length > 0 ? "\n" : ""}${await fs.readFile(physicalFilePath, {
+					content += `${content.length > 0 ? "\n" : ""}${await this.sync.environment.fs.readFile(physicalFilePath, {
 						encoding: "utf-8"
 					})}`
 				}
@@ -59,9 +57,9 @@ export class Ignorer {
 		try {
 			const filePath = pathModule.join(this.sync.syncPair.localPath, ".filenignore")
 
-			await fs.ensureDir(pathModule.dirname(filePath))
+			await this.sync.environment.fs.ensureDir(pathModule.dirname(filePath))
 
-			await writeFileAtomic(filePath, content, {
+			await this.sync.environment.writeFileAtomic(filePath, content, {
 				encoding: "utf-8"
 			})
 		} finally {
@@ -75,16 +73,16 @@ export class Ignorer {
 		try {
 			const filePath = pathModule.join(this.sync.dbPath, this.name, `v${IGNORER_VERSION}`, this.sync.syncPair.uuid, "filenIgnore")
 			const physicalFilePath = pathModule.join(this.sync.syncPair.localPath, ".filenignore")
-			const [exists, physicalExists] = await Promise.all([fs.exists(filePath), fs.exists(physicalFilePath)])
+			const [exists, physicalExists] = await Promise.all([this.sync.environment.fs.exists(filePath), this.sync.environment.fs.exists(physicalFilePath)])
 
 			if (exists) {
-				await writeFileAtomic(filePath, "", {
+				await this.sync.environment.writeFileAtomic(filePath, "", {
 					encoding: "utf-8"
 				})
 			}
 
 			if (physicalExists) {
-				await writeFileAtomic(physicalFilePath, "", {
+				await this.sync.environment.writeFileAtomic(physicalFilePath, "", {
 					encoding: "utf-8"
 				})
 			}

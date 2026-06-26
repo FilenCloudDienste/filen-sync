@@ -1,6 +1,5 @@
 import type Sync from "./sync"
 import pathModule from "path"
-import fs from "fs-extra"
 import { type RemoteTree, type RemoteItem } from "./filesystems/remote"
 import { type LocalTree, type LocalItem } from "./filesystems/local"
 import { type DoneTask } from "./tasks"
@@ -316,7 +315,7 @@ export class State {
 		destination: string,
 		record: Record<string | number, RemoteItem | LocalItem | string | number>
 	): Promise<void> {
-		await fs.ensureDir(pathModule.dirname(destination))
+		await this.sync.environment.fs.ensureDir(pathModule.dirname(destination))
 
 		const tmpDestination = pathModule.join(pathModule.dirname(destination), `${uuidv4()}.tmp`)
 
@@ -325,7 +324,7 @@ export class State {
 			await new Promise<void>(async (resolve, reject) => {
 				try {
 					let didError = false
-					const stream = fs.createWriteStream(tmpDestination, {
+					const stream = this.sync.environment.fs.createWriteStream(tmpDestination, {
 						encoding: "utf-8"
 					})
 
@@ -358,7 +357,7 @@ export class State {
 						return
 					}
 
-					await fs.move(tmpDestination, destination, {
+					await this.sync.environment.fs.move(tmpDestination, destination, {
 						overwrite: true
 					})
 
@@ -368,8 +367,8 @@ export class State {
 				}
 			})
 		} finally {
-			if (await fs.pathExists(tmpDestination)) {
-				await fs.rm(tmpDestination, {
+			if (await this.sync.environment.fs.pathExists(tmpDestination)) {
+				await this.sync.environment.fs.rm(tmpDestination, {
 					force: true,
 					maxRetries: 60 * 10,
 					recursive: true,
@@ -383,7 +382,7 @@ export class State {
 		const record: Record<string, T> = {}
 
 		const rl = readline.createInterface({
-			input: fs.createReadStream(inputPath, {
+			input: this.sync.environment.fs.createReadStream(inputPath, {
 				encoding: "utf-8"
 			}),
 			crlfDelay: Infinity,
@@ -415,15 +414,15 @@ export class State {
 	}
 
 	public async saveLocalFileHashes(): Promise<void> {
-		await fs.ensureDir(this.statePath)
+		await this.sync.environment.fs.ensureDir(this.statePath)
 
 		await this.writeLargeRecordSerializedAndAtomically(this.localFileHashesPath, this.sync.localFileHashes)
 	}
 
 	public async loadLocalFileHashes(): Promise<void> {
-		await fs.ensureDir(this.statePath)
+		await this.sync.environment.fs.ensureDir(this.statePath)
 
-		if (!(await fs.exists(this.localFileHashesPath))) {
+		if (!(await this.sync.environment.fs.exists(this.localFileHashesPath))) {
 			return
 		}
 
@@ -441,7 +440,7 @@ export class State {
 	}
 
 	public async loadPreviousTrees(): Promise<void> {
-		await fs.ensureDir(this.statePath)
+		await this.sync.environment.fs.ensureDir(this.statePath)
 
 		const dir = await FastGlob.async("**/*", {
 			dot: true,
@@ -451,7 +450,7 @@ export class State {
 			cwd: this.statePath,
 			followSymbolicLinks: false,
 			deep: 0,
-			fs,
+			fs: this.sync.environment.globFs,
 			suppressErrors: true,
 			stats: false,
 			unique: true,
@@ -464,7 +463,7 @@ export class State {
 			}
 
 			if (entry.trim().endsWith(".tmp")) {
-				await fs.rm(pathModule.join(this.statePath, entry), {
+				await this.sync.environment.fs.rm(pathModule.join(this.statePath, entry), {
 					force: true,
 					maxRetries: 60 * 10,
 					recursive: true,
@@ -474,10 +473,10 @@ export class State {
 		}
 
 		if (
-			!(await fs.exists(this.previousLocalTreePath)) ||
-			!(await fs.exists(this.previousRemoteTreePath)) ||
-			!(await fs.exists(this.previousRemoteTreePath)) ||
-			!(await fs.exists(this.previousRemoteUUIDsPath))
+			!(await this.sync.environment.fs.exists(this.previousLocalTreePath)) ||
+			!(await this.sync.environment.fs.exists(this.previousRemoteTreePath)) ||
+			!(await this.sync.environment.fs.exists(this.previousRemoteTreePath)) ||
+			!(await this.sync.environment.fs.exists(this.previousRemoteUUIDsPath))
 		) {
 			this.sync.isPreviousSavedTreeStateEmpty = true
 
@@ -497,7 +496,7 @@ export class State {
 	}
 
 	public async savePreviousTrees(): Promise<void> {
-		await fs.ensureDir(this.statePath)
+		await this.sync.environment.fs.ensureDir(this.statePath)
 
 		await this.writeLargeRecordSerializedAndAtomically(this.previousLocalTreePath, this.sync.previousLocalTree.tree)
 		await this.writeLargeRecordSerializedAndAtomically(this.previousLocalINodesPath, this.sync.previousLocalTree.inodes)
@@ -508,34 +507,34 @@ export class State {
 	}
 
 	public async clear(): Promise<void> {
-		await fs.ensureDir(this.statePath)
+		await this.sync.environment.fs.ensureDir(this.statePath)
 
 		await Promise.all([
-			fs.rm(this.previousLocalTreePath, {
+			this.sync.environment.fs.rm(this.previousLocalTreePath, {
 				force: true,
 				maxRetries: 60 * 10,
 				recursive: true,
 				retryDelay: 100
 			}),
-			fs.rm(this.previousLocalINodesPath, {
+			this.sync.environment.fs.rm(this.previousLocalINodesPath, {
 				force: true,
 				maxRetries: 60 * 10,
 				recursive: true,
 				retryDelay: 100
 			}),
-			fs.rm(this.previousRemoteTreePath, {
+			this.sync.environment.fs.rm(this.previousRemoteTreePath, {
 				force: true,
 				maxRetries: 60 * 10,
 				recursive: true,
 				retryDelay: 100
 			}),
-			fs.rm(this.previousRemoteUUIDsPath, {
+			this.sync.environment.fs.rm(this.previousRemoteUUIDsPath, {
 				force: true,
 				maxRetries: 60 * 10,
 				recursive: true,
 				retryDelay: 100
 			}),
-			fs.rm(this.localFileHashesPath, {
+			this.sync.environment.fs.rm(this.localFileHashesPath, {
 				force: true,
 				maxRetries: 60 * 10,
 				recursive: true,

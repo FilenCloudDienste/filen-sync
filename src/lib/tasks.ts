@@ -2,7 +2,7 @@ import type Sync from "./sync"
 import { type Delta } from "./deltas"
 import { promiseAllChunked, serializeError } from "../utils"
 import { type RemoteItem } from "./filesystems/remote"
-import fs from "fs-extra"
+import { type Stats } from "fs-extra"
 import { postMessageToMain } from "./ipc"
 import pathModule from "path"
 import { Semaphore } from "../semaphore"
@@ -34,16 +34,16 @@ export type DoneTask = { path: string } & (
 	| {
 			type: "uploadFile"
 			item: RemoteItem
-			stats: fs.Stats
+			stats: Stats
 	  }
 	| {
 			type: "createRemoteDirectory"
 			item: RemoteItem
-			stats: fs.Stats
+			stats: Stats
 	  }
 	| {
 			type: "createLocalDirectory"
-			stats: fs.Stats
+			stats: Stats
 			item: RemoteItem
 	  }
 	| {
@@ -60,14 +60,14 @@ export type DoneTask = { path: string } & (
 	  }
 	| {
 			type: "downloadFile"
-			stats: fs.Stats
+			stats: Stats
 			item: RemoteItem
 	  }
 	| {
 			type: "renameLocalFile"
 			from: string
 			to: string
-			stats: fs.Stats
+			stats: Stats
 	  }
 	| {
 			type: "renameRemoteFile"
@@ -83,7 +83,7 @@ export type DoneTask = { path: string } & (
 			type: "renameLocalDirectory"
 			from: string
 			to: string
-			stats: fs.Stats
+			stats: Stats
 	  }
 )
 
@@ -192,7 +192,7 @@ export class Tasks {
 				try {
 					const [, stats] = await Promise.all([
 						this.sync.remoteFileSystem.mkdir({ relativePath: delta.path }),
-						fs.stat(pathModule.join(this.sync.syncPair.localPath, delta.path))
+						this.sync.environment.fs.stat(pathModule.join(this.sync.syncPair.localPath, delta.path))
 					])
 					const item = this.sync.remoteFileSystem.getDirectoryTreeCache.tree[delta.path]
 
@@ -488,7 +488,7 @@ export class Tasks {
 							relativePath: delta.path,
 							passedMD5Hash: delta.md5Hash
 						}),
-						fs.stat(pathModule.join(this.sync.syncPair.localPath, delta.path))
+						this.sync.environment.fs.stat(pathModule.join(this.sync.syncPair.localPath, delta.path))
 					])
 					const item = this.sync.remoteFileSystem.getDirectoryTreeCache.tree[delta.path]
 

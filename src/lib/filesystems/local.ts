@@ -1,5 +1,4 @@
-import fs from "fs-extra"
-import watcher from "@parcel/watcher"
+import { type Stats } from "fs-extra"
 import {
 	isRelativePathIgnoredByDefault,
 	serializeError,
@@ -13,7 +12,6 @@ import {
 	promiseAllChunked
 } from "../../utils"
 import pathModule from "path"
-import process from "process"
 import type Sync from "../sync"
 import { SYNC_INTERVAL, LOCAL_TRASH_NAME } from "../../constants"
 import crypto from "crypto"
@@ -23,7 +21,7 @@ import { type CloudItem, PauseSignal } from "@filen/sdk"
 import { postMessageToMain } from "../ipc"
 import { Semaphore } from "../../semaphore"
 import { v4 as uuidv4 } from "uuid"
-import { type Watcher } from "node-watch"
+import { type SyncWatcher } from "../environment"
 import FastGlob from "fast-glob"
 
 const pipelineAsync = promisify(pipeline)
@@ -99,8 +97,7 @@ export class LocalFileSystem {
 		size: 0
 	}
 	public watcherRunning = false
-	private watcherInstanceParcel: watcher.AsyncSubscription | null = null
-	private watcherInstanceNode: Watcher | null = null
+	private watcherInstance: SyncWatcher | null = null
 	public readonly itemsMutex = new Semaphore(1)
 	public readonly mutex = new Semaphore(1)
 	public readonly mkdirMutex = new Semaphore(1)
@@ -260,7 +257,7 @@ export class LocalFileSystem {
 					cwd: this.sync.syncPair.localPath,
 					followSymbolicLinks: false,
 					deep: Infinity,
-					fs,
+					fs: this.sync.environment.globFs,
 					suppressErrors: true,
 					stats: false,
 					unique: false,
@@ -296,10 +293,10 @@ export class LocalFileSystem {
 
 						pathsAdded[lowercasePath] = true
 
-						let stats: fs.Stats
+						let stats: Stats
 
 						try {
-							stats = await fs.stat(absolutePath)
+							stats = await this.sync.environment.fs.stat(absolutePath)
 						} catch {
 							this.getDirectoryTreeCache.ignored.push({
 								localPath: absolutePath,
@@ -353,7 +350,7 @@ export class LocalFileSystem {
 						}
 
 						try {
-							await fs.access(absolutePath, fs.constants.R_OK)
+							await this.sync.environment.fs.access(absolutePath, this.sync.environment.fs.constants.R_OK)
 						} catch {
 							this.getDirectoryTreeCache.ignored.push({
 								localPath: absolutePath,
@@ -420,43 +417,13 @@ export class LocalFileSystem {
 		await this.watcherMutex.acquire()
 
 		try {
-			if (this.watcherInstanceParcel || this.watcherInstanceNode) {
+			if (this.watcherInstance) {
 				return
 			}
 
-			const backend =
-				process.platform === "win32"
-					? "windows"
-					: process.platform === "darwin"
-					? "fs-events"
-					: process.platform === "linux"
-					? "inotify"
-					: undefined
-
-			this.watcherInstanceParcel = await watcher.subscribe(
-				this.sync.syncPair.localPath,
-				(err, events) => {
-					if (!err && events && events.length > 0) {
-						this.lastDirectoryChangeTimestamp = Date.now()
-					}
-				},
-				backend ? { backend } : {}
-			)
-
-			/*
-			this.watcherInstanceNode = nodeWatch(
-				this.sync.syncPair.localPath,
-				{
-					persistent: true,
-					recursive: true,
-					encoding: "utf8",
-					delay: 1000
-				},
-				() => {
-					this.lastDirectoryChangeTimestamp = Date.now()
-				}
-			)
-			*/
+			this.watcherInstance = await this.sync.environment.createWatcher(this.sync.syncPair.localPath, () => {
+				this.lastDirectoryChangeTimestamp = Date.now()
+			})
 
 			clearInterval(this.watcherInstanceFallbackInterval)
 		} catch (e) {
@@ -500,16 +467,10 @@ export class LocalFileSystem {
 		clearInterval(this.watcherInstanceFallbackInterval)
 
 		try {
-			if (this.watcherInstanceParcel) {
-				await this.watcherInstanceParcel.unsubscribe()
+			if (this.watcherInstance) {
+				await this.watcherInstance.close()
 
-				this.watcherInstanceParcel = null
-			}
-
-			if (this.watcherInstanceNode && !this.watcherInstanceNode.isClosed()) {
-				this.watcherInstanceNode.close()
-
-				this.watcherInstanceNode = null
+				this.watcherInstance = null
 			}
 		} finally {
 			this.watcherMutex.release()
@@ -583,7 +544,7 @@ export class LocalFileSystem {
 		const localPath = pathModule.join(this.sync.syncPair.localPath, relativePath)
 		const hasher = crypto.createHash(algorithm)
 
-		await pipelineAsync(fs.createReadStream(localPath), hasher)
+		await pipelineAsync(this.sync.environment.fs.createReadStream(localPath), hasher)
 
 		const hash = hasher.digest("hex")
 
@@ -598,17 +559,17 @@ export class LocalFileSystem {
 	 * @async
 	 * @param {{ relativePath: string }} param0
 	 * @param {string} param0.relativePath
-	 * @returns {Promise<fs.Stats>}
+	 * @returns {Promise<Stats>}
 	 */
-	public async mkdir({ relativePath }: { relativePath: string }): Promise<fs.Stats> {
+	public async mkdir({ relativePath }: { relativePath: string }): Promise<Stats> {
 		await this.mkdirMutex.acquire()
 
 		try {
 			const localPath = pathModule.join(this.sync.syncPair.localPath, relativePath)
 
-			await fs.ensureDir(localPath)
+			await this.sync.environment.fs.ensureDir(localPath)
 
-			const stats = await fs.stat(localPath)
+			const stats = await this.sync.environment.fs.stat(localPath)
 
 			await this.itemsMutex.acquire()
 
@@ -647,12 +608,12 @@ export class LocalFileSystem {
 			if (!permanent && !this.sync.localTrashDisabled) {
 				const localTrashPath = pathModule.join(this.sync.syncPair.localPath, LOCAL_TRASH_NAME)
 
-				await fs.ensureDir(localTrashPath)
-				await fs.move(localPath, pathModule.join(localTrashPath, pathModule.posix.basename(relativePath)), {
+				await this.sync.environment.fs.ensureDir(localTrashPath)
+				await this.sync.environment.fs.move(localPath, pathModule.join(localTrashPath, pathModule.posix.basename(relativePath)), {
 					overwrite: true
 				})
 			} else {
-				await fs.rm(localPath, {
+				await this.sync.environment.fs.rm(localPath, {
 					force: true,
 					maxRetries: 60 * 10,
 					recursive: true,
@@ -685,7 +646,7 @@ export class LocalFileSystem {
 		}
 	}
 
-	public async rename({ fromRelativePath, toRelativePath }: { fromRelativePath: string; toRelativePath: string }): Promise<fs.Stats> {
+	public async rename({ fromRelativePath, toRelativePath }: { fromRelativePath: string; toRelativePath: string }): Promise<Stats> {
 		await this.mutex.acquire()
 
 		try {
@@ -704,25 +665,25 @@ export class LocalFileSystem {
 			const fromLocalPathParentPath = pathModule.dirname(fromLocalPath)
 			const toLocalPathParentPath = pathModule.dirname(toLocalPath)
 
-			await fs.ensureDir(toLocalPathParentPath)
+			await this.sync.environment.fs.ensureDir(toLocalPathParentPath)
 
 			if (
 				fromLocalPathParentPath === toLocalPathParentPath ||
 				Buffer.from(fromLocalPathParentPath, "utf-8").toString("hex") ===
 					Buffer.from(toLocalPathParentPath, "utf-8").toString("hex")
 			) {
-				await fs.rename(fromLocalPath, toLocalPath)
+				await this.sync.environment.fs.rename(fromLocalPath, toLocalPath)
 			} else {
 				if (toRelativePath.startsWith(fromRelativePath + pathModule.sep)) {
 					throw new Error("Invalid paths.")
 				}
 
-				await fs.move(fromLocalPath, toLocalPath, {
+				await this.sync.environment.fs.move(fromLocalPath, toLocalPath, {
 					overwrite: true
 				})
 			}
 
-			const stats = await fs.stat(toLocalPath)
+			const stats = await this.sync.environment.fs.stat(toLocalPath)
 
 			await this.itemsMutex.acquire()
 
@@ -799,7 +760,7 @@ export class LocalFileSystem {
 	}): Promise<CloudItem> {
 		const localPath = pathModule.join(this.sync.syncPair.localPath, relativePath)
 		const signalKey = `upload:${relativePath}`
-		const stats = await fs.stat(localPath)
+		const stats = await this.sync.environment.fs.stat(localPath)
 
 		if (!this.sync.pauseSignals[signalKey]) {
 			this.sync.pauseSignals[signalKey] = new PauseSignal()
@@ -950,7 +911,7 @@ export class LocalFileSystem {
 
 	public async isPathWritable(path: string): Promise<boolean> {
 		try {
-			await fs.access(path, fs.constants.W_OK | fs.constants.R_OK)
+			await this.sync.environment.fs.access(path, this.sync.environment.fs.constants.W_OK | this.sync.environment.fs.constants.R_OK)
 
 			return true
 		} catch {
@@ -960,7 +921,7 @@ export class LocalFileSystem {
 
 	public async isPathReadable(path: string): Promise<boolean> {
 		try {
-			await fs.access(path, fs.constants.R_OK)
+			await this.sync.environment.fs.access(path, this.sync.environment.fs.constants.R_OK)
 
 			return true
 		} catch {
@@ -970,7 +931,7 @@ export class LocalFileSystem {
 
 	public async pathExists(path: string): Promise<boolean> {
 		try {
-			return await fs.exists(path)
+			return await this.sync.environment.fs.exists(path)
 		} catch {
 			return false
 		}

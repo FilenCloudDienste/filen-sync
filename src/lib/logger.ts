@@ -52,6 +52,10 @@ export class Logger {
 	}
 
 	public async init(): Promise<void> {
+		if (this.disableLogging) {
+			return
+		}
+
 		try {
 			this.dest = pathModule.join(await filenLogsPath(), "sync.log")
 

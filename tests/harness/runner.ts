@@ -12,9 +12,9 @@ import { type SyncMessage } from "../../src/types"
 export type Step =
 	| { type: "runCycle" }
 	| { type: "restart" }
-	| { type: "localMutate"; mutate: (world: World) => void | Promise<void> }
-	| { type: "remoteMutate"; mutate: (world: World) => void | Promise<void> }
-	| { type: "control"; control: (world: World) => void | Promise<void> }
+	| { type: "localMutate"; mutate: (world: World) => unknown }
+	| { type: "remoteMutate"; mutate: (world: World) => unknown }
+	| { type: "control"; control: (world: World) => unknown }
 
 export function runCycle(): Step {
 	return { type: "runCycle" }
@@ -25,15 +25,15 @@ export function restart(): Step {
 	return { type: "restart" }
 }
 
-export function localMutate(mutate: (world: World) => void | Promise<void>): Step {
+export function localMutate(mutate: (world: World) => unknown): Step {
 	return { type: "localMutate", mutate }
 }
 
-export function remoteMutate(mutate: (world: World) => void | Promise<void>): Step {
+export function remoteMutate(mutate: (world: World) => unknown): Step {
 	return { type: "remoteMutate", mutate }
 }
 
-export function control(controlFn: (world: World) => void | Promise<void>): Step {
+export function control(controlFn: (world: World) => unknown): Step {
 	return { type: "control", control: controlFn }
 }
 

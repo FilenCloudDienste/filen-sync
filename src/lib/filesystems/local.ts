@@ -296,7 +296,7 @@ export class LocalFileSystem {
 
 						pathsAdded[lowercasePath] = true
 
-						let stats: fs.Stats | null = null
+						let stats: fs.Stats
 
 						try {
 							stats = await fs.stat(absolutePath)

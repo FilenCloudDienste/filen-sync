@@ -88,7 +88,7 @@ export class RemoteFileSystem {
 
 		await fs.ensureDir(pathModule.dirname(deviceIdFile))
 
-		let deviceId: string = ""
+		let deviceId: string
 
 		if (!(await fs.exists(deviceIdFile))) {
 			deviceId = uuidv4()

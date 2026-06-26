@@ -23,7 +23,6 @@ export type DistributiveOmit<T, K extends keyof any> = T extends any ? Omit<T, K
 
 export type Prettify<T> = {
 	[K in keyof T]: T[K]
-	// eslint-disable-next-line @typescript-eslint/ban-types
 } & {}
 
 export type IPCDoneTask = Prettify<Omit<DoneTask, "stats">>

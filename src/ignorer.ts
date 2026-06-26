@@ -97,7 +97,7 @@ export class Ignorer {
 		this.sync.localFileSystem.ignoredCache.clear()
 		this.sync.remoteFileSystem.ignoredCache.clear()
 
-		let content: string[] = []
+		let content: string[]
 
 		if (typeof passedContent === "string") {
 			await this.write(passedContent)

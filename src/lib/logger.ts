@@ -5,7 +5,7 @@ import fs from "fs-extra"
 import { createStream } from "rotating-file-stream"
 
 export async function filenLogsPath(): Promise<string> {
-	let configPath = ""
+	let configPath: string
 
 	switch (process.platform) {
 		case "win32":
@@ -91,7 +91,6 @@ export class Logger {
 			return
 		}
 
-		// eslint-disable-next-line no-extra-semi
 		;(async () => {
 			try {
 				if (!this.logger) {

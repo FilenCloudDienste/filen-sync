@@ -86,3 +86,16 @@ export function countMessages(messages: SyncMessage[], type: SyncMessage["type"]
 export function transferKinds(messages: SyncMessage[]): string[] {
 	return messagesOfType(messages, "transfer").map(message => message.data.of)
 }
+
+/** The transfer `of` discriminators that represent an actual file transfer (not a dir/rename op). */
+export const FILE_TRANSFER_OPS = ["upload", "uploadFile", "download", "downloadFile"] as const
+
+/** The actual file-transfer operations seen in a message stream (upload/download, queued..finished). */
+export function transferOps(messages: SyncMessage[]): string[] {
+	return transferKinds(messages).filter(kind => (FILE_TRANSFER_OPS as readonly string[]).includes(kind))
+}
+
+/** Whether any actual file transfer (upload/download) occurred in the message stream. */
+export function hadTransfers(messages: SyncMessage[]): boolean {
+	return transferOps(messages).length > 0
+}

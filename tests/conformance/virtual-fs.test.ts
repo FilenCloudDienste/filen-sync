@@ -111,8 +111,16 @@ describe("virtual filesystem conformance", () => {
 	})
 
 	afterAll(async () => {
-		if (realRoot) {
-			await fsExtra.rm(realRoot, { force: true, recursive: true })
+		if (!realRoot) {
+			return
+		}
+
+		// Best-effort removal of the OS temp directory; never let a cleanup
+		// failure mask a real test result.
+		try {
+			await fsExtra.rm(realRoot, { force: true, recursive: true, maxRetries: 5, retryDelay: 50 })
+		} catch {
+			// ignore
 		}
 	})
 

@@ -141,3 +141,43 @@ export async function createWorld(options: CreateWorldOptions): Promise<World> {
 		triggerWatcher: watcher.trigger
 	}
 }
+
+/**
+ * Simulate a process restart: rebuild the worker/sync over the SAME virtual filesystem and cloud,
+ * so persisted state (previous trees, deviceId, ignorer) is reloaded from disk. Mutates `world` in
+ * place (new worker/sync/watcher) and keeps appending to the same message stream.
+ */
+export async function restartSync(world: World): Promise<void> {
+	const watcher = createManualWatcher()
+
+	const environment: SyncEnvironment = {
+		fs: world.vfs.fs,
+		globFs: world.vfs.globFs,
+		writeFileAtomic: async (filename, data, writeOptions): Promise<void> => {
+			await world.vfs.fs.writeFile(filename, data, writeOptions)
+		},
+		createWatcher: watcher.factory
+	}
+
+	const worker = new SyncWorker({
+		syncPairs: [world.syncPair],
+		dbPath: DB_ROOT,
+		sdk: world.cloud.sdk,
+		onMessage: message => {
+			world.messages.push(message)
+		},
+		disableLogging: true,
+		environment
+	})
+
+	const sync = new Sync({ syncPair: world.syncPair, worker })
+
+	worker.syncs[world.syncPair.uuid] = sync
+
+	await sync.state.initialize()
+	await sync.ignorer.initialize()
+
+	world.worker = worker
+	world.sync = sync
+	world.triggerWatcher = watcher.trigger
+}

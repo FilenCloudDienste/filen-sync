@@ -1,6 +1,6 @@
 import { vi, expect } from "vitest"
 import { SYNC_INTERVAL } from "../../src/constants"
-import { createWorld, BASE_TIME, type CreateWorldOptions, type World } from "./world"
+import { createWorld, restartSync, BASE_TIME, type CreateWorldOptions, type World } from "./world"
 import { snapshotLocal, snapshotRemote, type WorldSnapshot } from "./snapshot"
 import { type SyncMessage } from "../../src/types"
 
@@ -11,12 +11,18 @@ import { type SyncMessage } from "../../src/types"
  */
 export type Step =
 	| { type: "runCycle" }
+	| { type: "restart" }
 	| { type: "localMutate"; mutate: (world: World) => void | Promise<void> }
 	| { type: "remoteMutate"; mutate: (world: World) => void | Promise<void> }
 	| { type: "control"; control: (world: World) => void | Promise<void> }
 
 export function runCycle(): Step {
 	return { type: "runCycle" }
+}
+
+/** Simulate a process restart: reload persisted state and rebuild the engine over the same world. */
+export function restart(): Step {
+	return { type: "restart" }
 }
 
 export function localMutate(mutate: (world: World) => void | Promise<void>): Step {
@@ -54,6 +60,12 @@ async function applyStep(world: World, step: Step): Promise<void> {
 			await vi.advanceTimersByTimeAsync(SYNC_INTERVAL + 1)
 
 			await world.sync.runCycle()
+
+			break
+		}
+
+		case "restart": {
+			await restartSync(world)
 
 			break
 		}

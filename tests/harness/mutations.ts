@@ -27,6 +27,13 @@ export function writeLocalAt(world: World, relativePath: string, content: string
 	world.vfs.ifs.utimesSync(localFull(world, relativePath), seconds, seconds)
 }
 
+/** Update a local file's mtime WITHOUT changing its content or inode (a pure touch). */
+export function touchLocal(world: World, relativePath: string, mtimeMs: number): void {
+	const seconds = mtimeMs / 1000
+
+	world.vfs.ifs.utimesSync(localFull(world, relativePath), seconds, seconds)
+}
+
 export function mkdirLocal(world: World, relativePath: string): void {
 	world.vfs.ifs.mkdirSync(localFull(world, relativePath), { recursive: true })
 }

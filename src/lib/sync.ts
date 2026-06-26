@@ -255,6 +255,40 @@ export class Sync {
 		}
 
 		try {
+			await this.runCycle()
+		} finally {
+			if (this.worker.runOnce || this.removed) {
+				await this.cleanup({
+					deleteLocalDbFiles: this.removed
+				})
+			} else {
+				postMessageToMain({
+					type: "cycleRestarting",
+					syncPair: this.syncPair
+				})
+
+				setTimeout(() => {
+					this.run()
+				}, SYNC_INTERVAL)
+			}
+		}
+	}
+
+	/**
+	 * Run exactly one synchronization cycle without scheduling the next one.
+	 *
+	 * This is the body of a single pass: error/pause gating, lock acquisition,
+	 * tree diffing, delta processing, task execution and state persistence. It
+	 * never throws (failures are caught and reported as a "cycleError" message)
+	 * and never reschedules — {@link run} owns the self-scheduling loop. Exposed
+	 * so a single cycle can be driven deterministically.
+	 *
+	 * @public
+	 * @async
+	 * @returns {Promise<void>}
+	 */
+	public async runCycle(): Promise<void> {
+		try {
 			if (this.taskErrors.length > 0 || this.localTreeErrors.length > 0) {
 				if (this.worker.runOnce) {
 					await this.cleanup({
@@ -681,21 +715,6 @@ export class Sync {
 						uuid: uuidv4()
 					}
 				})
-			}
-		} finally {
-			if (this.worker.runOnce || this.removed) {
-				await this.cleanup({
-					deleteLocalDbFiles: this.removed
-				})
-			} else {
-				postMessageToMain({
-					type: "cycleRestarting",
-					syncPair: this.syncPair
-				})
-
-				setTimeout(() => {
-					this.run()
-				}, SYNC_INTERVAL)
 			}
 		}
 	}

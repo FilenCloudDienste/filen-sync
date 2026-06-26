@@ -4,6 +4,7 @@ import FilenSDK, { type FilenSDKConfig } from "@filen/sdk"
 import { Semaphore } from "./semaphore"
 import { SYNC_INTERVAL } from "./constants"
 import Logger from "./lib/logger"
+import { type SyncEnvironment, defaultEnvironment } from "./lib/environment"
 
 /**
  * SyncWorker
@@ -21,6 +22,7 @@ export class SyncWorker {
 	public readonly sdk: FilenSDK
 	public readonly logger: Logger
 	public readonly runOnce: boolean
+	public readonly environment: SyncEnvironment
 
 	public constructor({
 		syncPairs,
@@ -29,7 +31,8 @@ export class SyncWorker {
 		onMessage,
 		runOnce = false,
 		sdk,
-		disableLogging = false
+		disableLogging = false,
+		environment
 	}: {
 		syncPairs: SyncPair[]
 		dbPath: string
@@ -38,6 +41,7 @@ export class SyncWorker {
 		runOnce?: boolean
 		sdk?: FilenSDK
 		disableLogging?: boolean
+		environment?: SyncEnvironment
 	}) {
 		if (!sdk && !sdkConfig) {
 			throw new Error("Either pass a configured SDK instance OR a SDKConfig object.")
@@ -48,6 +52,7 @@ export class SyncWorker {
 		}
 
 		this.runOnce = runOnce
+		this.environment = environment ?? defaultEnvironment()
 		this.syncPairs = syncPairs
 		this.dbPath = dbPath
 		this.logger = new Logger(disableLogging)

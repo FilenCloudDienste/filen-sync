@@ -12,7 +12,7 @@ import { serializeError } from "../utils"
 import type SyncWorker from ".."
 import Lock from "./lock"
 import pathModule from "path"
-import fs from "fs-extra"
+import { type SyncEnvironment } from "./environment"
 import { v4 as uuidv4 } from "uuid"
 import FastGlob from "fast-glob"
 
@@ -25,6 +25,7 @@ import FastGlob from "fast-glob"
  */
 export class Sync {
 	public readonly sdk: FilenSDK
+	public readonly environment: SyncEnvironment
 	public readonly syncPair: SyncPair
 	private isInitialized = false
 	public readonly localFileSystem: LocalFileSystem
@@ -78,6 +79,7 @@ export class Sync {
 		this.excludeDotFiles = syncPair.excludeDotFiles
 		this.dbPath = worker.dbPath
 		this.sdk = worker.sdk
+		this.environment = worker.environment
 		this.localTrashDisabled = syncPair.localTrashDisabled
 		this.requireConfirmationOnLargeDeletion =
 			typeof syncPair.requireConfirmationOnLargeDeletion === "boolean" ? syncPair.requireConfirmationOnLargeDeletion : false
@@ -151,7 +153,7 @@ export class Sync {
 			try {
 				const localTrashPath = pathModule.join(this.syncPair.localPath, LOCAL_TRASH_NAME)
 
-				if (await fs.exists(localTrashPath)) {
+				if (await this.environment.fs.exists(localTrashPath)) {
 					const now = Date.now()
 					const dir = await FastGlob.async("**/*", {
 						dot: true,
@@ -161,7 +163,7 @@ export class Sync {
 						cwd: localTrashPath,
 						followSymbolicLinks: false,
 						deep: 0,
-						fs,
+						fs: this.environment.globFs,
 						suppressErrors: true,
 						stats: true,
 						unique: true,
@@ -174,7 +176,7 @@ export class Sync {
 						}
 
 						if (entry.stats && entry.stats.atimeMs + 86400000 * 30 < now) {
-							await fs.rm(pathModule.join(localTrashPath, entry.path), {
+							await this.environment.fs.rm(pathModule.join(localTrashPath, entry.path), {
 								force: true,
 								maxRetries: 60 * 10,
 								recursive: true,

@@ -18,7 +18,19 @@ export default tseslint.config([
 			eqeqeq: "error",
 			quotes: ["error", "double"],
 			"no-mixed-spaces-and-tabs": "off",
-			"no-duplicate-imports": "error"
+			"no-duplicate-imports": "error",
+			// Honor the leading-underscore convention for intentionally-unused bindings,
+			// matching TypeScript's own noUnusedLocals/noUnusedParameters behavior.
+			"@typescript-eslint/no-unused-vars": [
+				"error",
+				{
+					argsIgnorePattern: "^_",
+					varsIgnorePattern: "^_",
+					caughtErrorsIgnorePattern: "^_",
+					destructuredArrayIgnorePattern: "^_",
+					ignoreRestSiblings: true
+				}
+			]
 		}
 	}
 ])

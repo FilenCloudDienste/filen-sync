@@ -8,3 +8,7 @@ dev/*
 dev
 dist
 tsconfig.tsbuildinfo
+docs
+docs/**/*
+coverage
+coverage/**/*

@@ -17,6 +17,23 @@ export async function writeLocal(world: E2EWorld, relativePath: string, content:
 	await fs.writeFile(full, content)
 }
 
+/**
+ * Modify an existing file's content AND stamp it with a clearly-newer mtime. The engine compares
+ * whole-second mtimes (plus size), so a same-size edit that lands in the same second as the previous
+ * version is — by design — invisible to it. Tests that specifically assert "a modification propagates"
+ * use this to make the change deterministically detectable regardless of how fast the prior cycle ran.
+ */
+export async function modifyLocal(world: E2EWorld, relativePath: string, content: string): Promise<void> {
+	const full = abs(world, relativePath)
+
+	await fs.ensureDir(pathModule.dirname(full))
+	await fs.writeFile(full, content)
+
+	const newer = new Date(Date.now() + 5000)
+
+	await fs.utimes(full, newer, newer)
+}
+
 export async function readLocal(world: E2EWorld, relativePath: string): Promise<string> {
 	return await fs.readFile(abs(world, relativePath), { encoding: "utf-8" })
 }

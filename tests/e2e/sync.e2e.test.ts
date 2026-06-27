@@ -4,7 +4,7 @@ import { E2E_ENABLED, loginTestSDK, teardownTestSDK } from "./harness/account"
 import { withE2EWorld, restartE2EWorld } from "./harness/world"
 import { cycle, settle, expectConverged, transferOps } from "./harness/drive"
 import { snapshotLocalReal, snapshotRemoteReal } from "./harness/assert"
-import { writeLocal, mkdirLocal, rmLocal, renameLocal, readLocal, uploadRemote, mkdirRemote, existsLocal } from "./harness/mutations"
+import { writeLocal, modifyLocal, mkdirLocal, rmLocal, renameLocal, readLocal, uploadRemote, mkdirRemote, existsLocal } from "./harness/mutations"
 
 /**
  * Phase 3 — real end-to-end against the live SDK + backend. Each case runs a real {@link SyncWorker}
@@ -67,7 +67,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — core sync against live backend", () => {
 			await settle(world)
 
 			// Same byte length, different content — size-only checks would miss this; content hash won't.
-			await writeLocal(world, "note.txt", "bbbb")
+			await modifyLocal(world, "note.txt", "bbbb")
 			await settle(world)
 
 			await expectConverged(world)

@@ -36,6 +36,6 @@ jobs:
             - name: E2E tests
               run: npm run test:e2e
               env:
-                  FILEN_TEST_EMAIL: ${{ secrets.FILEN_TEST_EMAIL }}
-                  FILEN_TEST_PASSWORD: ${{ secrets.FILEN_TEST_PASSWORD }}
-                  FILEN_TEST_2FA: ${{ secrets.FILEN_TEST_2FA }}
+                  FILEN_SYNC_LEGACY_E2E_EMAIL: ${{ secrets.FILEN_SYNC_LEGACY_E2E_EMAIL }}
+                  FILEN_SYNC_LEGACY_E2E_PASSWORD: ${{ secrets.FILEN_SYNC_LEGACY_E2E_PASSWORD }}
+                  FILEN_SYNC_LEGACY_E2E_2FA: ${{ secrets.FILEN_SYNC_LEGACY_E2E_2FA }}

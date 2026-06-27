@@ -8,14 +8,15 @@ import { v4 as uuidv4 } from "uuid"
  * Real-account login for the e2e suite.
  *
  * Credentials come from the environment so they never touch the repo:
- *   FILEN_TEST_EMAIL, FILEN_TEST_PASSWORD   (a DEDICATED throwaway test account — the suite creates and
- *                                            permanently deletes data under it and empties its trash)
- *   FILEN_TEST_2FA                          (optional TOTP code; normally unset — the test account has no 2FA)
+ *   FILEN_SYNC_LEGACY_E2E_EMAIL, FILEN_SYNC_LEGACY_E2E_PASSWORD
+ *                              (a DEDICATED throwaway test account — the suite creates and permanently
+ *                               deletes data under it and empties its trash)
+ *   FILEN_SYNC_LEGACY_E2E_2FA  (optional TOTP code; normally unset — the test account has no 2FA)
  *
  * When the creds are absent the whole e2e suite is skipped (see {@link E2E_ENABLED}); it never fails a
  * build that simply has no secrets (local dev, fork PRs).
  */
-export const E2E_ENABLED: boolean = Boolean(process.env["FILEN_TEST_EMAIL"] && process.env["FILEN_TEST_PASSWORD"])
+export const E2E_ENABLED: boolean = Boolean(process.env["FILEN_SYNC_LEGACY_E2E_EMAIL"] && process.env["FILEN_SYNC_LEGACY_E2E_PASSWORD"])
 
 /**
  * A uniquely-named tmp dir the SDK uses for its own scratch (download chunks etc.). Random per process
@@ -36,12 +37,12 @@ export function loginTestSDK(): Promise<FilenSDK> {
 
 	if (!sdkPromise) {
 		sdkPromise = (async (): Promise<FilenSDK> => {
-			const email = process.env["FILEN_TEST_EMAIL"]
-			const password = process.env["FILEN_TEST_PASSWORD"]
-			const twoFactorCode = process.env["FILEN_TEST_2FA"]
+			const email = process.env["FILEN_SYNC_LEGACY_E2E_EMAIL"]
+			const password = process.env["FILEN_SYNC_LEGACY_E2E_PASSWORD"]
+			const twoFactorCode = process.env["FILEN_SYNC_LEGACY_E2E_2FA"]
 
 			if (!email || !password) {
-				throw new Error("e2e credentials are not set (FILEN_TEST_EMAIL / FILEN_TEST_PASSWORD).")
+				throw new Error("e2e credentials are not set (FILEN_SYNC_LEGACY_E2E_EMAIL / FILEN_SYNC_LEGACY_E2E_PASSWORD).")
 			}
 
 			await fs.ensureDir(SDK_TMP_PATH)

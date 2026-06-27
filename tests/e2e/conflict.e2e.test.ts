@@ -34,23 +34,23 @@ describe.skipIf(!E2E_ENABLED)("E2E — twoWay conflict resolution", () => {
 		})
 	})
 
-	it("local modify vs remote delete: the remote deletion wins (observed policy — see E2E-OBS-001)", async () => {
+	it("local modify vs remote delete: the newer local modification wins, resurrected (E2E-OBS-001)", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
 			await writeLocal(world, "f.txt", "v1")
 			await settle(world)
 
-			// Local edit is stamped clearly-newer than the (earlier) remote deletion, yet the deletion
-			// still wins: the file is removed on both sides and the local edit is discarded. Documented
-			// here as the CURRENT behavior; whether a newer local modify should survive a remote delete is
-			// a product decision tracked as E2E-OBS-001.
+			// The local copy is edited (content changed) while the remote deletes it. Per newer-modify-wins
+			// the local modification survives the deletion: the file is re-uploaded (resurrected) remotely
+			// and kept locally with the local content, rather than being removed on both sides.
 			await modifyLocal(world, "f.txt", "v2-modified")
 			await deleteRemote(world, "f.txt")
 
 			await settle(world)
 
 			await expectConverged(world)
-			expect(await existsLocal(world, "f.txt")).toBe(false)
-			expect((await snapshotRemoteReal(world))["/f.txt"]).toBeUndefined()
+			expect(await existsLocal(world, "f.txt")).toBe(true)
+			expect(await readLocal(world, "f.txt")).toBe("v2-modified")
+			expect((await snapshotRemoteReal(world))["/f.txt"]).toMatchObject({ type: "file" })
 		})
 	})
 

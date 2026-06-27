@@ -440,6 +440,43 @@ export class Deltas {
 						previousRemoteItem //&&
 						//(this.sync.mode !== "cloudToLocal" ? !currentRemoteTree.uuids[previousRemoteItem.uuid] : true)
 					) {
+						// E2E-OBS-001 (newer-modify-wins): the remote deleted this path, but if the local FILE
+						// was modified since the last sync the modification wins — skip the delete and leave the
+						// path unmarked so the local-additions pass re-uploads (resurrects) it remotely. "Modified"
+						// requires a real CONTENT change: a size difference, or (same size, mtime moved) a cached
+						// upload hash that no longer matches. A bare mtime touch — or a same-size change we cannot
+						// confirm because no hash was stored — is NOT a modification, so the delete proceeds. The
+						// hash is an optional signal (older files carry none).
+						if (previousRemoteItem.type === "file") {
+							const previousLocalItem = previousLocalTree.tree[path]
+							const currentLocalItem = currentLocalTree.tree[path]
+
+							if (currentLocalItem && currentLocalItem.type === "file" && previousLocalItem) {
+								let localContentChanged = currentLocalItem.size !== previousLocalItem.size
+
+								if (
+									!localContentChanged &&
+									normalizeLastModifiedMsForComparison(currentLocalItem.lastModified) !==
+										normalizeLastModifiedMsForComparison(previousLocalItem.lastModified)
+								) {
+									const cachedHash = this.sync.localFileHashes[currentLocalItem.path]
+
+									if (cachedHash) {
+										const currentHash = await this.sync.localFileSystem.createFileHash({
+											relativePath: path,
+											algorithm: "md5"
+										})
+
+										localContentChanged = currentHash !== cachedHash
+									}
+								}
+
+								if (localContentChanged) {
+									continue
+								}
+							}
+						}
+
 						const delta: Delta = {
 							type: previousRemoteItem.type === "directory" ? "deleteLocalDirectory" : "deleteLocalFile",
 							path

@@ -1,7 +1,10 @@
 import { describe, it, expect } from "vitest"
 import { runScenario, runCycle, localMutate, remoteMutate, control } from "../harness/runner"
+import { BASE_TIME } from "../harness/world"
 import { transferKinds } from "../harness/snapshot"
-import { writeLocal, rmLocal, existsLocal } from "../harness/mutations"
+import { writeLocal, writeLocalAt, touchLocal, readLocal, rmLocal, existsLocal } from "../harness/mutations"
+
+const SECOND = 1000
 
 /**
  * Category D — deletions and trash (behavioral spec §D, §3, §4). Deletions propagate per the mode
@@ -190,6 +193,67 @@ describe("Category D — deletions", () => {
 		expect(finalUUID).toBeDefined()
 		expect(finalUUID).not.toBe(originalUUID)
 		expect(result.finalRemote["/a.txt"]).toMatchObject({ type: "file", size: "version-2".length })
+		expect(result.finalLocal).toEqual(result.finalRemote)
+	})
+
+	// D8–D10 — newer-modify-wins over a remote delete (E2E-OBS-001). When a file is deleted remotely
+	// but modified locally since the last sync, the local modification survives: the file is re-uploaded
+	// (resurrected) rather than deleted. "Modified" means a real CONTENT change (size differs, or the
+	// cached upload hash differs) — a bare mtime touch is not enough and lets the delete proceed.
+	it("D8: a local content modify (size changed) survives a remote delete — newer-modify-wins (E2E-OBS-001)", async () => {
+		const result = await runScenario({
+			name: "D8",
+			mode: "twoWay",
+			initialLocal: { "/local/f.txt": "v1" },
+			steps: [
+				runCycle(),
+				localMutate(world => writeLocalAt(world, "f.txt", "v2-modified-longer", BASE_TIME + 5 * SECOND)),
+				remoteMutate(world => world.cloud.controls.deletePath("/f.txt")),
+				runCycle(),
+				runCycle()
+			]
+		})
+
+		expect(transferKinds(result.cycles[1]!.messages)).toContain("upload")
+		expect(result.finalRemote["/f.txt"]).toMatchObject({ type: "file", size: "v2-modified-longer".length })
+		expect(result.finalLocal).toEqual(result.finalRemote)
+		expect(readLocal(result.world, "f.txt")).toBe("v2-modified-longer")
+	})
+
+	it("D9: a bare local touch (no content change) does NOT survive a remote delete — the delete wins", async () => {
+		const result = await runScenario({
+			name: "D9",
+			mode: "twoWay",
+			initialLocal: { "/local/f.txt": "v1" },
+			steps: [
+				runCycle(),
+				localMutate(world => touchLocal(world, "f.txt", BASE_TIME + 5 * SECOND)),
+				remoteMutate(world => world.cloud.controls.deletePath("/f.txt")),
+				runCycle(),
+				runCycle()
+			]
+		})
+
+		expect(result.finalRemote["/f.txt"]).toBeUndefined()
+		expect(existsLocal(result.world, "f.txt")).toBe(false)
+	})
+
+	it("D10: a same-size content change survives a remote delete via the cached upload hash (E2E-OBS-001)", async () => {
+		const result = await runScenario({
+			name: "D10",
+			mode: "twoWay",
+			initialLocal: { "/local/f.txt": "AAAA" },
+			steps: [
+				runCycle(),
+				localMutate(world => writeLocalAt(world, "f.txt", "BBBB", BASE_TIME + 5 * SECOND)),
+				remoteMutate(world => world.cloud.controls.deletePath("/f.txt")),
+				runCycle(),
+				runCycle()
+			]
+		})
+
+		expect(result.finalRemote["/f.txt"]).toMatchObject({ type: "file", size: 4 })
+		expect(readLocal(result.world, "f.txt")).toBe("BBBB")
 		expect(result.finalLocal).toEqual(result.finalRemote)
 	})
 })

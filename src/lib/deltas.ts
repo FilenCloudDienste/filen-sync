@@ -54,6 +54,110 @@ export type Delta = { path: string } & (
 )
 
 /**
+ * Collapses child rename/move/delete deltas into the parent-directory delta that already covers them.
+ *
+ * When a directory is renamed or deleted, the tree diff also emits a delta for every descendant (each
+ * child's path changed too). Executing all of them is wasteful — the parent op already moves or removes
+ * the whole subtree — so each child is folded into its parent here, saving disk usage and API calls.
+ *
+ * Pure and side-effect free so it can be unit-tested directly against adversarial delta arrays. Two
+ * correctness properties that the previous in-place version did NOT guarantee:
+ *
+ *   1. Most-specific parent wins. A child can sit under more than one renamed ancestor (e.g. both
+ *      "/a" -> "/x" and "/a/b" -> "/x/y" cover "/a/b/c.txt"). The longest-`from` ancestor is the
+ *      immediate enclosing renamed directory, and its `to` already reflects every outer rename — so
+ *      applying ONLY that one yields the correct post-rename source. Composing every match in array
+ *      order (the old loop) was order-dependent and could mis-compose.
+ *   2. No neighbour corruption. We build a fresh array instead of splicing the input while iterating.
+ *      The old loop spliced `deltas[i]` in place, so a removal shifted an unrelated delta into slot `i`
+ *      that a later iteration could overwrite — silently dropping a real op and leaving a bogus one.
+ */
+export function collapseDeltas({
+	deltas,
+	renamedLocalDirectories,
+	renamedRemoteDirectories,
+	deletedLocalDirectories,
+	deletedRemoteDirectories
+}: {
+	deltas: Delta[]
+	renamedLocalDirectories: Delta[]
+	renamedRemoteDirectories: Delta[]
+	deletedLocalDirectories: Delta[]
+	deletedRemoteDirectories: Delta[]
+}): Delta[] {
+	const collapsed: Delta[] = []
+
+	for (const delta of deltas) {
+		if (delta.type === "renameLocalDirectory" || delta.type === "renameLocalFile") {
+			let parent: Extract<Delta, { type: "renameLocalDirectory" }> | undefined
+
+			for (const directoryDelta of renamedLocalDirectories) {
+				if (
+					directoryDelta.type === "renameLocalDirectory" &&
+					delta.from.startsWith(directoryDelta.from + "/") &&
+					(!parent || directoryDelta.from.length > parent.from.length)
+				) {
+					parent = directoryDelta
+				}
+			}
+
+			if (parent) {
+				const newFromPath = replacePathStartWithFromAndTo(delta.from, parent.from, parent.to)
+
+				// Equal to the target => the parent rename already lands the child here, so it is redundant.
+				if (newFromPath !== delta.to) {
+					collapsed.push({ ...delta, from: newFromPath })
+				}
+
+				continue
+			}
+		} else if (delta.type === "renameRemoteDirectory" || delta.type === "renameRemoteFile") {
+			let parent: Extract<Delta, { type: "renameRemoteDirectory" }> | undefined
+
+			for (const directoryDelta of renamedRemoteDirectories) {
+				if (
+					directoryDelta.type === "renameRemoteDirectory" &&
+					delta.from.startsWith(directoryDelta.from + "/") &&
+					(!parent || directoryDelta.from.length > parent.from.length)
+				) {
+					parent = directoryDelta
+				}
+			}
+
+			if (parent) {
+				const newFromPath = replacePathStartWithFromAndTo(delta.from, parent.from, parent.to)
+
+				if (newFromPath !== delta.to) {
+					collapsed.push({ ...delta, from: newFromPath })
+				}
+
+				continue
+			}
+		} else if (delta.type === "deleteLocalDirectory" || delta.type === "deleteLocalFile") {
+			if (
+				deletedLocalDirectories.some(
+					directoryDelta => directoryDelta.type === "deleteLocalDirectory" && delta.path.startsWith(directoryDelta.path + "/")
+				)
+			) {
+				continue
+			}
+		} else if (delta.type === "deleteRemoteDirectory" || delta.type === "deleteRemoteFile") {
+			if (
+				deletedRemoteDirectories.some(
+					directoryDelta => directoryDelta.type === "deleteRemoteDirectory" && delta.path.startsWith(directoryDelta.path + "/")
+				)
+			) {
+				continue
+			}
+		}
+
+		collapsed.push(delta)
+	}
+
+	return collapsed
+}
+
+/**
  * Deltas
  * @date 3/1/2024 - 11:11:32 PM
  *
@@ -549,71 +653,18 @@ export class Deltas {
 		// This is pretty unnecessary, hence we filter them here.
 		// Same for deletions. We only ever need to rename/move/delete the parent directory if the children did not change.
 		// This saves a lot of disk usage and API requests. This also saves time applying all done tasks to the overall state,
-		// since we need to loop through less doneTasks.
-		for (let i = 0; i < deltas.length; i++) {
-			const delta = deltas[i]!
-			let moveUp = false
-
-			if (delta.type === "renameLocalDirectory" || delta.type === "renameLocalFile") {
-				for (const directoryDelta of renamedLocalDirectories) {
-					if (directoryDelta.type === "renameLocalDirectory" && delta.from.startsWith(directoryDelta.from + "/")) {
-						const newFromPath = replacePathStartWithFromAndTo(delta.from, directoryDelta.from, directoryDelta.to)
-
-						if (newFromPath === delta.to) {
-							deltas.splice(i, 1)
-
-							moveUp = true
-						} else {
-							deltas.splice(i, 1, {
-								...delta,
-								from: newFromPath
-							})
-						}
-					}
-				}
-			} else if (delta.type === "renameRemoteDirectory" || delta.type === "renameRemoteFile") {
-				for (const directoryDelta of renamedRemoteDirectories) {
-					if (directoryDelta.type === "renameRemoteDirectory" && delta.from.startsWith(directoryDelta.from + "/")) {
-						const newFromPath = replacePathStartWithFromAndTo(delta.from, directoryDelta.from, directoryDelta.to)
-
-						if (newFromPath === delta.to) {
-							deltas.splice(i, 1)
-
-							moveUp = true
-						} else {
-							deltas.splice(i, 1, {
-								...delta,
-								from: newFromPath
-							})
-						}
-					}
-				}
-			} else if (delta.type === "deleteLocalDirectory" || delta.type === "deleteLocalFile") {
-				for (const directoryDelta of deletedLocalDirectories) {
-					if (directoryDelta.type === "deleteLocalDirectory" && delta.path.startsWith(directoryDelta.path + "/")) {
-						deltas.splice(i, 1)
-
-						moveUp = true
-					}
-				}
-			} else if (delta.type === "deleteRemoteDirectory" || delta.type === "deleteRemoteFile") {
-				for (const directoryDelta of deletedRemoteDirectories) {
-					if (directoryDelta.type === "deleteRemoteDirectory" && delta.path.startsWith(directoryDelta.path + "/")) {
-						deltas.splice(i, 1)
-
-						moveUp = true
-					}
-				}
-			}
-
-			if (moveUp) {
-				i--
-			}
-		}
+		// since we need to loop through less doneTasks. See collapseDeltas for the correctness properties.
+		const collapsedDeltas = collapseDeltas({
+			deltas,
+			renamedLocalDirectories,
+			renamedRemoteDirectories,
+			deletedLocalDirectories,
+			deletedRemoteDirectories
+		})
 
 		// Work on deltas from "left to right" (ascending order, path length).
 		return {
-			deltas: deltas.sort((a, b) => a.path.split("/").length - b.path.split("/").length),
+			deltas: collapsedDeltas.sort((a, b) => a.path.split("/").length - b.path.split("/").length),
 			deleteLocalDirectoryCountRaw,
 			deleteLocalFileCountRaw,
 			deleteRemoteDirectoryCountRaw,

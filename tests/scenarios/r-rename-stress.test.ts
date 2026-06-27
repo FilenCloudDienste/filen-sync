@@ -171,4 +171,38 @@ describe("Category R — rename/move stress (BUG-004 net)", () => {
 		expect(result.finalRemote["/root2/mid/leaf.txt"]).toBeUndefined()
 		expectConverged(result)
 	})
+
+	it("RS7: a child under TWO overlapping renamed parents converges (sibling edit preserved)", async () => {
+		// Full-cycle guard for the multi-overlapping-parent collapse case (BUG-004's deterministic half).
+		// Two overlapping parent renames in one beat (/a -> /x then /x/b -> /x/y) make the child
+		// /a/b/c.txt match both, and a sibling edit adds an unrelated delta that must survive. NOTE: the
+		// engine re-runs and self-heals, so a corrupt FIRST cycle would still converge here — the
+		// deterministic corruption (dropped/duplicated op) is pinned directly at
+		// tests/unit/collapse-deltas.test.ts. This case proves the end-to-end path still converges.
+		const result = await runScenario({
+			name: "RS7",
+			mode: "twoWay",
+			initialLocal: {
+				"/local/a/b/c.txt": "child",
+				"/local/sibling.txt": "sib"
+			},
+			steps: [
+				runCycle(),
+				runCycle(),
+				localMutate(world => {
+					renameLocal(world, "a", "x")
+					renameLocal(world, "x/b", "x/y")
+					writeLocalAt(world, "sibling.txt", "sib-v2-longer", BASE_TIME + 10 * SECOND)
+				}),
+				runCycle(),
+				runCycle()
+			]
+		})
+
+		expect(result.finalRemote["/x/y/c.txt"]).toMatchObject({ type: "file" })
+		expect(result.finalRemote["/sibling.txt"]).toMatchObject({ type: "file", size: "sib-v2-longer".length })
+		expect(result.finalRemote["/a"]).toBeUndefined()
+		expect(result.finalRemote["/x/b"]).toBeUndefined()
+		expectConverged(result)
+	})
 })

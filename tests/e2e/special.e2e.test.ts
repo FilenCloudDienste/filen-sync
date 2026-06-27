@@ -8,7 +8,7 @@ import { E2E_ENABLED, loginTestSDK, teardownTestSDK } from "./harness/account"
 import { withE2EWorld } from "./harness/world"
 import { settle, expectConverged } from "./harness/drive"
 import { snapshotRemoteReal } from "./harness/assert"
-import { writeLocal, symlinkLocal, existsLocal } from "./harness/mutations"
+import { writeLocal, modifyLocal, symlinkLocal, existsLocal } from "./harness/mutations"
 
 /**
  * Phase 3 e2e — special files against the live backend: symlinks (skipped, BUG-006) and size-edge
@@ -77,7 +77,9 @@ describe.skipIf(!E2E_ENABLED)("E2E — special files", () => {
 			await writeLocal(world, "shrink.txt", "hello world")
 			await settle(world)
 
-			await writeLocal(world, "shrink.txt", "")
+			// modifyLocal stamps a clearly-newer mtime so the change is detected regardless of how fast the
+			// prior settle ran (change detection is mtime-gated at whole-second precision; size is not compared).
+			await modifyLocal(world, "shrink.txt", "")
 			await settle(world)
 
 			expect((await snapshotRemoteReal(world))["/shrink.txt"]).toMatchObject({ type: "file", size: 0 })
@@ -92,7 +94,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — special files", () => {
 
 			expect((await snapshotRemoteReal(world))["/grow.txt"]).toMatchObject({ type: "file", size: 0 })
 
-			await writeLocal(world, "grow.txt", "now it has content")
+			await modifyLocal(world, "grow.txt", "now it has content")
 			await settle(world)
 
 			expect((await snapshotRemoteReal(world))["/grow.txt"]).toMatchObject({ type: "file", size: 18 })

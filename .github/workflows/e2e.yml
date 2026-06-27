@@ -38,4 +38,3 @@ jobs:
               env:
                   FILEN_SYNC_LEGACY_E2E_EMAIL: ${{ secrets.FILEN_SYNC_LEGACY_E2E_EMAIL }}
                   FILEN_SYNC_LEGACY_E2E_PASSWORD: ${{ secrets.FILEN_SYNC_LEGACY_E2E_PASSWORD }}
-                  FILEN_SYNC_LEGACY_E2E_2FA: ${{ secrets.FILEN_SYNC_LEGACY_E2E_2FA }}

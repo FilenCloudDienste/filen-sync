@@ -4,7 +4,7 @@ import { E2E_ENABLED, loginTestSDK, teardownTestSDK } from "./harness/account"
 import { withE2EWorld } from "./harness/world"
 import { cycle, settle, expectConverged, transferKinds } from "./harness/drive"
 import { snapshotRemoteReal } from "./harness/assert"
-import { writeLocal, mkdirLocal, rmLocal, renameLocal } from "./harness/mutations"
+import { writeLocal, mkdirLocal, rmLocal, renameLocal, uploadRemote, existsLocal } from "./harness/mutations"
 
 /**
  * Phase 3 e2e — structural and naming edge cases against the live backend. Heavy on directory
@@ -163,6 +163,41 @@ describe.skipIf(!E2E_ENABLED)("E2E — structural & naming edge cases", () => {
 			for (let i = 0; i < 20; i++) {
 				expect(remote[`/bulk/file-${i}.txt`]).toMatchObject({ type: "file" })
 			}
+
+			await expectConverged(world)
+		})
+	})
+
+	it("moves a file from one directory to another", async () => {
+		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
+			await writeLocal(world, "from/doc.txt", "data")
+			await mkdirLocal(world, "to")
+			await settle(world)
+
+			await renameLocal(world, "from/doc.txt", "to/doc.txt")
+			await settle(world)
+
+			const remote = await snapshotRemoteReal(world)
+
+			expect(remote["/from/doc.txt"]).toBeUndefined()
+			expect(remote["/to/doc.txt"]).toMatchObject({ type: "file", size: 4 })
+
+			await expectConverged(world)
+		})
+	})
+
+	it("merges independent additions from both sides (twoWay, no conflict)", async () => {
+		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
+			await writeLocal(world, "local-add.txt", "local")
+			await uploadRemote(world, "remote-add.txt", "remote")
+			await settle(world)
+
+			const remote = await snapshotRemoteReal(world)
+
+			expect(remote["/local-add.txt"]).toMatchObject({ type: "file" })
+			expect(remote["/remote-add.txt"]).toMatchObject({ type: "file" })
+			expect(await existsLocal(world, "local-add.txt")).toBe(true)
+			expect(await existsLocal(world, "remote-add.txt")).toBe(true)
 
 			await expectConverged(world)
 		})

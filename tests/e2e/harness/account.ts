@@ -9,9 +9,8 @@ import { v4 as uuidv4 } from "uuid"
  *
  * Credentials come from the environment so they never touch the repo:
  *   FILEN_SYNC_LEGACY_E2E_EMAIL, FILEN_SYNC_LEGACY_E2E_PASSWORD
- *                              (a DEDICATED throwaway test account — the suite creates and permanently
- *                               deletes data under it and empties its trash)
- *   FILEN_SYNC_LEGACY_E2E_2FA  (optional TOTP code; normally unset — the test account has no 2FA)
+ *                              (a DEDICATED throwaway test account, no 2FA — the suite creates and
+ *                               permanently deletes data under it and empties its trash)
  *
  * When the creds are absent the whole e2e suite is skipped (see {@link E2E_ENABLED}); it never fails a
  * build that simply has no secrets (local dev, fork PRs).
@@ -39,7 +38,6 @@ export function loginTestSDK(): Promise<FilenSDK> {
 		sdkPromise = (async (): Promise<FilenSDK> => {
 			const email = process.env["FILEN_SYNC_LEGACY_E2E_EMAIL"]
 			const password = process.env["FILEN_SYNC_LEGACY_E2E_PASSWORD"]
-			const twoFactorCode = process.env["FILEN_SYNC_LEGACY_E2E_2FA"]
 
 			if (!email || !password) {
 				throw new Error("e2e credentials are not set (FILEN_SYNC_LEGACY_E2E_EMAIL / FILEN_SYNC_LEGACY_E2E_PASSWORD).")
@@ -53,12 +51,7 @@ export function loginTestSDK(): Promise<FilenSDK> {
 				tmpPath: SDK_TMP_PATH
 			})
 
-			await sdk.login({
-				email,
-				password,
-				// Only include the 2FA code when present (exactOptionalPropertyTypes forbids passing undefined).
-				...(twoFactorCode && twoFactorCode.length > 0 ? { twoFactorCode } : {})
-			})
+			await sdk.login({ email, password })
 
 			return sdk
 		})()

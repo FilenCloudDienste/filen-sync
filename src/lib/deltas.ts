@@ -158,6 +158,63 @@ export function collapseDeltas({
 }
 
 /**
+ * Remaps `path` across a set of propagated directory renames, returning its post-rename path (unchanged if
+ * none applies). The most-specific (longest `from`) ancestor wins, and each rename's `to` already encodes
+ * any outer renames (the rename pass records every directory's FINAL position), so one pass handles
+ * independent AND nested directory renames correctly.
+ */
+export function rebasePathAcrossRenames(path: string, renames: { from: string; to: string }[]): string {
+	let best: { from: string; to: string } | undefined
+
+	for (const rename of renames) {
+		if (path.startsWith(`${rename.from}/`) && (!best || rename.from.length > best.from.length)) {
+			best = rename
+		}
+	}
+
+	return best ? best.to + path.slice(best.from.length) : path
+}
+
+/**
+ * Returns a COPY of `tree` with every DESCENDANT of a renamed directory moved to its post-rename path. The
+ * input is never mutated (entries outside any renamed subtree are shared by reference). The renamed
+ * directory nodes themselves are NOT moved here — they are handled via `pathsAdded` — only their children.
+ * Used to realign the base + the not-yet-renamed side so the per-descendant passes attribute change at the
+ * correct post-rename path (BUG-A / BUG-B).
+ */
+export function rebaseLocalTreeAcrossRenames(tree: LocalTree, renames: { from: string; to: string }[]): LocalTree {
+	const newTree: LocalTree["tree"] = {}
+	const newINodes: LocalTree["inodes"] = {}
+
+	for (const path in tree.tree) {
+		const item = tree.tree[path]!
+		const rebasedPath = rebasePathAcrossRenames(path, renames)
+		const newItem = rebasedPath === path ? item : { ...item, path: rebasedPath }
+
+		newTree[rebasedPath] = newItem
+		newINodes[newItem.inode] = newItem
+	}
+
+	return { tree: newTree, inodes: newINodes, size: tree.size }
+}
+
+export function rebaseRemoteTreeAcrossRenames(tree: RemoteTree, renames: { from: string; to: string }[]): RemoteTree {
+	const newTree: RemoteTree["tree"] = {}
+	const newUUIDs: RemoteTree["uuids"] = {}
+
+	for (const path in tree.tree) {
+		const item = tree.tree[path]!
+		const rebasedPath = rebasePathAcrossRenames(path, renames)
+		const newItem = rebasedPath === path ? item : { ...item, path: rebasedPath }
+
+		newTree[rebasedPath] = newItem
+		newUUIDs[newItem.uuid] = newItem
+	}
+
+	return { tree: newTree, uuids: newUUIDs, size: tree.size }
+}
+
+/**
  * Deltas
  * @date 3/1/2024 - 11:11:32 PM
  *
@@ -408,6 +465,37 @@ export class Deltas {
 			}
 		}
 
+		// Rename-aware rebase (BUG-A / BUG-B): a propagated directory rename relocates its ENTIRE subtree, but
+		// every per-descendant pass below compares the current tree against the base BY PATH. A child changed
+		// on the OTHER side still sits at the pre-rename path, so without realigning it is mis-attributed — the
+		// rename moves it to the new path while a stale same-path upload/download/delete clobbers the change
+		// (silent data loss, BUG-A) or resurrects a deleted child (BUG-B). Model the post-rename state: for
+		// every propagated dir rename F->T, remap the affected subtree to T in the BASE (both sides) and in the
+		// OTHER side's CURRENT tree (the emitted rename physically moves it there; the child transfer runs
+		// AFTER the rename in phase order). The renamed side's current tree already sits at T, and the directory
+		// nodes themselves are handled via pathsAdded, so only descendants are remapped. Skipped entirely when
+		// no directory rename happened, so the common case pays nothing. The originals are not mutated — these
+		// computation-only copies never feed the persisted base (advanced from the task results), they only
+		// correct THIS cycle's delta attribution.
+		if (renamedRemoteDirectories.length > 0 || renamedLocalDirectories.length > 0) {
+			// renameRemoteDirectory deltas come from LOCAL-originated dir renames; renameLocalDirectory deltas
+			// from REMOTE-originated ones.
+			const localOriginatedRenames = renamedRemoteDirectories.flatMap(delta =>
+				delta.type === "renameRemoteDirectory" ? [{ from: delta.from, to: delta.to }] : []
+			)
+			const remoteOriginatedRenames = renamedLocalDirectories.flatMap(delta =>
+				delta.type === "renameLocalDirectory" ? [{ from: delta.from, to: delta.to }] : []
+			)
+			const allDirRenames = [...localOriginatedRenames, ...remoteOriginatedRenames]
+
+			// The base follows BOTH sides' renames; each side's CURRENT tree follows only the OTHER side's
+			// rename (its own rename already moved its current tree to the new path).
+			previousLocalTree = rebaseLocalTreeAcrossRenames(previousLocalTree, allDirRenames)
+			previousRemoteTree = rebaseRemoteTreeAcrossRenames(previousRemoteTree, allDirRenames)
+			currentRemoteTree = rebaseRemoteTreeAcrossRenames(currentRemoteTree, localOriginatedRenames)
+			currentLocalTree = rebaseLocalTreeAcrossRenames(currentLocalTree, remoteOriginatedRenames)
+		}
+
 		// Local deletions
 		if (this.sync.mode === "twoWay" || this.sync.mode === "localToCloud") {
 			if (this.sync.mode === "twoWay") {
@@ -536,12 +624,18 @@ export class Deltas {
 									const cachedHash = this.sync.localFileHashes[currentLocalItem.path]
 
 									if (cachedHash) {
-										const currentHash = await this.sync.localFileSystem.createFileHash({
-											relativePath: path,
-											algorithm: "md5"
-										})
+										try {
+											const currentHash = await this.sync.localFileSystem.createFileHash({
+												relativePath: path,
+												algorithm: "md5"
+											})
 
-										localContentChanged = currentHash !== cachedHash
+											localContentChanged = currentHash !== cachedHash
+										} catch {
+											// The file is mid-rename (a pending dir rename will move it to `path`); we cannot
+											// confirm a same-size content change without reading it, so leave it as "not
+											// modified" — the hash-optional policy already lets such a delete proceed.
+										}
 									}
 								}
 
@@ -795,17 +889,34 @@ export class Deltas {
 					const noBaseSizeDiverged = directionalPush && !previousRemoteItem && currentLocalItem.size !== currentRemoteItem.size
 
 					if ((localChanged || mirrorRevert || noBaseSizeDiverged) && localWins) {
-						const md5Hash = await this.sync.localFileSystem.createFileHash({
-							relativePath: path,
-							algorithm: "md5"
-						})
+						// The md5 is an OPTIONAL dedup. When a pending directory rename will move this file to
+						// `path` (a rebased descendant — BUG-A/BUG-B), the file is not at `path` yet at delta time,
+						// so the read throws; we already KNOW it changed (size/mtime vs base), so emit the upload
+						// and let the upload task hash the moved file. A same-content touch is still deduped when
+						// the hash IS readable.
+						let md5Hash: string | undefined
 
-						if (mirrorRevert || noBaseSizeDiverged || md5Hash !== this.sync.localFileHashes[currentLocalItem.path]) {
+						try {
+							md5Hash = await this.sync.localFileSystem.createFileHash({
+								relativePath: path,
+								algorithm: "md5"
+							})
+						} catch {
+							md5Hash = undefined
+						}
+
+						if (
+							mirrorRevert ||
+							noBaseSizeDiverged ||
+							md5Hash === undefined ||
+							md5Hash !== this.sync.localFileHashes[currentLocalItem.path]
+						) {
 							deltas.push({
 								type: "uploadFile",
 								path,
 								size: currentLocalItem.size,
-								md5Hash
+								// Omit (rather than set undefined) when unreadable, so the upload task computes it.
+								...(md5Hash !== undefined ? { md5Hash } : {})
 							})
 
 							pathsAdded[path] = true

@@ -164,6 +164,30 @@ export async function resolveRemote(
 }
 
 /**
+ * Rename a remote DIRECTORY within its current parent (simulating a peer client's rename), via the SDK
+ * renameDirectory call the engine itself uses.
+ */
+export async function renameRemoteDir(world: E2EWorld, fromRelative: string, toRelative: string): Promise<void> {
+	const item = await resolveRemote(world, fromRelative)
+
+	if (!item || item.type !== "directory") {
+		throw new Error(`renameRemoteDir: no remote directory at ${fromRelative}`)
+	}
+
+	const newName = segments(toRelative).pop()
+
+	if (!newName) {
+		throw new Error(`renameRemoteDir: invalid target ${toRelative}`)
+	}
+
+	await world.sdk.cloud().renameDirectory({
+		uuid: item.uuid,
+		name: newName,
+		overwriteIfExists: true
+	})
+}
+
+/**
  * Rename a remote FILE within its current directory (simulating a peer client's rename), via the SDK
  * renameFile call the engine itself uses. Only same-directory file renames are needed by the conflict
  * suite, so the metadata is rebuilt from the resolved item.

@@ -4,7 +4,18 @@ import { E2E_ENABLED, loginTestSDK, teardownTestSDK } from "./harness/account"
 import { withE2EWorld } from "./harness/world"
 import { cycle, settle, expectConverged, transferKinds } from "./harness/drive"
 import { snapshotRemoteReal, snapshotLocalReal } from "./harness/assert"
-import { writeLocal, mkdirLocal, rmLocal, renameLocal, uploadRemote, existsLocal } from "./harness/mutations"
+import {
+	writeLocal,
+	mkdirLocal,
+	rmLocal,
+	renameLocal,
+	uploadRemote,
+	existsLocal,
+	renameRemoteDir,
+	deleteRemote,
+	modifyLocal,
+	readLocal
+} from "./harness/mutations"
 
 /**
  * Phase 3 e2e — structural and naming edge cases against the live backend. Heavy on directory
@@ -256,6 +267,73 @@ describe.skipIf(!E2E_ENABLED)("E2E — structural & naming edge cases", () => {
 			await expectConverged(world)
 
 			expect(Object.keys(await snapshotLocalReal(world))).toHaveLength(1)
+		})
+	})
+
+	// Cross-side directory rename + concurrent child change (BUG-A / BUG-B): a folder renamed on one side
+	// while a file inside it is edited/deleted on the OTHER side. Before the rename-aware rebase the rename
+	// relocated the subtree while a stale same-path op clobbered the change (data loss) or resurrected a
+	// deletion. Live mirror of the mocked ZB suite.
+	describe("cross-side directory rename + concurrent child change", () => {
+		it("a local dir rename + a remote child edit keeps the remote edit (BUG-A)", async () => {
+			await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
+				await mkdirLocal(world, "dir")
+				await writeLocal(world, "dir/child.txt", "old")
+				await writeLocal(world, "dir/sibling.txt", "sib")
+				await settle(world)
+				await expectConverged(world)
+
+				// One device renames the folder; another edits a file still at the old path, same window.
+				await renameLocal(world, "dir", "dir2")
+				await uploadRemote(world, "dir/child.txt", "REMOTE-EDITED-NEW-CONTENT")
+
+				await settle(world)
+				await expectConverged(world)
+
+				expect(await readLocal(world, "dir2/child.txt")).toBe("REMOTE-EDITED-NEW-CONTENT")
+				const remote = await snapshotRemoteReal(world)
+				expect(remote["/dir2/child.txt"]).toMatchObject({ size: "REMOTE-EDITED-NEW-CONTENT".length })
+				expect(remote["/dir/child.txt"]).toBeUndefined()
+			})
+		})
+
+		it("a remote dir rename + a local child edit keeps the local edit (BUG-A symmetric)", async () => {
+			await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
+				await mkdirLocal(world, "dir")
+				await writeLocal(world, "dir/child.txt", "old")
+				await settle(world)
+				await expectConverged(world)
+
+				await renameRemoteDir(world, "dir", "dir2")
+				await modifyLocal(world, "dir/child.txt", "LOCAL-EDITED-NEW-CONTENT")
+
+				await settle(world)
+				await expectConverged(world)
+
+				const remote = await snapshotRemoteReal(world)
+				expect(remote["/dir2/child.txt"]).toMatchObject({ size: "LOCAL-EDITED-NEW-CONTENT".length })
+			})
+		})
+
+		it("a local dir rename + a remote child delete does not resurrect the child (BUG-B)", async () => {
+			await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
+				await mkdirLocal(world, "dir")
+				await writeLocal(world, "dir/child.txt", "old")
+				await writeLocal(world, "dir/keep.txt", "k")
+				await settle(world)
+				await expectConverged(world)
+
+				await renameLocal(world, "dir", "dir2")
+				await deleteRemote(world, "dir/child.txt")
+
+				await settle(world)
+				await expectConverged(world)
+
+				expect(await existsLocal(world, "dir2/child.txt")).toBe(false)
+				const remote = await snapshotRemoteReal(world)
+				expect(remote["/dir2/child.txt"]).toBeUndefined()
+				expect(remote["/dir2/keep.txt"]).toMatchObject({ size: "k".length })
+			})
 		})
 	})
 })

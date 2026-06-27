@@ -3,7 +3,7 @@ import type FilenSDK from "@filen/sdk"
 import { E2E_ENABLED, loginTestSDK, teardownTestSDK } from "./harness/account"
 import { withE2EWorld } from "./harness/world"
 import { cycle, settle, expectConverged, transferKinds } from "./harness/drive"
-import { snapshotRemoteReal } from "./harness/assert"
+import { snapshotRemoteReal, snapshotLocalReal } from "./harness/assert"
 import { writeLocal, mkdirLocal, rmLocal, renameLocal, uploadRemote, existsLocal } from "./harness/mutations"
 
 /**
@@ -234,6 +234,28 @@ describe.skipIf(!E2E_ENABLED)("E2E — structural & naming edge cases", () => {
 
 			expect(transferKinds(messages)).toEqual([])
 			await expectConverged(world)
+		})
+	})
+
+	it("case-insensitive name collision: only one variant survives and the sync converges (F11)", async () => {
+		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
+			// The backend is case-insensitive per parent, so two names differing only in case collide. The
+			// collision is created on the REMOTE (a case-sensitive local FS isn't guaranteed on the test host)
+			// and synced down — the live counterpart of mocked F11.
+			await uploadRemote(world, "Report.txt", "one")
+			await uploadRemote(world, "report.txt", "two")
+
+			// The backend kept exactly one of the two case variants.
+			const remoteAfterUpload = await snapshotRemoteReal(world)
+			const survivingRemote = ["/Report.txt", "/report.txt"].filter(path => remoteAfterUpload[path] !== undefined)
+
+			expect(survivingRemote).toHaveLength(1)
+
+			// The sync converges without crashing or churning; the local side ends matching the single copy.
+			await settle(world)
+			await expectConverged(world)
+
+			expect(Object.keys(await snapshotLocalReal(world))).toHaveLength(1)
 		})
 	})
 })

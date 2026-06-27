@@ -1,8 +1,7 @@
 import fsExtra from "fs-extra"
+import fs from "fs"
 import FastGlob from "fast-glob"
 import writeFileAtomicReal from "write-file-atomic"
-import parcelWatcher from "@parcel/watcher"
-import process from "process"
 
 /**
  * The subset of the fs-extra promise API that the sync engine awaits directly.
@@ -45,7 +44,7 @@ export type SyncWatcher = {
 
 /**
  * Creates a recursive directory watcher that invokes `onChange` whenever something under `path`
- * changes. The default uses @parcel/watcher; tests inject a controllable no-op.
+ * changes. The default uses the native recursive `fs.watch`; tests inject a controllable no-op.
  */
 export type SyncWatcherFactory = (path: string, onChange: () => void) => Promise<SyncWatcher>
 
@@ -62,7 +61,7 @@ export type SyncEnvironment = {
 }
 
 /**
- * The production environment: real fs-extra, real @parcel/watcher, real write-file-atomic.
+ * The production environment: real fs-extra, native recursive fs.watch, real write-file-atomic.
  */
 export function defaultEnvironment(): SyncEnvironment {
 	return {
@@ -70,28 +69,57 @@ export function defaultEnvironment(): SyncEnvironment {
 		globFs: fsExtra,
 		writeFileAtomic: writeFileAtomicReal,
 		createWatcher: async (path: string, onChange: () => void): Promise<SyncWatcher> => {
-			const backend =
-				process.platform === "win32"
-					? "windows"
-					: process.platform === "darwin"
-					? "fs-events"
-					: process.platform === "linux"
-					? "inotify"
-					: undefined
+			let closed = false
+			let watcher: fs.FSWatcher | undefined
 
-			const subscription = await parcelWatcher.subscribe(
-				path,
-				(err, events) => {
-					if (!err && events && events.length > 0) {
-						onChange()
+			const start = (): void => {
+				watcher = fs.watch(path, { recursive: true, persistent: true }, () => {
+					onChange()
+				})
+
+				// fs.watch can emit a runtime "error" (a transient inotify/FSEvents hiccup, or the watched
+				// directory being replaced). Tear the dead watcher down and re-establish it shortly after
+				// instead of letting the error go unhandled; trigger a scan so nothing is missed in the gap.
+				watcher.on("error", () => {
+					try {
+						watcher?.close()
+					} catch {
+						// already closed
 					}
-				},
-				backend ? { backend } : {}
-			)
+
+					if (closed) {
+						return
+					}
+
+					onChange()
+
+					setTimeout(() => {
+						if (closed) {
+							return
+						}
+
+						try {
+							start()
+						} catch {
+							// startDirectoryWatcher's retry + fallback interval recovers on the next cycle
+						}
+					}, 1000)
+				})
+			}
+
+			// A creation failure (e.g. the path is gone) throws here and rejects the factory, so
+			// startDirectoryWatcher falls back to its polling interval.
+			start()
 
 			return {
 				close: async (): Promise<void> => {
-					await subscription.unsubscribe()
+					closed = true
+
+					try {
+						watcher?.close()
+					} catch {
+						// already closed
+					}
 				}
 			}
 		}

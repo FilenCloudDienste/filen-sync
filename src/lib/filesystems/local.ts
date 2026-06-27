@@ -598,20 +598,33 @@ export class LocalFileSystem {
 
 			const localPath = pathModule.join(this.sync.syncPair.localPath, relativePath)
 
-			if (!permanent && !this.sync.localTrashDisabled) {
-				const localTrashPath = pathModule.join(this.sync.syncPair.localPath, LOCAL_TRASH_NAME)
+			try {
+				if (!permanent && !this.sync.localTrashDisabled) {
+					const localTrashPath = pathModule.join(this.sync.syncPair.localPath, LOCAL_TRASH_NAME)
 
-				await this.sync.environment.fs.ensureDir(localTrashPath)
-				await this.sync.environment.fs.move(localPath, pathModule.join(localTrashPath, pathModule.posix.basename(relativePath)), {
-					overwrite: true
-				})
-			} else {
-				await this.sync.environment.fs.rm(localPath, {
-					force: true,
-					maxRetries: 60 * 10,
-					recursive: true,
-					retryDelay: 100
-				})
+					await this.sync.environment.fs.ensureDir(localTrashPath)
+					await this.sync.environment.fs.move(localPath, pathModule.join(localTrashPath, pathModule.posix.basename(relativePath)), {
+						overwrite: true
+					})
+				} else {
+					await this.sync.environment.fs.rm(localPath, {
+						force: true,
+						maxRetries: 60 * 10,
+						recursive: true,
+						retryDelay: 100
+					})
+				}
+			} catch (e) {
+				// The source vanished between the tree scan and this delete (the same path removed on both sides
+				// in one cycle, or an external removal). The intended end state — the path gone — already holds,
+				// so fall through to evict the cache entry instead of throwing. Leaving it would persist a
+				// PHANTOM entry into the base tree; a later re-creation at that path would then be mis-read as a
+				// local deletion to propagate, deleting the freshly re-created file. Only swallow when the source
+				// is confirmed gone — any other failure (permissions, destination, disk) still throws. This
+				// mirrors the remote unlink, which already cleans its cache entry on file_not_found. (F4)
+				if (await this.pathExists(localPath)) {
+					throw e
+				}
 			}
 
 			await this.itemsMutex.acquire()

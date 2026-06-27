@@ -454,4 +454,44 @@ describe("Category O — per-task-type error paths", () => {
 		expect(result.finalRemote["/a.txt"]).toMatchObject({ type: "file", size: "v1-edited-longer-content".length })
 		expect(result.finalLocal).toEqual(result.finalRemote)
 	})
+
+	// O14 (F4 regression): a deleteLocalFile whose target already vanished must still evict the cache entry,
+	// otherwise that entry is persisted into the base tree as a PHANTOM. A later re-creation of the same path
+	// on the remote would then be read as a local deletion to propagate, and the engine would DELETE the
+	// re-created remote file instead of downloading it. The local unlink evicts the cache only AFTER a
+	// successful move/rm; when the source is already gone the move throws and the eviction is skipped — the
+	// fix makes unlink idempotent (evict when the source is confirmed gone). The remote unlink already does
+	// this via cleanItemEntry; this restores the symmetry on the local side.
+	it("O14: a deleteLocalFile on an already-vanished target evicts the cache, so a re-created remote file is not mis-deleted (F4)", async () => {
+		const result = await runScenario({
+			name: "O14",
+			mode: "twoWay",
+			initialLocal: { "/local/a.txt": "v0" },
+			steps: [
+				runCycle(),
+				// Remote trashes a.txt → next cycle mirrors the delete down to the local side.
+				remoteMutate(world => world.cloud.controls.trashPath("/a.txt")),
+				// The local copy vanishes concurrently WITHOUT a watcher event (a control step does not trigger
+				// the watcher), so the cached local scan still lists a.txt and a deleteLocalFile is generated —
+				// but the file is already gone when the task runs (move → ENOENT).
+				control(world => rmLocal(world, "a.txt")),
+				runCycle(),
+				// Another device re-creates a.txt remotely (new uuid). A phantom base entry for the old local
+				// a.txt would make the engine read this as a local deletion to propagate, deleting the new file.
+				remoteMutate(world => world.cloud.controls.addFile("/a.txt", "v2-recreated", { mtimeMs: BASE_TIME + 9 * SECOND })),
+				control(world => world.triggerWatcher()),
+				runCycle(),
+				runCycle()
+			]
+		})
+
+		expect(taskErrorCount(result.messages)).toBe(0)
+		// The re-created remote file must SURVIVE and be mirrored down — not deleted by a phantom base entry.
+		expect(result.finalRemote["/a.txt"], "re-created remote file must survive").toMatchObject({
+			type: "file",
+			size: "v2-recreated".length
+		})
+		expect(result.finalLocal["/a.txt"]).toMatchObject({ type: "file", size: "v2-recreated".length })
+		expect(result.finalLocal).toEqual(result.finalRemote)
+	})
 })

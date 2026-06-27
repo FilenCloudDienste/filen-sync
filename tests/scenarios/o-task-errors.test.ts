@@ -1,9 +1,12 @@
 import { describe, it, expect } from "vitest"
 import { runScenario, runCycle, localMutate, remoteMutate, control } from "../harness/runner"
 import { messagesOfType } from "../harness/snapshot"
-import { mkdirLocal, rmLocal, renameLocal } from "../harness/mutations"
+import { mkdirLocal, rmLocal, renameLocal, writeLocalAt } from "../harness/mutations"
+import { BASE_TIME } from "../harness/world"
 import { makeErrnoError } from "../fakes/virtual-fs"
 import { type SyncMessage, type TransferData } from "../../src/types"
+
+const SECOND = 1000
 
 /**
  * Category O — per-task-type error paths (resilience / §H). This extends Category H to every task
@@ -409,6 +412,46 @@ describe("Category O — per-task-type error paths", () => {
 		expect(taskErrorCount(result.messages)).toBe(0)
 		expect(result.finalLocal["/e"]).toMatchObject({ type: "directory" })
 		expect(result.finalLocal["/d"]).toBeUndefined()
+		expect(result.finalLocal).toEqual(result.finalRemote)
+	})
+
+	// O13 (F1 regression): an upload that fails AFTER the file was already synced once must not poison the
+	// md5 dedup cache. The modify-branch upload (deltas.ts) writes localFileHashes[path] = newHash and only
+	// THEN calls uploadLocalFile; if the upload throws, the hash must be reverted (or written only on
+	// success). Otherwise, after the host clears the task error (resetTaskErrors — which does NOT clear
+	// localFileHashes), the next cycle recomputes the same newHash, finds it already equal to the poisoned
+	// cache entry, and SUPPRESSES the re-upload → the local edit is silently never pushed and the sides
+	// diverge permanently. This is the modify branch (file present on BOTH sides); a first upload goes
+	// through the additions branch which has no dedup, so only an edit-after-sync exposes it.
+	it("O13: an upload failure on a MODIFIED (already-synced) file does not suppress the retry (F1)", async () => {
+		const result = await runScenario({
+			name: "O13",
+			mode: "twoWay",
+			initialLocal: { "/local/a.txt": "v0-initial" },
+			steps: [
+				runCycle(),
+				// Edit the already-synced file: distinct size + newer whole-second mtime → modify branch, localWins.
+				localMutate(world => writeLocalAt(world, "a.txt", "v1-edited-longer-content", BASE_TIME + 5 * SECOND)),
+				control(world => world.cloud.controls.setError("uploadLocalFile", new Error("upload boom"))),
+				runCycle(),
+				// Host recovery: clear the injected fault and the task error. Crucially does NOT touch localFileHashes.
+				control(world => {
+					world.cloud.controls.clearError("uploadLocalFile")
+					world.worker.resetTaskErrors(world.syncPair.uuid)
+					world.triggerWatcher()
+				}),
+				runCycle(),
+				runCycle()
+			]
+		})
+
+		const failCycle = result.cycles[1]!
+
+		// The first attempt surfaced an upload error and gated the cycle.
+		expect(hasTransfer(failCycle.messages, "upload", "error")).toBe(true)
+		expect(taskErrorCount(failCycle.messages)).toBeGreaterThan(0)
+		// After recovery the edit IS pushed and the sides converge on the new content (not the stale v0).
+		expect(result.finalRemote["/a.txt"]).toMatchObject({ type: "file", size: "v1-edited-longer-content".length })
 		expect(result.finalLocal).toEqual(result.finalRemote)
 	})
 })

@@ -793,8 +793,6 @@ export class LocalFileSystem {
 						algorithm: "md5"
 				  })
 
-			this.sync.localFileHashes[relativePath] = md5Hash
-
 			const item = await this.sync.sdk.cloud().uploadLocalFile({
 				source: localPath,
 				parent: parentUUID,
@@ -847,6 +845,13 @@ export class LocalFileSystem {
 					})
 				}
 			})
+
+			// Record the dedup hash only AFTER the upload durably succeeds. Writing it before the await would
+			// poison the cache on a failed upload: because the task error gates the cycle and leaves the base
+			// unchanged, a later retry (after the host calls resetTaskErrors, which does NOT clear
+			// localFileHashes) would recompute the same hash, find it already cached, and SUPPRESS the
+			// re-upload — silently dropping the local edit and diverging the sides permanently. (F1)
+			this.sync.localFileHashes[relativePath] = md5Hash
 
 			await this.sync.remoteFileSystem.itemsMutex.acquire()
 

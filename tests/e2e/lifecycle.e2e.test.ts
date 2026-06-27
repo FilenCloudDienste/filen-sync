@@ -249,4 +249,42 @@ describe.skipIf(!E2E_ENABLED)("E2E — lifecycle & control surface", () => {
 			expect(await readLocal(world, "r.txt")).toBe("remote-content")
 		})
 	})
+
+	it("an upload failure on an already-synced, then EDITED file does not suppress the retry (F1)", async () => {
+		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
+			const uuid = world.syncPair.uuid
+
+			// First sync the file so it exists on BOTH sides and its md5 is recorded in localFileHashes.
+			await writeLocal(world, "a.txt", "v1-original")
+			await settle(world)
+			await expectConverged(world)
+
+			// Edit it (distinct size) → the modify branch, which consults the md5 dedup cache.
+			await writeLocal(world, "a.txt", "v2-edited-longer-content")
+
+			// Fail the upload of the edit by pre-aborting its transfer (no synthetic injection).
+			const signalKey = "upload:/a.txt"
+			world.sync.abortControllers[signalKey] = new AbortController()
+			world.worker.stopTransfer(uuid, "upload", "/a.txt")
+
+			const abortedMessages = await cycle(world)
+
+			expect(
+				messagesOfType(abortedMessages, "transfer").filter(message => message.data.of === "upload" && message.data.type === "error")
+					.length
+			).toBeGreaterThan(0)
+			// The edit has not landed remotely yet (still the original).
+			expect((await snapshotRemoteReal(world, { withContent: true }))["/a.txt"]).toMatchObject({ size: "v1-original".length })
+
+			// Recover. resetTaskErrors does NOT clear localFileHashes — if the failed upload had poisoned it with
+			// the edit's hash, the modify branch would now find the hash already cached and SUPPRESS the
+			// re-upload, stranding the edit locally forever. With the fix the hash is only written on success.
+			world.worker.resetTaskErrors(uuid)
+			await settle(world)
+			await expectConverged(world)
+
+			expect(await readLocal(world, "a.txt")).toBe("v2-edited-longer-content")
+			expect((await snapshotRemoteReal(world, { withContent: true }))["/a.txt"]).toMatchObject({ size: "v2-edited-longer-content".length })
+		})
+	})
 })

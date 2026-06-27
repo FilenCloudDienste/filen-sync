@@ -117,11 +117,10 @@ describe.skipIf(!E2E_ENABLED)("E2E — structural & naming edge cases", () => {
 		})
 	})
 
-	// KNOWN BUG (E2E-BUG-001): a same-path type change (file -> directory) is not synced. The delta
-	// engine emits createRemoteDirectory for the new dir but never deletes the old remote FILE at that
-	// path, so the backend keeps the file and the sides diverge. Flip to `it(...)` once the engine
-	// deletes the conflicting different-type item before creating the new one.
-	it.fails("replaces a file with a directory of the same name", async () => {
+	// E2E-BUG-001 (FIXED): a same-path type change (file -> directory). The delta engine now attributes
+	// the change against the last-synced base, deletes the stale-type remote item, then creates the new
+	// type — the phase-ordered runner guarantees the delete lands before the create.
+	it("replaces a file with a directory of the same name", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
 			await writeLocal(world, "thing", "i am a file")
 			await settle(world)
@@ -134,6 +133,26 @@ describe.skipIf(!E2E_ENABLED)("E2E — structural & naming edge cases", () => {
 
 			expect(remote["/thing"]).toMatchObject({ type: "directory" })
 			expect(remote["/thing/inside.txt"]).toMatchObject({ type: "file" })
+
+			await expectConverged(world)
+		})
+	})
+
+	it("replaces a directory (with children) with a file of the same name", async () => {
+		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
+			await writeLocal(world, "thing/a.txt", "child a")
+			await writeLocal(world, "thing/b.txt", "child b")
+			await settle(world)
+
+			await rmLocal(world, "thing")
+			await writeLocal(world, "thing", "now a file")
+			await settle(world)
+
+			const remote = await snapshotRemoteReal(world)
+
+			expect(remote["/thing"]).toMatchObject({ type: "file" })
+			expect(remote["/thing/a.txt"]).toBeUndefined()
+			expect(remote["/thing/b.txt"]).toBeUndefined()
 
 			await expectConverged(world)
 		})

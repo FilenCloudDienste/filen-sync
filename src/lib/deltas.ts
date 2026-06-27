@@ -491,6 +491,120 @@ export class Deltas {
 			}
 		}
 
+		// Type change at a path (file <-> directory). The path exists in BOTH current trees but as
+		// different types, so it slips through every other pass: the rename passes need a matching
+		// inode/uuid (a type change has neither), the deletion passes need the path ABSENT on the other
+		// side (here it is present, only a different type), and the addition passes skip a path whose
+		// other-side item already exists. Left unhandled, the stale-type item lingers and its replacement
+		// cannot be created over it (E2E-BUG-001).
+		//
+		// We attribute the change against the last-synced base: whichever side's type differs from the
+		// base is the one that changed. In twoWay, if both changed (or neither is in the base) local wins,
+		// matching the tie policy used elsewhere; directional modes force the authoritative side. The
+		// authoritative side's new item is created and the other side's stale item is deleted — the
+		// phase-ordered task runner always runs deletes before creates, so the delete lands first. When
+		// the deleted (stale) side is a directory, its descendants are marked "added" so the addition
+		// passes don't try to sync now-obsolete children; the recursive delete removes them (and any
+		// child-delete deltas already emitted collapse into the parent). The surviving side's descendants
+		// stay unmarked and sync normally.
+		{
+			const canWriteRemote =
+				this.sync.mode === "twoWay" || this.sync.mode === "localBackup" || this.sync.mode === "localToCloud"
+			const canWriteLocal =
+				this.sync.mode === "twoWay" || this.sync.mode === "cloudBackup" || this.sync.mode === "cloudToLocal"
+			const markSubtreeAdded = (treePaths: Record<string, unknown>, parentPath: string): void => {
+				const prefix = `${parentPath}/`
+
+				for (const descendantPath in treePaths) {
+					if (descendantPath.startsWith(prefix)) {
+						pathsAdded[descendantPath] = true
+					}
+				}
+			}
+
+			for (const path in currentLocalTree.tree) {
+				if (pathsAdded[path] || erroredLocalPaths[path] || ignoredLocalPaths[path]) {
+					continue
+				}
+
+				const currentLocalItem = currentLocalTree.tree[path]
+				const currentRemoteItem = currentRemoteTree.tree[path]
+
+				if (!currentLocalItem || !currentRemoteItem || currentLocalItem.type === currentRemoteItem.type) {
+					continue
+				}
+
+				// Both sides have this path, with different types. Attribute the change against the base.
+				const previousLocalItem = previousLocalTree.tree[path]
+				const previousRemoteItem = previousRemoteTree.tree[path]
+				const localChangedType = !previousLocalItem || previousLocalItem.type !== currentLocalItem.type
+				const remoteChangedType = !previousRemoteItem || previousRemoteItem.type !== currentRemoteItem.type
+
+				let localWins: boolean
+
+				if (this.sync.mode === "localBackup" || this.sync.mode === "localToCloud") {
+					localWins = true
+				} else if (this.sync.mode === "cloudBackup" || this.sync.mode === "cloudToLocal") {
+					localWins = false
+				} else {
+					// twoWay: whoever's type diverged from base wins; local wins a tie / a both-changed conflict.
+					localWins = localChangedType || !remoteChangedType
+				}
+
+				if (localWins && canWriteRemote) {
+					const deleteDelta: Delta = {
+						type: currentRemoteItem.type === "directory" ? "deleteRemoteDirectory" : "deleteRemoteFile",
+						path
+					}
+
+					deltas.push(deleteDelta)
+
+					if (currentRemoteItem.type === "directory") {
+						deletedRemoteDirectories.push(deleteDelta)
+
+						deleteRemoteDirectoryCountRaw += 1
+
+						markSubtreeAdded(currentRemoteTree.tree, path)
+					} else {
+						deleteRemoteFileCountRaw += 1
+					}
+
+					deltas.push(
+						currentLocalItem.type === "directory"
+							? { type: "createRemoteDirectory", path }
+							: { type: "uploadFile", path, size: currentLocalItem.size }
+					)
+
+					pathsAdded[path] = true
+				} else if (!localWins && canWriteLocal) {
+					const deleteDelta: Delta = {
+						type: currentLocalItem.type === "directory" ? "deleteLocalDirectory" : "deleteLocalFile",
+						path
+					}
+
+					deltas.push(deleteDelta)
+
+					if (currentLocalItem.type === "directory") {
+						deletedLocalDirectories.push(deleteDelta)
+
+						deleteLocalDirectoryCountRaw += 1
+
+						markSubtreeAdded(currentLocalTree.tree, path)
+					} else {
+						deleteLocalFileCountRaw += 1
+					}
+
+					deltas.push(
+						currentRemoteItem.type === "directory"
+							? { type: "createLocalDirectory", path }
+							: { type: "downloadFile", path, size: currentRemoteItem.size }
+					)
+
+					pathsAdded[path] = true
+				}
+			}
+		}
+
 		// Local additions/fileModifications
 		if (this.sync.mode === "twoWay" || this.sync.mode === "localBackup" || this.sync.mode === "localToCloud") {
 			for (const path in currentLocalTree.tree) {

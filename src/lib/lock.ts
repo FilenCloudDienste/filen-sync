@@ -127,14 +127,22 @@ export class Lock {
 				return
 			}
 
-			clearInterval(this.lockRefreshInterval)
-
 			try {
 				await this.sync.sdk.user().releaseResourceLock({
 					resource: this.resource,
 					lockUUID: this.lockUUID
 				})
 
+				// Tear down the refresh timer and drop the UUID ONLY after the release durably succeeds.
+				// Clearing the interval before the await (and never restoring it on failure) used to
+				// permanently kill lock refreshing: a transient release error restored acquiredCount to >= 1
+				// but left the timer gone, so every later acquire() short-circuited (count > 1) without
+				// re-installing it — the server-side lock then silently lapsed while the engine still believed
+				// it held it, letting another device acquire it concurrently. Keeping the timer alive on
+				// failure preserves the still-held lock (it keeps refreshing) until a later release succeeds. (F2)
+				clearInterval(this.lockRefreshInterval)
+
+				this.lockRefreshInterval = undefined
 				this.lockUUID = null
 			} catch (error) {
 				this.acquiredCount = previousCount

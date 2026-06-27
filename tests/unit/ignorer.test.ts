@@ -16,13 +16,15 @@ function dbIgnorePath(dbPath: string, uuid: string): string {
 describe("Ignorer — management surface", () => {
 	it("clearFile empties both the dbPath copy and the physical .filenignore when both exist", async () => {
 		const world = await createWorld({ mode: "twoWay", filenIgnore: "secret.txt" })
-		const physicalPath = pathModule.join(world.syncPair.localPath, ".filenignore")
+		// posix joins: these paths are read back through the RAW memfs `ifs` (which is posix-only), so on a
+		// Windows runner a platform `pathModule.join` would normalize to backslashes and miss the key.
+		const physicalPath = pathModule.posix.join(world.syncPair.localPath, ".filenignore")
 		const dbPath = dbIgnorePath(world.sync.dbPath, world.syncPair.uuid)
 
 		// The physical `.filenignore` is written by the `filenIgnore` option. The dbPath copy is the
 		// engine's merged-on-disk mirror, seeded out-of-band in the harness (as Category F does); seed it
 		// so clearFile sees BOTH files present and exercises both blank-out branches.
-		world.vfs.ifs.mkdirSync(pathModule.dirname(dbPath), { recursive: true })
+		world.vfs.ifs.mkdirSync(pathModule.posix.dirname(dbPath), { recursive: true })
 		world.vfs.ifs.writeFileSync(dbPath, "db-secret.txt")
 
 		expect(world.vfs.ifs.readFileSync(physicalPath, "utf-8")).toBe("secret.txt")

@@ -4,7 +4,7 @@ import { E2E_ENABLED, loginTestSDK, teardownTestSDK } from "./harness/account"
 import { withE2EWorld } from "./harness/world"
 import { settle } from "./harness/drive"
 import { snapshotRemoteReal } from "./harness/assert"
-import { writeLocal } from "./harness/mutations"
+import { writeLocal, modifyLocal, existsLocal } from "./harness/mutations"
 
 /**
  * Phase 3 e2e — .filenignore + dotfile filtering against the live backend. Ignored paths must never
@@ -84,6 +84,40 @@ describe.skipIf(!E2E_ENABLED)("E2E — ignore filtering", () => {
 
 			expect(remote["/shown.txt"]).toMatchObject({ type: "file" })
 			expect(remote["/.hidden"]).toBeUndefined()
+		})
+	})
+
+	it("default OS-junk names (.DS_Store, Thumbs.db) are never uploaded; real files sync", async () => {
+		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
+			await writeLocal(world, ".DS_Store", "junk")
+			await writeLocal(world, "Thumbs.db", "junk")
+			await writeLocal(world, "real.txt", "real")
+			await settle(world)
+
+			const remote = await snapshotRemoteReal(world)
+
+			expect(remote["/.DS_Store"]).toBeUndefined()
+			expect(remote["/Thumbs.db"]).toBeUndefined()
+			expect(remote["/real.txt"]).toMatchObject({ type: "file" })
+		})
+	})
+
+	it("a file synced and THEN newly ignored is not deleted from the remote (ignore ≠ delete)", async () => {
+		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
+			await writeLocal(world, "keep-me.txt", "content")
+			await settle(world)
+
+			// It synced up.
+			expect((await snapshotRemoteReal(world))["/keep-me.txt"]).toMatchObject({ type: "file" })
+
+			// Now ignore the already-synced file and edit it; ignoring must not imply a remote deletion.
+			await world.worker.updateIgnorerContent(world.syncPair.uuid, "keep-me.txt")
+			await modifyLocal(world, "keep-me.txt", "content-edited-after-ignore")
+			await settle(world)
+
+			// The remote copy survives and the local file is untouched — ignore is not deletion.
+			expect((await snapshotRemoteReal(world))["/keep-me.txt"]).toMatchObject({ type: "file" })
+			expect(await existsLocal(world, "keep-me.txt")).toBe(true)
 		})
 	})
 })

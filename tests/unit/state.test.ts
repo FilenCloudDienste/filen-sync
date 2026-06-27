@@ -5,7 +5,7 @@ import { State } from "../../src/lib/state"
 import { type LocalItem, type LocalTree } from "../../src/lib/filesystems/local"
 import { type RemoteItem, type RemoteTree } from "../../src/lib/filesystems/remote"
 import { type DoneTask } from "../../src/lib/tasks"
-import { createVirtualFS, type VirtualFS } from "../fakes/virtual-fs"
+import { createVirtualFS, toPosixPath, type VirtualFS } from "../fakes/virtual-fs"
 import type Sync from "../../src/lib/sync"
 
 /**
@@ -110,15 +110,21 @@ function makeStats(values: { mtimeMs: number; birthtimeMs: number; size: number;
 	return values as unknown as Stats
 }
 
+// `filePath` is built with the engine's platform `pathModule.join`, so on a Windows runner it carries
+// backslashes / a drive letter. The engine persists through the wrapped fs (which posix-normalizes at
+// the memfs boundary), so raw `ifs` access here must normalize too or it would miss the stored key.
+
 /** Plant a raw file (creating parents) so loader/reader branches can be driven over exact bytes. */
 function writeRaw(vfs: VirtualFS, filePath: string, content: string): void {
-	vfs.ifs.mkdirSync(pathModule.dirname(filePath), { recursive: true })
-	vfs.ifs.writeFileSync(filePath, content)
+	const posixPath = toPosixPath(filePath)
+
+	vfs.ifs.mkdirSync(pathModule.posix.dirname(posixPath), { recursive: true })
+	vfs.ifs.writeFileSync(posixPath, content)
 }
 
 /** Read a written file back as text (the engine always writes utf-8). */
 function readRaw(vfs: VirtualFS, filePath: string): string {
-	return vfs.ifs.readFileSync(filePath, "utf-8") as string
+	return vfs.ifs.readFileSync(toPosixPath(filePath), "utf-8") as string
 }
 
 /** Split a written line-delimited file into its non-empty JSON lines. */

@@ -52,6 +52,22 @@ export function makeErrnoError(code: string, message?: string): NodeJS.ErrnoExce
 }
 
 /**
+ * Normalize a path the ENGINE produced into the posix form memfs understands.
+ *
+ * memfs is strictly posix (it rejects backslashes), and the virtual tree is seeded with `/`-paths. But
+ * the engine joins local paths with the host's real `path` module, so on a Windows runner it emits
+ * backslash separators — and FastGlob/@nodelib may resolve the posix `cwd` to a drive-rooted absolute
+ * like `C:\local\...`. Stripping a leading drive letter and converting `\`→`/` lets the in-memory fs
+ * accept whatever the host's path module emits, so the identical suite runs on win32/darwin/linux.
+ *
+ * On posix hosts this is a no-op (no drive letter, no backslashes). Only paths the engine passes in are
+ * normalized here; test-side `ifs`/`vol` access stays posix (tests always use `/`).
+ */
+export function toPosixPath<T>(path: T): T {
+	return (typeof path === "string" ? path.replace(/^[a-zA-Z]:(?=[\\/])/, "").replace(/\\/g, "/") : path) as T
+}
+
+/**
  * Materialize a {@link VfsSpec} into a memfs filesystem.
  */
 export function applyVfsSpec(ifs: IFs, spec: VfsSpec): void {
@@ -64,7 +80,7 @@ export function applyVfsSpec(ifs: IFs, spec: VfsSpec): void {
 
 		const content = typeof value === "string" ? value : value.content ?? ""
 
-		ifs.mkdirSync(pathModule.dirname(path), { recursive: true })
+		ifs.mkdirSync(pathModule.posix.dirname(path), { recursive: true })
 		ifs.writeFileSync(path, content)
 
 		const mtimeMs = typeof value === "string" ? undefined : value.mtimeMs
@@ -91,6 +107,8 @@ export function createVirtualFS(initial: VfsSpec = {}): VirtualFS {
 	applyVfsSpec(ifs, initial)
 
 	const errors = new Map<string, NodeJS.ErrnoException>()
+	// `guard` is always called with an already-posix-normalized path (each method normalizes its inputs
+	// at entry), so the error map — keyed by the posix paths tests inject — matches on every host.
 	const guard = (path: string): void => {
 		const error = errors.get(path)
 
@@ -104,22 +122,26 @@ export function createVirtualFS(initial: VfsSpec = {}): VirtualFS {
 	const fs = {
 		constants: ifs.constants,
 		stat: async (path: string) => {
+			path = toPosixPath(path)
 			guard(path)
 
 			return await promises.stat(path)
 		},
 		lstat: async (path: string) => {
+			path = toPosixPath(path)
 			guard(path)
 
 			return await promises.lstat(path)
 		},
 		access: async (path: string, mode?: number) => {
+			path = toPosixPath(path)
 			guard(path)
 
 			return await promises.access(path, mode)
 		},
 		exists: async (path: string): Promise<boolean> => {
 			try {
+				path = toPosixPath(path)
 				guard(path)
 
 				await promises.access(path)
@@ -131,6 +153,7 @@ export function createVirtualFS(initial: VfsSpec = {}): VirtualFS {
 		},
 		pathExists: async (path: string): Promise<boolean> => {
 			try {
+				path = toPosixPath(path)
 				guard(path)
 
 				await promises.access(path)
@@ -141,11 +164,13 @@ export function createVirtualFS(initial: VfsSpec = {}): VirtualFS {
 			}
 		},
 		ensureDir: async (path: string): Promise<void> => {
+			path = toPosixPath(path)
 			guard(path)
 
 			await promises.mkdir(path, { recursive: true })
 		},
 		mkdir: async (path: string, options?: { recursive?: boolean }) => {
+			path = toPosixPath(path)
 			guard(path)
 
 			return await promises.mkdir(path, options)
@@ -154,19 +179,24 @@ export function createVirtualFS(initial: VfsSpec = {}): VirtualFS {
 			path: string,
 			options?: { force?: boolean; maxRetries?: number; recursive?: boolean; retryDelay?: number }
 		): Promise<void> => {
+			path = toPosixPath(path)
 			guard(path)
 
 			await promises.rm(path, options)
 		},
 		rename: async (src: string, dest: string): Promise<void> => {
+			src = toPosixPath(src)
+			dest = toPosixPath(dest)
 			guard(src)
 
 			await promises.rename(src, dest)
 		},
 		move: async (src: string, dest: string, options?: { overwrite?: boolean }): Promise<void> => {
+			src = toPosixPath(src)
+			dest = toPosixPath(dest)
 			guard(src)
 
-			await promises.mkdir(pathModule.dirname(dest), { recursive: true })
+			await promises.mkdir(pathModule.posix.dirname(dest), { recursive: true })
 
 			if (options?.overwrite) {
 				try {
@@ -179,30 +209,48 @@ export function createVirtualFS(initial: VfsSpec = {}): VirtualFS {
 			await promises.rename(src, dest)
 		},
 		utimes: async (path: string, atime: number | Date, mtime: number | Date): Promise<void> => {
+			path = toPosixPath(path)
 			guard(path)
 
 			await promises.utimes(path, atime, mtime)
 		},
 		readFile: async (path: string, options?: { encoding?: BufferEncoding }) => {
+			path = toPosixPath(path)
 			guard(path)
 
 			return await promises.readFile(path, options)
 		},
 		writeFile: async (path: string, data: string | Uint8Array, options?: { encoding?: BufferEncoding }): Promise<void> => {
+			path = toPosixPath(path)
 			guard(path)
 
 			await promises.writeFile(path, data, options)
 		},
 		createReadStream: (path: string, options?: Parameters<IFs["createReadStream"]>[1]) => {
+			path = toPosixPath(path)
 			guard(path)
 
 			return ifs.createReadStream(path, options)
 		},
 		createWriteStream: (path: string, options?: Parameters<IFs["createWriteStream"]>[1]) => {
+			path = toPosixPath(path)
 			guard(path)
 
 			return ifs.createWriteStream(path, options)
 		}
+	}
+
+	// FastGlob walks the tree through this adapter (lstat/stat/readdir + sync variants). On a Windows
+	// runner @nodelib builds child paths with the host separator and may resolve the posix `cwd` to a
+	// drive-rooted absolute, so every path it hands us is posix-normalized before reaching memfs. The
+	// returned glob entries are already forward-slash (fast-glob normalizes its output on all platforms).
+	const globFs = {
+		lstat: (path: string, ...rest: unknown[]) => (ifs.lstat as (...args: unknown[]) => unknown)(toPosixPath(path), ...rest),
+		lstatSync: (path: string, ...rest: unknown[]) => (ifs.lstatSync as (...args: unknown[]) => unknown)(toPosixPath(path), ...rest),
+		stat: (path: string, ...rest: unknown[]) => (ifs.stat as (...args: unknown[]) => unknown)(toPosixPath(path), ...rest),
+		statSync: (path: string, ...rest: unknown[]) => (ifs.statSync as (...args: unknown[]) => unknown)(toPosixPath(path), ...rest),
+		readdir: (path: string, ...rest: unknown[]) => (ifs.readdir as (...args: unknown[]) => unknown)(toPosixPath(path), ...rest),
+		readdirSync: (path: string, ...rest: unknown[]) => (ifs.readdirSync as (...args: unknown[]) => unknown)(toPosixPath(path), ...rest)
 	}
 
 	const controls: VirtualFS["controls"] = {
@@ -236,7 +284,7 @@ export function createVirtualFS(initial: VfsSpec = {}): VirtualFS {
 
 	return {
 		fs: fs as unknown as SyncFS,
-		globFs: ifs as unknown as SyncGlobFS,
+		globFs: globFs as unknown as SyncGlobFS,
 		vol,
 		ifs,
 		controls

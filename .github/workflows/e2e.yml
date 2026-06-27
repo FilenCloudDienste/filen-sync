@@ -36,5 +36,9 @@ jobs:
             - name: E2E tests
               run: npm run test:e2e
               env:
+                  # Preferred: a base64(JSON) authenticated SDK config — the harness reuses the session
+                  # instead of logging in, so parallel matrix runs don't trip the account's login rate
+                  # limit. Email/password remain as a fallback when the config secret isn't set.
+                  FILEN_SYNC_LEGACY_E2E_SDK_CONFIG: ${{ secrets.FILEN_SYNC_LEGACY_E2E_SDK_CONFIG }}
                   FILEN_SYNC_LEGACY_E2E_EMAIL: ${{ secrets.FILEN_SYNC_LEGACY_E2E_EMAIL }}
                   FILEN_SYNC_LEGACY_E2E_PASSWORD: ${{ secrets.FILEN_SYNC_LEGACY_E2E_PASSWORD }}

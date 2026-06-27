@@ -9,8 +9,24 @@ on:
 
 jobs:
     test:
-        name: Build and test
-        runs-on: ubuntu-latest
+        name: Build and test (${{ matrix.os }})
+        runs-on: ${{ matrix.os }}
+        # The deterministic suite runs on all three platforms: the engine ships cross-platform and the
+        # path rules it enforces (separators, illegal chars, reserved device names, per-OS length limits)
+        # genuinely differ by OS, so they deserve to run on the real OS. The in-memory harness is
+        # posix-normalized at its memfs boundary, so the identical suite runs everywhere.
+        # The coverage gate is enforced once, on ubuntu (the canonical run); macOS/Windows run the full
+        # suite without the gate to avoid per-OS coverage drift against the tight branch-coverage margin.
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - os: ubuntu-latest
+                      test: npm run test:coverage
+                    - os: macos-latest
+                      test: npm test
+                    - os: windows-latest
+                      test: npm test
         steps:
             - name: Checkout
               uses: actions/checkout@v4
@@ -30,5 +46,5 @@ jobs:
             - name: Type check (tests)
               run: npm run typecheck
 
-            - name: Test (with coverage gate)
-              run: npm run test:coverage
+            - name: Test
+              run: ${{ matrix.test }}

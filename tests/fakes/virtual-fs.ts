@@ -27,6 +27,15 @@ export type VirtualFS = {
 	controls: {
 		/** Current inode of a path, or null if it does not exist. */
 		getInode(path: string): number | null
+		/**
+		 * Force `stat`/`lstat` of `path` to report inode `ino`, simulating an OS (ext4) that recycles a
+		 * freed inode number for the next-created file. memfs has no native reuse, so this is the only way
+		 * to reproduce the inode-reuse rename misdetection deterministically. Use the real posix path the
+		 * engine will stat (e.g. "/local/c.txt").
+		 */
+		setInode(path: string, ino: number): void
+		/** Remove a previously forced inode for `path`. */
+		clearInode(path: string): void
 		/** Whether a path currently exists (no symlink following beyond stat). */
 		exists(path: string): boolean
 		/** Force the next fs operation that touches `path` to throw `error`. */
@@ -107,6 +116,9 @@ export function createVirtualFS(initial: VfsSpec = {}): VirtualFS {
 	applyVfsSpec(ifs, initial)
 
 	const errors = new Map<string, NodeJS.ErrnoException>()
+	// Forced inode numbers (posix path -> ino) so a test can reproduce ext4-style inode reuse, which
+	// memfs's allocator does not surface naturally.
+	const inodeOverrides = new Map<string, number>()
 	// `guard` is always called with an already-posix-normalized path (each method normalizes its inputs
 	// at entry), so the error map — keyed by the posix paths tests inject — matches on every host.
 	const guard = (path: string): void => {
@@ -125,13 +137,27 @@ export function createVirtualFS(initial: VfsSpec = {}): VirtualFS {
 			path = toPosixPath(path)
 			guard(path)
 
-			return await promises.stat(path)
+			const stats = await promises.stat(path)
+			const overriddenInode = inodeOverrides.get(path)
+
+			if (overriddenInode !== undefined) {
+				stats.ino = overriddenInode
+			}
+
+			return stats
 		},
 		lstat: async (path: string) => {
 			path = toPosixPath(path)
 			guard(path)
 
-			return await promises.lstat(path)
+			const stats = await promises.lstat(path)
+			const overriddenInode = inodeOverrides.get(path)
+
+			if (overriddenInode !== undefined) {
+				stats.ino = overriddenInode
+			}
+
+			return stats
 		},
 		access: async (path: string, mode?: number) => {
 			path = toPosixPath(path)
@@ -269,6 +295,12 @@ export function createVirtualFS(initial: VfsSpec = {}): VirtualFS {
 			} catch {
 				return false
 			}
+		},
+		setInode: (path: string, ino: number): void => {
+			inodeOverrides.set(path, ino)
+		},
+		clearInode: (path: string): void => {
+			inodeOverrides.delete(path)
 		},
 		setError: (path: string, error: NodeJS.ErrnoException): void => {
 			errors.set(path, error)

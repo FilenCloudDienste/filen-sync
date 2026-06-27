@@ -348,6 +348,17 @@ export class Deltas {
 				if (
 					currentItem.path !== previousItem.path &&
 					currentItem.type === previousItem.type &&
+					// A matching inode is NOT sufficient proof of a rename. The OS recycles inode numbers, and
+					// ext4 hands a freed inode straight to the next file created — so "delete a.txt + create
+					// c.txt" can land c.txt on a.txt's old inode and be misread as "rename a.txt -> c.txt".
+					// That phantom rename propagates as a REMOTE rename and DELETES the original: silent data
+					// loss in modes that keep deletions (localBackup), and invisible in twoWay only because the
+					// stale path was going to be deleted anyway. A genuine rename preserves the file's
+					// creation/birthtime (even a rename+modify only touches mtime/size); a reused inode belongs
+					// to a freshly-created file with a newer birthtime. Require both to match. A filesystem that
+					// cannot report birthtime reads 0 on both sides — still equal — so this degrades safely to
+					// the old inode-only behavior rather than dropping genuine renames. (F8 — inode reuse)
+					currentItem.creation === previousItem.creation &&
 					// Does an item with the same path and type already exist in the current remote tree (probably moved by something else prior)?
 					!(currentRemoteTree.tree[currentItem.path] && currentRemoteTree.tree[currentItem.path]!.type === currentItem.type) &&
 					// Because only comparing strings can be weird sometimes

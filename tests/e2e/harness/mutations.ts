@@ -204,6 +204,11 @@ export async function setLocalMtime(world: E2EWorld, relativePath: string, epoch
 	await fs.utimes(abs(world, relativePath), when, when)
 }
 
+/** Change a local file's permission bits (e.g. 0o000 to make it unreadable for a fault-tolerance test). */
+export async function chmodLocal(world: E2EWorld, relativePath: string, mode: number): Promise<void> {
+	await fs.chmod(abs(world, relativePath), mode)
+}
+
 /** Permanently delete (no trash) the remote item at `relativePath`. */
 export async function deleteRemote(world: E2EWorld, relativePath: string): Promise<void> {
 	const item = await resolveRemote(world, relativePath)

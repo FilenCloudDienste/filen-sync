@@ -6,7 +6,7 @@ import { E2E_ENABLED, loginTestSDK, teardownTestSDK } from "./harness/account"
 import { withE2EWorld, restartE2EWorld } from "./harness/world"
 import { cycle, settle, expectConverged, transferOps, messagesOfType } from "./harness/drive"
 import { snapshotRemoteReal } from "./harness/assert"
-import { writeLocal, rmLocal, renameLocal, existsLocal } from "./harness/mutations"
+import { writeLocal, rmLocal, renameLocal, existsLocal, uploadRemote } from "./harness/mutations"
 import { DEVICE_ID_VERSION } from "../../src/lib/filesystems/remote"
 
 /**
@@ -175,6 +175,55 @@ describe.skipIf(!E2E_ENABLED)("E2E — state persistence across restarts", () =>
 
 			assertLines(localTreeRaw)
 			assertLines(remoteTreeRaw)
+		})
+	})
+
+	// ---- crash / stop mid-run: the persisted base is BEHIND reality on restart ----------------------
+	// The state save runs only after a fully clean cycle, so a kill (or a user stop) mid-run leaves the
+	// on-disk base at the last clean cycle while the fs/remote already moved on. A fresh engine must
+	// re-derive the outstanding work from that stale base and converge — no loss, no resurrection. These
+	// are the live counterparts of mocked Category ZC (which additionally injects a partial-cycle fault).
+
+	it("un-synced changes on BOTH sides survive a restart and converge (crash before the first sync)", async () => {
+		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
+			await writeLocal(world, "base.txt", "base")
+			await settle(world)
+
+			// Both sides change, then the process dies before any cycle syncs them: the persisted base
+			// still only knows base.txt.
+			await writeLocal(world, "local-only.txt", "L")
+			await uploadRemote(world, "remote-only.txt", "R")
+
+			await restartE2EWorld(world)
+			await settle(world)
+
+			const remote = await snapshotRemoteReal(world)
+
+			expect(remote["/local-only.txt"]).toMatchObject({ type: "file" })
+			expect(remote["/remote-only.txt"]).toMatchObject({ type: "file" })
+			expect(await existsLocal(world, "local-only.txt")).toBe(true)
+			expect(await existsLocal(world, "remote-only.txt")).toBe(true)
+			await expectConverged(world)
+		})
+	})
+
+	it("an un-synced local rename survives a restart and applies (no resurrection of the old path)", async () => {
+		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
+			await writeLocal(world, "dir/file.txt", "x")
+			await settle(world)
+
+			// Rename locally, then die before the rename is ever synced — the base still has the old path.
+			await renameLocal(world, "dir", "dir2")
+
+			await restartE2EWorld(world)
+			await settle(world)
+
+			const remote = await snapshotRemoteReal(world)
+
+			expect(remote["/dir2/file.txt"]).toMatchObject({ type: "file" })
+			expect(remote["/dir/file.txt"]).toBeUndefined()
+			expect(remote["/dir"]).toBeUndefined()
+			await expectConverged(world)
 		})
 	})
 })

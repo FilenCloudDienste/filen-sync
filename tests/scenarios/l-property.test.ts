@@ -10,9 +10,10 @@ import { writeLocalAt, rmLocal } from "../harness/mutations"
  * convergence (the worlds end identical), idempotence (a fully settled cycle does no work), and — via
  * convergence over content hashes — no silent data loss.
  *
- * "Well-behaved" deliberately excludes the codified limitations so a failure means a REAL bug, not a
- * known gap: every write gets a strictly-increasing whole-second mtime (so latest-mtime-wins is
- * unambiguous — avoids the §C6 equal-second tie), each path is touched at most once per round (so
+ * "Well-behaved" deliberately keeps every history unambiguous so a failure means a REAL bug, not a
+ * known gap: every write gets a strictly-increasing whole-second mtime (so latest-mtime-wins never
+ * hits the equal-second tie — which now resolves to local-wins, §C6 — nor the same-second same-size
+ * content swap that has no detectable signal, §C11), each path is touched at most once per round (so
  * there is no same-path delete-vs-modify ambiguity within a single cycle), content is never empty
  * (BUG-002), and names are case-distinct (no §F11 collisions). Renames-under-concurrency are covered
  * structurally by Category E and the BUG-004 note, so they are not generated here. Each case is

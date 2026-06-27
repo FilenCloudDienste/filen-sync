@@ -5,9 +5,13 @@ import { transferKinds, transferOps } from "../harness/snapshot"
 import { writeLocal, writeLocalAt } from "../harness/mutations"
 
 /**
- * Category C — modifications (behavioral spec §C, §4). Conflict policy is latest-mtime-wins compared
- * at whole-second precision; uploads are additionally gated on the md5 differing from the stored
- * hash, and downloads on the remote uuid having actually changed.
+ * Category C — modifications (behavioral spec §C, §4). Change is attributed against the last-synced
+ * base (previousLocalTree): a local file changed iff its size OR whole-second mtime differs from the
+ * base; a remote file changed iff its uuid changed. Conflicts resolve latest-mtime-wins at whole-
+ * second precision, with an unorderable equal-second tie going to local (C6). Uploads are additionally
+ * deduped by the md5 differing from the stored hash (optional — older files have none), and downloads
+ * gated on the remote uuid having actually changed. The one irreducible gap (C11): a same-second AND
+ * same-size content swap on a file with no stored hash.
  */
 const SECOND = 1000
 

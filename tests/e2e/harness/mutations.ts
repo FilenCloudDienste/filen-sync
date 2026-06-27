@@ -34,6 +34,19 @@ export async function modifyLocal(world: E2EWorld, relativePath: string, content
 	await fs.utimes(full, newer, newer)
 }
 
+/**
+ * Overwrite a file with new content while RESTORING its previous mtime, reproducing an edit that
+ * lands in the same whole-second as the last sync (the exact E2E-OBS-002 condition). The whole-second
+ * mtime is unchanged, so only base-relative SIZE comparison can detect the edit.
+ */
+export async function writeLocalPreservingMtime(world: E2EWorld, relativePath: string, content: string): Promise<void> {
+	const full = abs(world, relativePath)
+	const { atime, mtime } = await fs.stat(full)
+
+	await fs.writeFile(full, content)
+	await fs.utimes(full, atime, mtime)
+}
+
 export async function readLocal(world: E2EWorld, relativePath: string): Promise<string> {
 	return await fs.readFile(abs(world, relativePath), { encoding: "utf-8" })
 }

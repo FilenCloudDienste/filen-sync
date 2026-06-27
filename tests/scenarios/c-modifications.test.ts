@@ -91,7 +91,7 @@ describe("Category C — modifications", () => {
 		expect(result.finalLocal).toEqual(result.finalRemote)
 	})
 
-	it("C6: both sides modified with equal whole-second mtime → no transfer (worlds diverge)", async () => {
+	it("C6: both sides modified with equal whole-second mtime → local wins the tie (upload)", async () => {
 		const result = await runScenario({
 			name: "C6",
 			mode: "twoWay",
@@ -105,11 +105,12 @@ describe("Category C — modifications", () => {
 			]
 		})
 
-		// Equal floor-to-seconds mtime ⇒ neither side is "newer" ⇒ the modify cycle does no transfer
-		// ⇒ the worlds diverge (the codified second-precision limitation).
-		expect(transferOps(result.cycles[1]!.messages)).toEqual([])
-		expect(result.finalLocal["/a.txt"]!.size).toBe("LOCAL6".length)
-		expect(result.finalRemote["/a.txt"]!.size).toBe("REMOTE-6".length)
+		// Both sides changed since the base and their mtimes floor to the same second (unorderable). Per
+		// the confirmed tie policy local wins: the upload pass runs before the download pass and marks the
+		// path added, so local uploads and the worlds converge to the local content.
+		expect(transferKinds(result.cycles[1]!.messages)).toContain("upload")
+		expect(result.finalRemote["/a.txt"]).toMatchObject({ type: "file", size: "LOCAL6".length })
+		expect(result.finalLocal).toEqual(result.finalRemote)
 	})
 
 	it("C7: a remote mtime bump with an unchanged uuid does NOT download (uuid guard)", async () => {
@@ -142,5 +143,48 @@ describe("Category C — modifications", () => {
 
 		expect(result.finalRemote["/data.txt"]).toMatchObject({ type: "file", size: 0 })
 		expect(result.finalLocal).toEqual(result.finalRemote)
+	})
+
+	it("C10: a same-second size change uploads (base-relative detection, E2E-OBS-002)", async () => {
+		// The edit keeps the SAME whole-second mtime as the last sync but changes the SIZE. The old
+		// side-vs-side gate (local.mtime > remote.mtime) missed it; base-relative detection (size OR
+		// mtime vs previousLocalTree) catches it.
+		const result = await runScenario({
+			name: "C10",
+			mode: "twoWay",
+			initialLocal: { "/local/a.txt": "12345678" },
+			steps: [
+				runCycle(),
+				localMutate(world => writeLocalAt(world, "a.txt", "123", BASE_TIME)),
+				runCycle(),
+				runCycle()
+			]
+		})
+
+		expect(transferKinds(result.cycles[1]!.messages)).toContain("upload")
+		expect(result.finalRemote["/a.txt"]).toMatchObject({ type: "file", size: 3 })
+		expect(result.finalLocal).toEqual(result.finalRemote)
+	})
+
+	it("C11: a same-second SAME-size content swap is NOT detected (documented irreducible limit)", async () => {
+		// Same whole-second mtime AND same size, only the bytes differ. With no mtime/size signal and no
+		// reliable stored hash, this is undetectable without re-hashing every file every cycle (which the
+		// perf budget forbids). Codified so a future "fix" that re-hashes unconditionally is a conscious
+		// choice, not an accident. Astronomically rare in practice (it needs an edit within the same
+		// wall-clock second as the last sync) and self-heals on the next edit in a later second.
+		const result = await runScenario({
+			name: "C11",
+			mode: "twoWay",
+			initialLocal: { "/local/a.txt": "AAAA" },
+			steps: [
+				runCycle(),
+				localMutate(world => writeLocalAt(world, "a.txt", "BBBB", BASE_TIME)),
+				runCycle(),
+				runCycle()
+			]
+		})
+
+		expect(transferOps(result.cycles[1]!.messages)).toEqual([])
+		expect(result.finalLocal["/a.txt"]!.contentHash).not.toBe(result.finalRemote["/a.txt"]!.contentHash)
 	})
 })

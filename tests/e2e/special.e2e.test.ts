@@ -8,7 +8,7 @@ import { E2E_ENABLED, loginTestSDK, teardownTestSDK } from "./harness/account"
 import { withE2EWorld } from "./harness/world"
 import { settle, expectConverged } from "./harness/drive"
 import { snapshotRemoteReal } from "./harness/assert"
-import { writeLocal, modifyLocal, symlinkLocal, existsLocal } from "./harness/mutations"
+import { writeLocal, modifyLocal, writeLocalPreservingMtime, symlinkLocal, existsLocal } from "./harness/mutations"
 
 /**
  * Phase 3 e2e — special files against the live backend: symlinks (skipped, BUG-006) and size-edge
@@ -99,6 +99,21 @@ describe.skipIf(!E2E_ENABLED)("E2E — special files", () => {
 
 			expect((await snapshotRemoteReal(world))["/grow.txt"]).toMatchObject({ type: "file", size: 18 })
 			expect(await existsLocal(world, "grow.txt")).toBe(true)
+			await expectConverged(world)
+		})
+	})
+
+	it("propagates a same-mtime size change (base-relative detection, E2E-OBS-002)", async () => {
+		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
+			await writeLocal(world, "sized.txt", "12345678")
+			await settle(world)
+
+			// Change the size but restore the original mtime: the whole-second mtime is unchanged, so only
+			// the base-relative size comparison can detect this edit (the old side-vs-side gate missed it).
+			await writeLocalPreservingMtime(world, "sized.txt", "123")
+			await settle(world)
+
+			expect((await snapshotRemoteReal(world))["/sized.txt"]).toMatchObject({ type: "file", size: 3 })
 			await expectConverged(world)
 		})
 	})

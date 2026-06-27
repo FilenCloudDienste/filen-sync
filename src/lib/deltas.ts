@@ -637,29 +637,52 @@ export class Deltas {
 					continue
 				}
 
-				// If the item exists in both trees and has a different mod time + hash, we upload it again.
-				if (
-					currentRemoteItem &&
-					currentRemoteItem.type === "file" &&
-					currentLocalItem &&
-					currentLocalItem.type === "file" &&
-					normalizeLastModifiedMsForComparison(currentLocalItem.lastModified) >
-						normalizeLastModifiedMsForComparison(currentRemoteItem.lastModified)
-				) {
-					const md5Hash = await this.sync.localFileSystem.createFileHash({
-						relativePath: path,
-						algorithm: "md5"
-					})
+				// If the item exists in both trees and the local copy changed since the last sync, upload it.
+				// The change is attributed against the last-synced BASE (previousLocalTree) by size + whole-
+				// second mtime — not by comparing the two current sides — so an edit that lands in the same
+				// whole-second as the base mtime, or that only changes the size (e.g. 0 -> N bytes), is still
+				// detected (E2E-OBS-002). The remote side's change is detected by a new uuid (every re-upload
+				// mints one). On a both-changed conflict the newer mtime wins; an unorderable same-second tie
+				// resolves to local because this pass runs before the download pass and marks the path added.
+				// The md5 comparison stays as an OPTIONAL dedup (so a pure mtime touch with identical bytes is
+				// not re-uploaded) — never a required signal, since older files carry no stored hash.
+				if (currentRemoteItem && currentRemoteItem.type === "file" && currentLocalItem && currentLocalItem.type === "file") {
+					const previousLocalItem = previousLocalTree.tree[path]
+					const previousRemoteItem = previousRemoteTree.tree[path]
+					// With a persisted base, attribute the change against it (size + whole-second mtime). With
+					// NO base — a genuine first sync, or lost/corrupt state — there is no common ancestor, so
+					// the remote copy is the only reference: fall back to the side-vs-side comparison and treat
+					// the file as changed only when the local copy is strictly newer (otherwise identical
+					// content on both sides would be needlessly re-uploaded). OBS-002's same-second case
+					// requires a base, so this fallback cannot reintroduce it.
+					const localChanged = previousLocalItem
+						? previousLocalItem.size !== currentLocalItem.size ||
+							normalizeLastModifiedMsForComparison(previousLocalItem.lastModified) !==
+								normalizeLastModifiedMsForComparison(currentLocalItem.lastModified)
+						: normalizeLastModifiedMsForComparison(currentLocalItem.lastModified) >
+							normalizeLastModifiedMsForComparison(currentRemoteItem.lastModified)
+					const remoteChanged = !previousRemoteItem || currentRemoteItem.uuid !== previousRemoteItem.uuid
+					const localWins =
+						!remoteChanged ||
+						normalizeLastModifiedMsForComparison(currentLocalItem.lastModified) >=
+							normalizeLastModifiedMsForComparison(currentRemoteItem.lastModified)
 
-					if (md5Hash !== this.sync.localFileHashes[currentLocalItem.path]) {
-						deltas.push({
-							type: "uploadFile",
-							path,
-							size: currentLocalItem.size,
-							md5Hash
+					if (localChanged && localWins) {
+						const md5Hash = await this.sync.localFileSystem.createFileHash({
+							relativePath: path,
+							algorithm: "md5"
 						})
 
-						pathsAdded[path] = true
+						if (md5Hash !== this.sync.localFileHashes[currentLocalItem.path]) {
+							deltas.push({
+								type: "uploadFile",
+								path,
+								size: currentLocalItem.size,
+								md5Hash
+							})
+
+							pathsAdded[path] = true
+						}
 					}
 				}
 			}

@@ -4,7 +4,7 @@ import { E2E_ENABLED, loginTestSDK, teardownTestSDK } from "./harness/account"
 import { withE2EWorld } from "./harness/world"
 import { settle, expectConverged } from "./harness/drive"
 import { snapshotLocalReal, snapshotRemoteReal } from "./harness/assert"
-import { writeLocal, modifyLocal, rmLocal, renameLocal, readLocal, existsLocal, uploadRemote, deleteRemote } from "./harness/mutations"
+import { writeLocal, modifyLocal, rmLocal, renameLocal, renameRemoteDir, readLocal, existsLocal, uploadRemote, deleteRemote } from "./harness/mutations"
 
 /**
  * Phase 3 e2e — one-way mode semantics against the live backend. localToCloud pushes local changes up
@@ -167,6 +167,49 @@ describe.skipIf(!E2E_ENABLED)("E2E — one-way mode semantics", () => {
 			await settle(world)
 
 			expect(await readLocal(world, "a.txt")).toBe("remote-content")
+		})
+	})
+
+	// ---- cross-side directory rename + a concurrent child change in a MIRROR mode (BUG-A parity) ------
+	// In twoWay this was the critical data-loss bug; in a mirror the authoritative side always wins, but
+	// the rename-aware rebase must still keep the dir rename and the child change correctly aligned and
+	// the worlds convergent. (Live counterparts of mocked ZB11/ZB12.)
+
+	it("localToCloud: a local dir rename + a foreign remote child edit → local content wins, converges", async () => {
+		await withE2EWorld({ sdk, mode: "localToCloud" }, async world => {
+			await writeLocal(world, "dir/child.txt", "old")
+			await writeLocal(world, "dir/sibling.txt", "sib")
+			await settle(world)
+
+			// Rename the directory locally while another device concurrently edits a child at the old path.
+			await renameLocal(world, "dir", "dir2")
+			await uploadRemote(world, "dir/child.txt", "FOREIGN-REMOTE-EDIT")
+			await settle(world)
+
+			const remote = await snapshotRemoteReal(world, { withContent: true })
+
+			// Local authoritative: the renamed dir wins and the foreign edit is reverted to local content.
+			expect(remote["/dir2/child.txt"]!.size).toBe("old".length)
+			expect(remote["/dir/child.txt"]).toBeUndefined()
+			await expectConverged(world)
+		})
+	})
+
+	it("cloudToLocal: a remote dir rename + a foreign local child edit → remote content wins, converges", async () => {
+		await withE2EWorld({ sdk, mode: "cloudToLocal" }, async world => {
+			await uploadRemote(world, "dir/child.txt", "old")
+			await uploadRemote(world, "dir/sibling.txt", "sib")
+			await settle(world)
+
+			// Another device renames the directory remotely while we edit a child locally at the old path.
+			await renameRemoteDir(world, "dir", "dir2")
+			await modifyLocal(world, "dir/child.txt", "FOREIGN-LOCAL-EDIT")
+			await settle(world)
+
+			// Remote authoritative: the renamed dir wins and the foreign local edit is reverted.
+			expect(await readLocal(world, "dir2/child.txt")).toBe("old")
+			expect(await existsLocal(world, "dir/child.txt")).toBe(false)
+			await expectConverged(world)
 		})
 	})
 })

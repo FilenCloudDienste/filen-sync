@@ -245,4 +245,52 @@ describe("Cross-side directory rename + concurrent child change (BUG-A / BUG-B)"
 		expect(result.finalRemote["/dir2/child.txt"]).toMatchObject({ size: "REMOTE-EDITED-NEW-CONTENT".length })
 		expect(result.finalLocal).toEqual(result.finalRemote)
 	})
+
+	// Mirror-mode coverage: BUG-A's DATA LOSS is twoWay-specific (a mirror's authoritative side always wins
+	// correctly), but the rename-aware rebase must still keep mirror modes CONVERGENT and the authoritative
+	// side's content winning at the renamed path.
+
+	it("ZB11: localToCloud — local dir rename + a foreign remote child edit → local content wins, converges", async () => {
+		const result = await runScenario({
+			name: "ZB11",
+			mode: "localToCloud",
+			initialLocal: { "/local/dir/child.txt": "old", "/local/dir/sibling.txt": "sib" },
+			steps: [
+				runCycle(),
+				localMutate(world => renameLocal(world, "dir", "dir2")),
+				remoteMutate(world =>
+					world.cloud.controls.updateFile("/dir/child.txt", "FOREIGN-REMOTE-EDIT", { mtimeMs: BASE_TIME + 10 * SECOND })
+				),
+				runCycle(),
+				runCycle(),
+				runCycle()
+			]
+		})
+
+		// Local authoritative: the foreign remote edit is reverted to the local content at the renamed path.
+		expect(result.finalRemote["/dir2/child.txt"]).toMatchObject({ size: "old".length })
+		expect(result.finalRemote["/dir/child.txt"]).toBeUndefined()
+		expect(result.finalLocal).toEqual(result.finalRemote)
+	})
+
+	it("ZB12: cloudToLocal — remote dir rename + a foreign local child edit → remote content wins, converges", async () => {
+		const result = await runScenario({
+			name: "ZB12",
+			mode: "cloudToLocal",
+			initialRemote: { "/dir/child.txt": "old", "/dir/sibling.txt": "sib" },
+			steps: [
+				runCycle(),
+				remoteMutate(world => world.cloud.controls.movePath("/dir", "/dir2")),
+				localMutate(world => writeLocalAt(world, "dir/child.txt", "FOREIGN-LOCAL-EDIT", BASE_TIME + 10 * SECOND)),
+				runCycle(),
+				runCycle(),
+				runCycle()
+			]
+		})
+
+		// Remote authoritative: the foreign local edit is reverted to the remote content at the renamed path.
+		expect(result.finalLocal["/dir2/child.txt"]).toMatchObject({ size: "old".length })
+		expect(result.finalLocal["/dir/child.txt"]).toBeUndefined()
+		expect(result.finalLocal).toEqual(result.finalRemote)
+	})
 })

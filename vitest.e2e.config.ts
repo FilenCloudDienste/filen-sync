@@ -28,7 +28,10 @@ function loadDotEnvE2E(): void {
 		}
 
 		const key = line.slice(0, eq).trim()
-		const value = line.slice(eq + 1).trim().replace(/^["']|["']$/g, "")
+		const value = line
+			.slice(eq + 1)
+			.trim()
+			.replace(/^["']|["']$/g, "")
 
 		if (key && process.env[key] === undefined) {
 			process.env[key] = value
@@ -51,9 +54,9 @@ export default defineConfig({
 		include: ["tests/e2e/**/*.test.ts"],
 		// Very generous: CI runners can be slow and real transfers + tree fetches add up. Better to wait
 		// than to flake on a slow-but-healthy run.
-		testTimeout: 900_000,
-		hookTimeout: 900_000,
-		teardownTimeout: 600_000,
+		testTimeout: 3600_000,
+		hookTimeout: 3600_000,
+		teardownTimeout: 3600_000,
 		// One retry absorbs a transient network blip without masking a persistent failure.
 		retry: 1,
 		// Never run e2e files concurrently — they share one account.

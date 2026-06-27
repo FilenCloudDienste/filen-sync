@@ -2,6 +2,7 @@ import FilenSDK from "@filen/sdk"
 import os from "os"
 import pathModule from "path"
 import fs from "fs-extra"
+import { v4 as uuidv4 } from "uuid"
 
 /**
  * Real-account login for the e2e suite.
@@ -16,8 +17,11 @@ import fs from "fs-extra"
  */
 export const E2E_ENABLED: boolean = Boolean(process.env["FILEN_TEST_EMAIL"] && process.env["FILEN_TEST_PASSWORD"])
 
-/** A tmp dir the SDK uses for its own scratch (download chunks etc.). Cleaned up by the global teardown. */
-export const SDK_TMP_PATH: string = pathModule.join(os.tmpdir(), "filen-sync-e2e-sdk-tmp")
+/**
+ * A uniquely-named tmp dir the SDK uses for its own scratch (download chunks etc.). Random per process
+ * so parallel CI runners never collide; removed by {@link teardownTestSDK}.
+ */
+export const SDK_TMP_PATH: string = pathModule.join(os.tmpdir(), `filen-sync-e2e-sdk-${uuidv4()}`)
 
 let sdkPromise: Promise<FilenSDK> | null = null
 

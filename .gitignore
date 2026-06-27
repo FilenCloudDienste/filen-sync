@@ -12,3 +12,5 @@ docs
 docs/**/*
 coverage
 coverage/**/*
+.env.e2e
+.env.e2e.local

@@ -12,12 +12,12 @@ jobs:
     e2e:
         name: E2E (${{ matrix.os }})
         runs-on: ${{ matrix.os }}
-        timeout-minutes: 30
+        timeout-minutes: 90
         strategy:
             fail-fast: false
-            # Serialize the OS matrix: all three runners share ONE test account (and its trash), so they
-            # must not run concurrently.
-            max-parallel: 1
+            # The runners share ONE account but each world uses a truly-random remote /<uuid> + local tmp
+            # dir, and account-wide emptyTrash only ever purges trashed test artifacts (never live items
+            # under any /<uuid>), so parallel runs are safe.
             matrix:
                 os: [ubuntu-latest, macos-latest, windows-latest]
         steps:

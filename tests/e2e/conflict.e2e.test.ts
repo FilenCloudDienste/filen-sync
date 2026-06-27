@@ -4,7 +4,18 @@ import { E2E_ENABLED, loginTestSDK, teardownTestSDK } from "./harness/account"
 import { withE2EWorld } from "./harness/world"
 import { settle, expectConverged } from "./harness/drive"
 import { snapshotRemoteReal } from "./harness/assert"
-import { writeLocal, modifyLocal, rmLocal, renameLocal, readLocal, uploadRemote, deleteRemote, existsLocal } from "./harness/mutations"
+import {
+	writeLocal,
+	modifyLocal,
+	rmLocal,
+	renameLocal,
+	readLocal,
+	uploadRemote,
+	deleteRemote,
+	renameRemote,
+	setLocalMtime,
+	existsLocal
+} from "./harness/mutations"
 
 /**
  * Phase 3 e2e — twoWay conflict resolution against the live backend (both sides changed since the last
@@ -105,6 +116,146 @@ describe.skipIf(!E2E_ENABLED)("E2E — twoWay conflict resolution", () => {
 			expect(remote["/a.txt"]).toBeUndefined()
 			expect(remote["/b.txt"]).toMatchObject({ type: "file" })
 			expect(await readLocal(world, "b.txt")).toBe("BRAND-NEW-CONTENT")
+		})
+	})
+
+	// --- Conflict-matrix parity with mocked Category Y (the trickiest rename-vs-other-side cases) ---
+
+	it("add(local) vs add(remote) same path, remote newer → the remote copy wins (Y2)", async () => {
+		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
+			await writeLocal(world, "addboth.txt", "LOCAL-OLDER")
+			// Age the local copy so the remote upload that follows is unambiguously newer.
+			await setLocalMtime(world, "addboth.txt", Date.now() - 60_000)
+			await uploadRemote(world, "addboth.txt", "REMOTE-NEWER")
+
+			await settle(world)
+
+			await expectConverged(world)
+			expect(await readLocal(world, "addboth.txt")).toBe("REMOTE-NEWER")
+		})
+	})
+
+	it("delete(local) vs delete(remote) same path → converges to empty, no error (Y3)", async () => {
+		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
+			await writeLocal(world, "doomed.txt", "bye")
+			await settle(world)
+
+			await rmLocal(world, "doomed.txt")
+			await deleteRemote(world, "doomed.txt")
+
+			await settle(world)
+
+			await expectConverged(world)
+			expect((await snapshotRemoteReal(world))["/doomed.txt"]).toBeUndefined()
+			expect(await existsLocal(world, "doomed.txt")).toBe(false)
+		})
+	})
+
+	it("rename(local a→b) vs delete(remote a) → converges to {b}, data preserved (Y7)", async () => {
+		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
+			await writeLocal(world, "a.txt", "data")
+			await settle(world)
+
+			await renameLocal(world, "a.txt", "b.txt")
+			await deleteRemote(world, "a.txt")
+
+			await settle(world)
+
+			await expectConverged(world)
+			const remote = await snapshotRemoteReal(world)
+			expect(remote["/a.txt"]).toBeUndefined()
+			expect(remote["/b.txt"]).toMatchObject({ type: "file" })
+			expect(await existsLocal(world, "b.txt")).toBe(true)
+		})
+	})
+
+	it("rename(local a→b) vs modify(remote a) → converges keeping BOTH a and b (Y8)", async () => {
+		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
+			await writeLocal(world, "a.txt", "orig")
+			await settle(world)
+
+			await renameLocal(world, "a.txt", "b.txt")
+			await uploadRemote(world, "a.txt", "REMOTE-MOD")
+
+			await settle(world)
+
+			await expectConverged(world)
+			const remote = await snapshotRemoteReal(world)
+			expect(remote["/a.txt"]).toMatchObject({ type: "file" })
+			expect(remote["/b.txt"]).toMatchObject({ type: "file" })
+			expect(await readLocal(world, "a.txt")).toBe("REMOTE-MOD")
+			expect(await readLocal(world, "b.txt")).toBe("orig")
+		})
+	})
+
+	it("rename(local a→X) vs rename(remote a→Y) → converges keeping BOTH X and Y (Y9)", async () => {
+		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
+			await writeLocal(world, "a.txt", "data")
+			await settle(world)
+
+			await renameLocal(world, "a.txt", "local-name.txt")
+			await renameRemote(world, "a.txt", "remote-name.txt")
+
+			await settle(world)
+
+			await expectConverged(world)
+			const remote = await snapshotRemoteReal(world)
+			expect(remote["/local-name.txt"]).toMatchObject({ type: "file" })
+			expect(remote["/remote-name.txt"]).toMatchObject({ type: "file" })
+			expect(remote["/a.txt"]).toBeUndefined()
+		})
+	})
+
+	it("rename(remote a→b) vs delete(local a) → converges to {b}, data preserved (Y10)", async () => {
+		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
+			await writeLocal(world, "a.txt", "data")
+			await settle(world)
+
+			await renameRemote(world, "a.txt", "b.txt")
+			await rmLocal(world, "a.txt")
+
+			await settle(world)
+
+			await expectConverged(world)
+			const remote = await snapshotRemoteReal(world)
+			expect(remote["/a.txt"]).toBeUndefined()
+			expect(remote["/b.txt"]).toMatchObject({ type: "file" })
+		})
+	})
+
+	it("rename(remote a→b) vs modify(local a) → converges keeping BOTH a and b (Y11)", async () => {
+		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
+			await writeLocal(world, "a.txt", "orig")
+			await settle(world)
+
+			await renameRemote(world, "a.txt", "b.txt")
+			await modifyLocal(world, "a.txt", "LOCAL-MOD")
+
+			await settle(world)
+
+			await expectConverged(world)
+			const remote = await snapshotRemoteReal(world)
+			expect(remote["/a.txt"]).toMatchObject({ type: "file" })
+			expect(remote["/b.txt"]).toMatchObject({ type: "file" })
+			expect(await readLocal(world, "a.txt")).toBe("LOCAL-MOD")
+			expect(await readLocal(world, "b.txt")).toBe("orig")
+		})
+	})
+
+	it("delete(local a) + add(remote b) in one cycle → both applied, converges (Y12)", async () => {
+		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
+			await writeLocal(world, "a.txt", "data")
+			await settle(world)
+
+			await rmLocal(world, "a.txt")
+			await uploadRemote(world, "b.txt", "new-remote")
+
+			await settle(world)
+
+			await expectConverged(world)
+			const remote = await snapshotRemoteReal(world)
+			expect(remote["/a.txt"]).toBeUndefined()
+			expect(remote["/b.txt"]).toMatchObject({ type: "file" })
 		})
 	})
 })

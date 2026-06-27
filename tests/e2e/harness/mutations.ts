@@ -163,6 +163,47 @@ export async function resolveRemote(
 	return null
 }
 
+/**
+ * Rename a remote FILE within its current directory (simulating a peer client's rename), via the SDK
+ * renameFile call the engine itself uses. Only same-directory file renames are needed by the conflict
+ * suite, so the metadata is rebuilt from the resolved item.
+ */
+export async function renameRemote(world: E2EWorld, fromRelative: string, toRelative: string): Promise<void> {
+	const item = await resolveRemote(world, fromRelative)
+
+	if (!item || item.type !== "file") {
+		throw new Error(`renameRemote: no remote file at ${fromRelative}`)
+	}
+
+	const newName = segments(toRelative).pop()
+
+	if (!newName) {
+		throw new Error(`renameRemote: invalid target ${toRelative}`)
+	}
+
+	await world.sdk.cloud().renameFile({
+		uuid: item.uuid,
+		name: newName,
+		metadata: {
+			name: newName,
+			size: item.size,
+			mime: item.mime,
+			key: item.key,
+			lastModified: item.lastModified,
+			...(item.creation !== undefined ? { creation: item.creation } : {}),
+			...(item.hash !== undefined ? { hash: item.hash } : {})
+		},
+		overwriteIfExists: true
+	})
+}
+
+/** Force a local file's mtime to a specific epoch-ms (e.g. to age it before a newer conflicting write). */
+export async function setLocalMtime(world: E2EWorld, relativePath: string, epochMs: number): Promise<void> {
+	const when = new Date(epochMs)
+
+	await fs.utimes(abs(world, relativePath), when, when)
+}
+
 /** Permanently delete (no trash) the remote item at `relativePath`. */
 export async function deleteRemote(world: E2EWorld, relativePath: string): Promise<void> {
 	const item = await resolveRemote(world, relativePath)

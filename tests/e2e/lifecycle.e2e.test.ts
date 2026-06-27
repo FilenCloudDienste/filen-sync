@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest"
-import type FilenSDK from "@filen/sdk"
+import FilenSDK, { PauseSignal } from "@filen/sdk"
 import fs from "fs-extra"
 import { E2E_ENABLED, loginTestSDK, teardownTestSDK } from "./harness/account"
 import { withE2EWorld } from "./harness/world"
@@ -9,13 +9,15 @@ import { writeLocal, rmLocal } from "./harness/mutations"
 
 /**
  * Phase 3 e2e — the SyncWorker control surface against the live backend, the live counterpart of mocked
- * Category I. These exercise the REAL worker methods a host app drives at runtime (pause/resume, runtime
- * mode change, pair removal + db cleanup, idempotent registration) and assert their backend-observable
- * effect on the real account — not just internal signal routing. Three Category I cases stay mocked-only
- * for genuine determinism reasons (not omission): pauseTransfer/stopTransfer mid-upload (I4/I5) — the SDK
- * only honors the abort inside the chunk loop, so aborting a real tiny-file upload is a race (the same
- * limit that keeps Category O mocked); and runOnce (I1) — a self-scheduling one-shot loop whose distinctive
- * effect is cleanup-without-reschedule, which IS exercised live here by the updateRemoved cleanup (I3).
+ * Category I (+ the abort-driven error path of Q5). These exercise the REAL worker methods a host app
+ * drives at runtime — pause/resume (I2), runtime mode change (I6), pair removal + db cleanup (I3),
+ * idempotent registration (I7), per-transfer pause/stop routing (I4), and stop-then-retry for an upload
+ * (I5) — plus the task-error gate (Q5). A pre-registered abort controller is the deterministic stand-in
+ * for an in-flight transfer: the SDK honors the abort at the chunk-loop entry, so a pre-aborted upload
+ * fails reliably (verified by hammering). Only runOnce (I1) stays mocked-only — a self-scheduling one-shot
+ * loop whose distinctive effect, cleanup-without-reschedule, is already exercised live by I3. (Stopping a
+ * DOWNLOAD is left mocked too: a tiny single-chunk download can finish locally before the abort check, so
+ * the pre-abort stand-in is non-deterministic for the pull direction; the upload path covers the mechanism.)
  */
 describe.skipIf(!E2E_ENABLED)("E2E — lifecycle & control surface", () => {
 	let sdk: FilenSDK
@@ -134,6 +136,84 @@ describe.skipIf(!E2E_ENABLED)("E2E — lifecycle & control surface", () => {
 			await expectConverged(world)
 
 			expect((await snapshotRemoteReal(world))["/b.txt"]).toMatchObject({ type: "file" })
+		})
+	})
+
+	it("pauseTransfer / resumeTransfer route to the per-transfer signal; unknown keys are safe no-ops (I4)", async () => {
+		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
+			const uuid = world.syncPair.uuid
+
+			// Stand in for an in-flight upload: a registered pause signal keyed `${type}:${path}`.
+			const signalKey = "upload:/a.txt"
+			world.sync.pauseSignals[signalKey] = new PauseSignal()
+
+			// pauseTransfer / resumeTransfer route by the same key and flip the real signal's state.
+			world.worker.pauseTransfer(uuid, "upload", "/a.txt")
+			expect(world.sync.pauseSignals[signalKey]!.isPaused()).toBe(true)
+
+			world.worker.resumeTransfer(uuid, "upload", "/a.txt")
+			expect(world.sync.pauseSignals[signalKey]!.isPaused()).toBe(false)
+
+			// An unknown key is a safe no-op: no throw and no signal conjured.
+			world.worker.pauseTransfer(uuid, "download", "/does-not-exist.txt")
+			expect(world.sync.pauseSignals["download:/does-not-exist.txt"]).toBeUndefined()
+		})
+	})
+
+	it("stopping a transfer surfaces an error, and a retry converges (I5)", async () => {
+		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
+			const uuid = world.syncPair.uuid
+
+			await writeLocal(world, "a.txt", "v1")
+
+			// Pre-register the transfer's abort controller (as if in flight) and stop it via the worker; the
+			// upload then runs against an already-aborted signal — the engine reuses the registered controller.
+			const signalKey = "upload:/a.txt"
+			world.sync.abortControllers[signalKey] = new AbortController()
+			world.worker.stopTransfer(uuid, "upload", "/a.txt")
+
+			expect(world.sync.abortControllers[signalKey]!.signal.aborted).toBe(true)
+
+			const abortedMessages = await cycle(world)
+			const uploadErrors = messagesOfType(abortedMessages, "transfer").filter(
+				message => message.data.of === "upload" && message.data.type === "error"
+			)
+
+			// The abort is surfaced as an upload transfer error and nothing was uploaded.
+			expect(uploadErrors.length).toBeGreaterThan(0)
+			expect((await snapshotRemoteReal(world))["/a.txt"]).toBeUndefined()
+
+			// Retry on a later cycle: clear the recorded task error (it gates the next cycle); a fresh
+			// controller is created and the upload succeeds against the real backend.
+			world.worker.resetTaskErrors(uuid)
+			await settle(world)
+			await expectConverged(world)
+
+			expect((await snapshotRemoteReal(world))["/a.txt"]).toMatchObject({ type: "file" })
+		})
+	})
+
+	it("a cycle starting with an unresolved task error re-reports it and gates without doing work (Q5)", async () => {
+		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
+			const uuid = world.syncPair.uuid
+
+			await writeLocal(world, "a.txt", "v1")
+
+			// Induce a REAL task error (no synthetic injection): stop the upload so the transfer fails and the
+			// engine records a task error for the pair.
+			world.sync.abortControllers["upload:/a.txt"] = new AbortController()
+			world.worker.stopTransfer(uuid, "upload", "/a.txt")
+
+			await cycle(world)
+
+			// The NEXT cycle is NOT error-reset, so it observes the pending task error at the very top and
+			// gates: it re-emits taskErrors + cycleRestarting and returns BEFORE cycleStarted (no work done).
+			const gated = await cycle(world)
+
+			expect(messagesOfType(gated, "taskErrors").length).toBeGreaterThan(0)
+			expect(messagesOfType(gated, "cycleRestarting").length).toBeGreaterThan(0)
+			expect(messagesOfType(gated, "cycleStarted").length).toBe(0)
+			expect((await snapshotRemoteReal(world))["/a.txt"], "still nothing uploaded while the error gates").toBeUndefined()
 		})
 	})
 })

@@ -124,4 +124,23 @@ describe("Category C — modifications", () => {
 		expect(transferOps(result.cycles[2]!.messages)).toEqual([])
 		expect(result.finalLocal["/a.txt"]).toMatchObject({ type: "file", size: "original".length })
 	})
+
+	it("C9: truncating a synced file to 0 bytes propagates the empty version (BUG-002)", async () => {
+		// The md5 of an empty file differs from the non-empty original, so the upload gate fires and the
+		// remote becomes a real 0-byte file (rather than the change being skipped as an ignored "empty").
+		const result = await runScenario({
+			name: "C9",
+			mode: "twoWay",
+			initialLocal: { "/local/data.txt": "has content" },
+			steps: [
+				runCycle(),
+				localMutate(world => writeLocalAt(world, "data.txt", "", BASE_TIME + 5 * SECOND)),
+				runCycle(),
+				runCycle()
+			]
+		})
+
+		expect(result.finalRemote["/data.txt"]).toMatchObject({ type: "file", size: 0 })
+		expect(result.finalLocal).toEqual(result.finalRemote)
+	})
 })

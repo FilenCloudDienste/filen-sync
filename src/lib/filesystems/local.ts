@@ -339,16 +339,6 @@ export class LocalFileSystem {
 							return
 						}
 
-						if (stats.isFile() && stats.size <= 0) {
-							this.getDirectoryTreeCache.ignored.push({
-								localPath: absolutePath,
-								relativePath: entryPath,
-								reason: "empty"
-							})
-
-							return
-						}
-
 						try {
 							await this.sync.environment.fs.access(absolutePath, this.sync.environment.fs.constants.R_OK)
 						} catch {

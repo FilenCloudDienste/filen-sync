@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest"
 import { runScenario, runCycle, localMutate, remoteMutate } from "../harness/runner"
 import { transferKinds, transferOps, hadTransfers } from "../harness/snapshot"
 import { writeLocal } from "../harness/mutations"
-import { knownBug } from "../harness/known-bug"
 
 /**
  * Category B — additions (behavioral spec §B). Additions are applied dynamically (after an initial
@@ -134,9 +133,9 @@ describe("Category B — additions", () => {
 		expect(result.finalLocal).toEqual(result.finalRemote)
 	})
 
-	// B8 — TARGET: 0-byte files sync normally. The engine currently ignores size<=0 entries during
-	// tree build (local.ts and remote.ts), so an empty file is never uploaded. See BUG-002.
-	knownBug("BUG-002", "B8: a new 0-byte file syncs to the remote", async () => {
+	// B8: 0-byte files sync normally. (BUG-002 fix: the size<=0 skip in the local and remote tree
+	// builds is removed, so empty files are tracked and transferred like any other file.)
+	it("B8: a new 0-byte file syncs to the remote", async () => {
 		const result = await runScenario({
 			name: "B8",
 			mode: "twoWay",
@@ -145,5 +144,17 @@ describe("Category B — additions", () => {
 
 		expect(result.finalRemote["/empty.txt"]).toMatchObject({ type: "file", size: 0 })
 		expect(hadTransfers(result.messages)).toBe(true)
+	})
+
+	it("B9: a remote 0-byte file downloads to local", async () => {
+		const result = await runScenario({
+			name: "B9",
+			mode: "twoWay",
+			initialRemote: { "/remote-empty.txt": "" },
+			steps: [runCycle(), runCycle()]
+		})
+
+		expect(result.finalLocal["/remote-empty.txt"]).toMatchObject({ type: "file", size: 0 })
+		expect(result.finalLocal).toEqual(result.finalRemote)
 	})
 })

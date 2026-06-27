@@ -374,16 +374,6 @@ export class RemoteFileSystem {
 
 					pathsAdded[lowercasePath] = true
 
-					if (decrypted.size <= 0) {
-						this.getDirectoryTreeCache.ignored.push({
-							localPath,
-							relativePath: filePath,
-							reason: "empty"
-						})
-
-						return
-					}
-
 					const ignored = this.isPathIgnored({
 						absolutePath: localPath,
 						relativePath: filePath,

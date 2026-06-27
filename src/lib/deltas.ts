@@ -1,5 +1,5 @@
 import type Sync from "./sync"
-import { type LocalTree, type LocalTreeError } from "./filesystems/local"
+import { type LocalTree, type LocalTreeError, type LocalTreeIgnored } from "./filesystems/local"
 import { type RemoteTree } from "./filesystems/remote"
 import { replacePathStartWithFromAndTo, pathIncludesDotFile, normalizeLastModifiedMsForComparison } from "../utils"
 
@@ -105,13 +105,15 @@ export class Deltas {
 		currentRemoteTree,
 		previousLocalTree,
 		previousRemoteTree,
-		currentLocalTreeErrors
+		currentLocalTreeErrors,
+		currentLocalTreeIgnored
 	}: {
 		currentLocalTree: LocalTree
 		currentRemoteTree: RemoteTree
 		previousLocalTree: LocalTree
 		previousRemoteTree: RemoteTree
 		currentLocalTreeErrors: LocalTreeError[]
+		currentLocalTreeIgnored: LocalTreeIgnored[]
 	}): Promise<{
 		deltas: Delta[]
 		deleteLocalDirectoryCountRaw: number
@@ -132,6 +134,7 @@ export class Deltas {
 		let deltas: Delta[] = []
 		const pathsAdded: Record<string, boolean> = {}
 		const erroredLocalPaths: Record<string, boolean> = {}
+		const ignoredLocalPaths: Record<string, boolean> = {}
 		const renamedRemoteDirectories: Delta[] = []
 		const renamedLocalDirectories: Delta[] = []
 		const deletedRemoteDirectories: Delta[] = []
@@ -143,6 +146,16 @@ export class Deltas {
 
 		for (const error of currentLocalTreeErrors) {
 			erroredLocalPaths[error.relativePath] = true
+		}
+
+		// A path that physically exists locally but is currently NOT syncable — a symlink, an
+		// unreadable/permission-denied entry, a case-insensitive duplicate, a special device, an
+		// over-long name — is recorded as "ignored", never as a deletion. Suppressing remote-deletes for
+		// these preserves the cloud copy of a path that was synced before it became ignored (e.g. a file
+		// now skipped because it is a symlink after upgrading to lstat), mirroring how the .filenignore
+		// filter below already protects ignored paths. (BUG-006)
+		for (const ignored of currentLocalTreeIgnored) {
+			ignoredLocalPaths[ignored.relativePath] = true
 		}
 
 		// The order of delta processing:
@@ -240,7 +253,7 @@ export class Deltas {
 		if (this.sync.mode === "twoWay" || this.sync.mode === "localToCloud") {
 			if (this.sync.mode === "twoWay") {
 				for (const path in previousLocalTree.tree) {
-					if (pathsAdded[path] || erroredLocalPaths[path]) {
+					if (pathsAdded[path] || erroredLocalPaths[path] || ignoredLocalPaths[path]) {
 						continue
 					}
 
@@ -275,7 +288,7 @@ export class Deltas {
 				}
 			} else {
 				for (const path in currentRemoteTree.tree) {
-					if (pathsAdded[path] || erroredLocalPaths[path]) {
+					if (pathsAdded[path] || erroredLocalPaths[path] || ignoredLocalPaths[path]) {
 						continue
 					}
 

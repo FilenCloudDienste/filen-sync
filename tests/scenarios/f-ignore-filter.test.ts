@@ -4,7 +4,6 @@ import { runScenario, runCycle, localMutate, control } from "../harness/runner"
 import { BASE_TIME, DB_ROOT, type World } from "../harness/world"
 import { messagesOfType } from "../harness/snapshot"
 import { writeLocal } from "../harness/mutations"
-import { knownBug } from "../harness/known-bug"
 import { IGNORER_VERSION } from "../../src/ignorer"
 import { type SyncMessage } from "../../src/types"
 
@@ -194,11 +193,10 @@ describe("Category F — ignore / filter", () => {
 		expect(result.finalRemote["/kept.txt"]).toMatchObject({ type: "file" })
 	})
 
-	// F9 — TARGET: a symlink is recognized and skipped structurally (reason "symlink"). The engine
-	// stats THROUGH the link (uses fs.stat, which follows, instead of lstat), so isSymbolicLink() is
-	// always false and the link is never flagged — it is silently followed and collides on the target's
-	// inode (producing flaky spurious ops). The "symlink" reason is therefore dead code. See BUG-006.
-	knownBug("BUG-006", "F9: a symlink is skipped structurally with the symlink reason", async () => {
+	// F9: a symlink is recognized and skipped structurally (reason "symlink"). The walk lstats each
+	// entry, so isSymbolicLink() is true for a link and it is flagged rather than silently followed and
+	// collided on the target's inode. (BUG-006 fix: stat → lstat; the previously-dead skip is now live.)
+	it("F9: a symlink is skipped structurally with the symlink reason", async () => {
 		const result = await runScenario({
 			name: "F9",
 			mode: "twoWay",
@@ -315,5 +313,34 @@ describe("Category F — ignore / filter", () => {
 		// "cache" IS a directory, so "cache/" correctly ignores it and its contents.
 		expect(result.finalLocal["/cache"]).toBeUndefined()
 		expect(result.finalLocal["/cache/tmp.txt"]).toBeUndefined()
+	})
+
+	it("F15: a synced file that becomes a symlink is skipped, not deleted from the remote (BUG-006 compat)", async () => {
+		// Backwards-compat: a file synced before the lstat switch (so the cloud has it and it is in the
+		// previous local tree) that is then replaced by a symlink must NOT be deleted from the cloud. A
+		// structurally-ignored path (a symlink) is treated like ignore-after-sync: skipped, never deleted
+		// — the delta layer suppresses remote-deletes for currently-ignored local paths.
+		const result = await runScenario({
+			name: "F15",
+			mode: "twoWay",
+			initialLocal: { "/local/data.txt": "real content" },
+			steps: [
+				runCycle(),
+				runCycle(),
+				// Replace the synced file with a (dangling) symlink at the same path.
+				control(world => {
+					world.vfs.ifs.unlinkSync("/local/data.txt")
+					world.vfs.ifs.symlinkSync("/local/elsewhere.txt", "/local/data.txt")
+				}),
+				localMutate(() => {}),
+				runCycle(),
+				runCycle()
+			]
+		})
+
+		// The symlink is skipped structurally…
+		expect(ignoredReasons(result.messages)).toContain("symlink")
+		// …and the previously-synced cloud copy survives (ignore is not deletion).
+		expect(result.finalRemote["/data.txt"]).toMatchObject({ type: "file" })
 	})
 })

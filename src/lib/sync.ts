@@ -483,7 +483,8 @@ export class Sync {
 						currentRemoteTree: currentRemoteTree.result,
 						previousLocalTree: this.previousLocalTree,
 						previousRemoteTree: this.previousRemoteTree,
-						currentLocalTreeErrors: currentLocalTree.errors
+						currentLocalTreeErrors: currentLocalTree.errors,
+						currentLocalTreeIgnored: currentLocalTree.ignored
 					})
 
 					postMessageToMain({

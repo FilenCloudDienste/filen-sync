@@ -296,7 +296,10 @@ export class LocalFileSystem {
 						let stats: Stats
 
 						try {
-							stats = await this.sync.environment.fs.stat(absolutePath)
+							// lstat (not stat) so a symlink is detected as a link rather than followed to its
+							// target — symlinks are skipped structurally below (reason "symlink") instead of being
+							// silently dereferenced (which collided on the target's inode and caused churn).
+							stats = await this.sync.environment.fs.lstat(absolutePath)
 						} catch {
 							this.getDirectoryTreeCache.ignored.push({
 								localPath: absolutePath,

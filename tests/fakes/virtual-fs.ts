@@ -108,6 +108,11 @@ export function createVirtualFS(initial: VfsSpec = {}): VirtualFS {
 
 			return await promises.stat(path)
 		},
+		lstat: async (path: string) => {
+			guard(path)
+
+			return await promises.lstat(path)
+		},
 		access: async (path: string, mode?: number) => {
 			guard(path)
 

@@ -11,6 +11,7 @@ import process from "process"
 export type SyncFS = Pick<
 	typeof fsExtra,
 	| "stat"
+	| "lstat"
 	| "access"
 	| "exists"
 	| "pathExists"

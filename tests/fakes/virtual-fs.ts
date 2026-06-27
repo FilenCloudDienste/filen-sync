@@ -280,16 +280,20 @@ export function createVirtualFS(initial: VfsSpec = {}): VirtualFS {
 	}
 
 	const controls: VirtualFS["controls"] = {
+		// Every path-keyed control normalizes with toPosixPath, exactly as the fs methods do before they
+		// consult these maps. Tests pass either posix literals (a no-op here) or engine-computed paths,
+		// which on Windows carry host backslash separators — without this an injected key would never
+		// match the posix path the engine actually stats/opens.
 		getInode: (path: string): number | null => {
 			try {
-				return Number(vol.statSync(path).ino)
+				return Number(vol.statSync(toPosixPath(path)).ino)
 			} catch {
 				return null
 			}
 		},
 		exists: (path: string): boolean => {
 			try {
-				vol.statSync(path)
+				vol.statSync(toPosixPath(path))
 
 				return true
 			} catch {
@@ -297,16 +301,16 @@ export function createVirtualFS(initial: VfsSpec = {}): VirtualFS {
 			}
 		},
 		setInode: (path: string, ino: number): void => {
-			inodeOverrides.set(path, ino)
+			inodeOverrides.set(toPosixPath(path), ino)
 		},
 		clearInode: (path: string): void => {
-			inodeOverrides.delete(path)
+			inodeOverrides.delete(toPosixPath(path))
 		},
 		setError: (path: string, error: NodeJS.ErrnoException): void => {
-			errors.set(path, error)
+			errors.set(toPosixPath(path), error)
 		},
 		clearError: (path: string): void => {
-			errors.delete(path)
+			errors.delete(toPosixPath(path))
 		},
 		clearAllErrors: (): void => {
 			errors.clear()

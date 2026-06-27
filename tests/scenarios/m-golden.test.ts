@@ -255,25 +255,30 @@ describe("Category M — golden / compatibility pins", () => {
 				(ifs.readFileSync(path, "utf-8") as string).split("\n").filter(line => line.trim().length > 0)
 
 			// --- State directory layout: the engine's own public paths must live under `state/v2/<uuid>`.
+			// The engine composes these paths with the host `path.join`, so on Windows they use backslash
+			// separators; memfs and the layout pins below are posix, so normalize before touching the fs.
 			const state = world.sync.state
-
-			expect(state.statePath).toContain("/state/v2/")
-			expect(state.statePath.endsWith(`/${uuid}`)).toBe(true)
-
-			for (const filePath of [
+			const toPosix = (path: string): string => path.replace(/\\/g, "/")
+			const statePath = toPosix(state.statePath)
+			const stateFilePaths = [
 				state.previousLocalTreePath,
 				state.previousLocalINodesPath,
 				state.previousRemoteTreePath,
 				state.previousRemoteUUIDsPath,
 				state.localFileHashesPath
-			]) {
-				expect(state.statePath.length, `${filePath} must live under statePath`).toBeGreaterThan(0)
-				expect(filePath.startsWith(state.statePath)).toBe(true)
+			].map(toPosix)
+
+			expect(statePath).toContain("/state/v2/")
+			expect(statePath.endsWith(`/${uuid}`)).toBe(true)
+
+			for (const filePath of stateFilePaths) {
+				expect(statePath.length, `${filePath} must live under statePath`).toBeGreaterThan(0)
+				expect(filePath.startsWith(statePath)).toBe(true)
 				expect(exists(filePath), `expected persisted state file ${filePath}`).toBe(true)
 			}
 
 			// --- Line-delimited JSON format: every line is `{"prop":<key>,"data":<value>}` + "\n".
-			const localTreeLines = readLines(state.previousLocalTreePath)
+			const localTreeLines = readLines(toPosix(state.previousLocalTreePath))
 
 			expect(localTreeLines.length).toBeGreaterThan(0)
 
@@ -285,7 +290,7 @@ describe("Category M — golden / compatibility pins", () => {
 			expect(localEntry.data).toHaveProperty("path")
 			expect(localEntry.data).toHaveProperty("type")
 
-			const remoteTreeLines = readLines(state.previousRemoteTreePath)
+			const remoteTreeLines = readLines(toPosix(state.previousRemoteTreePath))
 
 			expect(remoteTreeLines.length).toBeGreaterThan(0)
 
@@ -298,7 +303,7 @@ describe("Category M — golden / compatibility pins", () => {
 			expect(remoteEntry.data).toHaveProperty("type")
 
 			// localFileHashes maps a path → md5 hex STRING (not an object).
-			const hashLines = readLines(state.localFileHashesPath)
+			const hashLines = readLines(toPosix(state.localFileHashesPath))
 
 			expect(hashLines.length).toBeGreaterThan(0)
 

@@ -954,6 +954,23 @@ export class RemoteFileSystem {
 				}
 			})
 
+			// Integrity guard: only commit a download whose staged size matches the expected size. The SDK
+			// can RESOLVE (rather than reject) with an incomplete staged file when the transfer is aborted
+			// mid-stream — the read stream ends cleanly, so the pipeline reports no error even though fewer
+			// bytes were written. Without this check the partial/0-byte file would be moved into place and
+			// cached as "synced", leaving local and remote permanently diverged (it never re-downloads,
+			// because the cached size now matches the persisted base). Discarding it and throwing turns an
+			// aborted download into a normal failed task that the next cycle retries.
+			const stagedSize = (await this.sync.environment.fs.stat(tmpLocalPath)).size
+
+			if (stagedSize !== item.size) {
+				await this.sync.environment.fs
+					.rm(tmpLocalPath, { force: true, maxRetries: 60 * 10, recursive: true, retryDelay: 100 })
+					.catch(() => {})
+
+				throw new Error(`Download of ${relativePath} is incomplete: expected ${item.size} bytes but staged ${stagedSize}.`)
+			}
+
 			await this.sync.environment.fs.move(tmpLocalPath, localPath, {
 				overwrite: true
 			})

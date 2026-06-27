@@ -196,6 +196,40 @@ describe("Category O — per-task-type error paths", () => {
 		expect(result.finalLocal).toEqual(result.finalRemote)
 	})
 
+	it("O5b: an aborted download that RESOLVES with a short file is discarded by the integrity guard, then a retry converges", async () => {
+		// Unlike O5 (where the SDK throws), the real SDK RESOLVES an aborted download — the read stream ends
+		// cleanly, so the pipeline reports no error even though the staged file is incomplete. The engine must
+		// NOT commit that short/0-byte file as synced (which would leave local & remote permanently diverged,
+		// since the cached size then matches the base). The remote.ts size guard discards it and the next cycle
+		// re-downloads in full. The fake's `simulateIncompleteDownload` reproduces the SDK's resolve-with-short
+		// behavior, which `setError` (a throw) does not — this pins the guard the live suite first surfaced.
+		const result = await runScenario({
+			name: "O5b",
+			mode: "cloudToLocal",
+			initialRemote: { "/r.txt": "remote-content" },
+			steps: [
+				control(world => world.cloud.controls.simulateIncompleteDownload("/r.txt")),
+				runCycle(),
+				control(world => {
+					world.worker.resetTaskErrors(world.syncPair.uuid)
+					world.triggerWatcher()
+				}),
+				runCycle(),
+				runCycle()
+			]
+		})
+
+		const failCycle = result.cycles[0]!
+
+		// The incomplete download was detected and surfaced as a download error — not silently committed.
+		expect(hasTransfer(failCycle.messages, "download", "error")).toBe(true)
+		// The regression guard: WITHOUT the size check the 0-byte file is committed + cached as synced, so the
+		// base matches and it never re-downloads (finalLocal stays size 0, diverged). WITH the guard the short
+		// file is discarded and the engine re-fetches the full 14 bytes, converging.
+		expect(result.finalLocal["/r.txt"]).toMatchObject({ type: "file", size: 14 })
+		expect(result.finalLocal).toEqual(result.finalRemote)
+	})
+
 	// LOCAL error-surface: inject on a sub-path the op touches but the existence re-check does NOT.
 
 	it("O6: a local mkdir failure surfaces a createLocalDirectory error, and a retry converges", async () => {

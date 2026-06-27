@@ -5,7 +5,7 @@ import { E2E_ENABLED, loginTestSDK, teardownTestSDK } from "./harness/account"
 import { withE2EWorld } from "./harness/world"
 import { cycle, settle, expectConverged, messagesOfType, transferOps } from "./harness/drive"
 import { snapshotRemoteReal } from "./harness/assert"
-import { writeLocal, rmLocal } from "./harness/mutations"
+import { writeLocal, rmLocal, uploadRemote, readLocal, existsLocal } from "./harness/mutations"
 
 /**
  * Phase 3 e2e — the SyncWorker control surface against the live backend, the live counterpart of mocked
@@ -14,10 +14,11 @@ import { writeLocal, rmLocal } from "./harness/mutations"
  * idempotent registration (I7), per-transfer pause/stop routing (I4), and stop-then-retry for an upload
  * (I5) — plus the task-error gate (Q5). A pre-registered abort controller is the deterministic stand-in
  * for an in-flight transfer: the SDK honors the abort at the chunk-loop entry, so a pre-aborted upload
- * fails reliably (verified by hammering). Only runOnce (I1) stays mocked-only — a self-scheduling one-shot
- * loop whose distinctive effect, cleanup-without-reschedule, is already exercised live by I3. (Stopping a
- * DOWNLOAD is left mocked too: a tiny single-chunk download can finish locally before the abort check, so
- * the pre-abort stand-in is non-deterministic for the pull direction; the upload path covers the mechanism.)
+ * fails reliably (verified by hammering). Stopping a DOWNLOAD is covered too — and surfaced a real bug now
+ * fixed in remote.ts: an aborted download RESOLVES with a 0-byte staged file, which the engine used to
+ * commit as synced (permanent divergence); the integrity guard now discards an incomplete download so the
+ * next cycle re-fetches it in full. Only runOnce (I1) stays mocked-only — a self-scheduling one-shot loop
+ * whose distinctive effect, cleanup-without-reschedule, is already exercised live by I3.
  */
 describe.skipIf(!E2E_ENABLED)("E2E — lifecycle & control surface", () => {
 	let sdk: FilenSDK
@@ -214,6 +215,38 @@ describe.skipIf(!E2E_ENABLED)("E2E — lifecycle & control surface", () => {
 			expect(messagesOfType(gated, "cycleRestarting").length).toBeGreaterThan(0)
 			expect(messagesOfType(gated, "cycleStarted").length).toBe(0)
 			expect((await snapshotRemoteReal(world))["/a.txt"], "still nothing uploaded while the error gates").toBeUndefined()
+		})
+	})
+
+	it("an incomplete (stopped) download is discarded, not committed as 0 bytes, and a retry converges", async () => {
+		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
+			const uuid = world.syncPair.uuid
+
+			// A remote-origin file the engine will pull down.
+			await uploadRemote(world, "r.txt", "remote-content")
+
+			// Pre-abort the download. The SDK resolves with a 0-byte staged file (the aborted stream ends
+			// cleanly), but the engine's integrity guard must DISCARD it on the size mismatch instead of
+			// moving a 0-byte file into place and caching it as synced — which would diverge permanently.
+			const signalKey = "download:/r.txt"
+			world.sync.abortControllers[signalKey] = new AbortController()
+			world.worker.stopTransfer(uuid, "download", "/r.txt")
+
+			const abortedMessages = await cycle(world)
+
+			expect(
+				messagesOfType(abortedMessages, "transfer").filter(message => message.data.of === "download" && message.data.type === "error")
+					.length
+			).toBeGreaterThan(0)
+			// The guard prevented a corrupt 0-byte file from being committed locally.
+			expect(await existsLocal(world, "r.txt"), "the incomplete download must not be committed").toBe(false)
+
+			// Retry: the FULL file downloads and the worlds converge (no lingering 0-byte divergence).
+			world.worker.resetTaskErrors(uuid)
+			await settle(world)
+			await expectConverged(world)
+
+			expect(await readLocal(world, "r.txt")).toBe("remote-content")
 		})
 	})
 })

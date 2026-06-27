@@ -119,6 +119,13 @@ export type FakeCloudControls = {
 	setError(method: string, error: Error): void
 	clearError(method: string): void
 	clearAllErrors(): void
+	/**
+	 * Make the next `downloadFileToLocal` for the file at `path` write an INCOMPLETE (0-byte) staged file
+	 * and RESOLVE (calling onError but not throwing) — reproducing the real SDK, whose aborted download
+	 * ends the read stream cleanly so the pipeline reports no error. One-shot; the engine's integrity guard
+	 * must discard the short file rather than commit it.
+	 */
+	simulateIncompleteDownload(path: string): void
 	/** Block lock acquisition for `resource` to simulate another device holding it. */
 	contendLock(resource: string): void
 	releaseLockContention(resource: string): void
@@ -144,6 +151,7 @@ export function createFakeCloud(initial: CloudSpec = {}, deps: { localFs: SyncFS
 	const locks = new Map<string, string>()
 	const contendedLocks = new Set<string>()
 	const errors = new Map<string, Error>()
+	const incompleteDownloads = new Set<string>()
 	const rootUUID = deps.rootUUID ?? uuidv4()
 	let revision = 0
 
@@ -650,6 +658,21 @@ export function createFakeCloud(initial: CloudSpec = {}, deps: { localFs: SyncFS
 						// nothing to clear
 					}
 
+					if (incompleteDownloads.has(uuid)) {
+						// Reproduce the real SDK's aborted-download behavior: a 0-byte staged file, an onError
+						// notification, but a RESOLVED promise (no throw). The engine's integrity guard must catch
+						// the size mismatch and refuse to commit it. One-shot.
+						incompleteDownloads.delete(uuid)
+
+						await deps.localFs.writeFile(to, new Uint8Array(0))
+
+						if (onError) {
+							onError(new Error("Aborted"))
+						}
+
+						return to
+					}
+
 					if (size > 0) {
 						if (onStarted) {
 							onStarted()
@@ -947,6 +970,15 @@ export function createFakeCloud(initial: CloudSpec = {}, deps: { localFs: SyncFS
 		setError: (method, error) => errors.set(method, error),
 		clearError: method => errors.delete(method),
 		clearAllErrors: () => errors.clear(),
+		simulateIncompleteDownload: (path: string): void => {
+			const node = getByPath(path)
+
+			if (!node) {
+				throw new Error(`simulateIncompleteDownload: no node at ${path}`)
+			}
+
+			incompleteDownloads.add(node.uuid)
+		},
 		contendLock: resource => contendedLocks.add(resource),
 		releaseLockContention: resource => contendedLocks.delete(resource),
 		addDir: (path: string): string => {

@@ -10,7 +10,7 @@ function abs(world: E2EWorld, relativePath: string): string {
 
 // ---- Local mutations (real filesystem under the sync root) -------------------------------------------
 
-export async function writeLocal(world: E2EWorld, relativePath: string, content: string): Promise<void> {
+export async function writeLocal(world: E2EWorld, relativePath: string, content: string | Uint8Array): Promise<void> {
 	const full = abs(world, relativePath)
 
 	await fs.ensureDir(pathModule.dirname(full))

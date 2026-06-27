@@ -45,6 +45,24 @@ describe.skipIf(!E2E_ENABLED)("E2E — core sync against live backend", () => {
 		})
 	})
 
+	it("twoWay: propagates creation AND deletion of a standalone empty directory", async () => {
+		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
+			// Create a standalone empty directory and let it sync up.
+			await mkdirLocal(world, "empty")
+			await settle(world)
+
+			expect((await snapshotRemoteReal(world))["/empty"]).toMatchObject({ type: "directory" })
+			await expectConverged(world)
+
+			// Deleting the still-empty directory must propagate too — no leaked empty dir on the remote.
+			await rmLocal(world, "empty")
+			await settle(world)
+
+			expect((await snapshotRemoteReal(world))["/empty"]).toBeUndefined()
+			await expectConverged(world)
+		})
+	})
+
 	it("twoWay: downloads new remote files and directories to local", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
 			await uploadRemote(world, "from-cloud.txt", "cloud-content")

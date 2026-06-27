@@ -3,7 +3,6 @@ import { SYNC_INTERVAL } from "../../src/constants"
 import { createWorld, BASE_TIME, type CreateWorldOptions, type World } from "../harness/world"
 import { snapshotLocal, snapshotRemote, messagesOfType } from "../harness/snapshot"
 import { rmLocal } from "../harness/mutations"
-import { knownBug } from "../harness/known-bug"
 
 /**
  * Category G — large-deletion confirmation (behavioral spec §G, §6). When
@@ -109,12 +108,12 @@ describe("Category G — large-deletion confirmation", () => {
 		)
 	})
 
-	// G3 — TARGET: confirmRemoteDeletion is gated by BOTH the mode and the `previousRemote.size <=
-	// deleteCount` threshold (symmetric to confirmLocalDeletion). Here the remote is emptied but only
-	// part of it is attributable to remote-side deletions (the rest was deleted locally), so the
-	// threshold is NOT met and there must be NO prompt. Today's engine drops the threshold via a
-	// missing `&&` (BUG-001) and over-prompts.
-	knownBug("BUG-001", "G3: a sub-threshold remote emptying does not trigger a confirmation prompt", async () => {
+	// G3: confirmRemoteDeletion is gated by BOTH the mode and the `previousRemote.size <= deleteCount`
+	// threshold (symmetric to confirmLocalDeletion). Here the remote is emptied but only part of it is
+	// attributable to remote-side deletions (the rest was deleted locally), so the threshold is NOT met
+	// and there is NO prompt. (BUG-001 fix: the missing `&&` that dropped the threshold + mode gate is
+	// restored, so confirmRemoteDeletion is now symmetric with confirmLocalDeletion.)
+	it("G3: a sub-threshold remote emptying does not trigger a confirmation prompt", async () => {
 		await withWorld(
 			{
 				mode: "twoWay",

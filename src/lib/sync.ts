@@ -520,9 +520,8 @@ export class Sync {
 					const confirmRemoteDeletion =
 						this.previousRemoteTree.size > 0 &&
 						currentRemoteTree.result.size === 0 &&
-						deleteLocalDirectoryCountRaw + deleteLocalFileCountRaw > 0
-					// eslint-disable-next-line @typescript-eslint/no-unused-expressions -- BUG-001: dangling expression from a missing "&&"; behavior preserved verbatim, fixed in Phase 2 with a regression test
-					this.previousRemoteTree.size <= deleteLocalDirectoryCountRaw + deleteLocalFileCountRaw &&
+						deleteLocalDirectoryCountRaw + deleteLocalFileCountRaw > 0 &&
+						this.previousRemoteTree.size <= deleteLocalDirectoryCountRaw + deleteLocalFileCountRaw &&
 						(this.mode === "twoWay" || this.mode === "cloudToLocal")
 
 					let skipSyncDueToConfirmDeletionRestart = false

@@ -1,7 +1,7 @@
 import { DEFAULT_IGNORED } from "./constants"
 import pathModule from "path"
 import crypto from "crypto"
-import { exec } from "child_process"
+import { execFile } from "child_process"
 import micromatch from "micromatch"
 
 /**
@@ -343,7 +343,8 @@ export async function pathSyncedByICloud(path: string): Promise<boolean> {
 	}
 
 	return await new Promise<boolean>(resolve => {
-		exec(`xattr "${path}"`, (err, stdout, stderr) => {
+		// execFile (no shell) so the path can't be interpreted as a shell string.
+		execFile("xattr", [path], (err, stdout, stderr) => {
 			if (err) {
 				resolve(false)
 

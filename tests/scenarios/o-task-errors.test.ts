@@ -3,7 +3,6 @@ import { runScenario, runCycle, localMutate, remoteMutate, control } from "../ha
 import { messagesOfType } from "../harness/snapshot"
 import { mkdirLocal, rmLocal, renameLocal } from "../harness/mutations"
 import { makeErrnoError } from "../fakes/virtual-fs"
-import { knownBug } from "../harness/known-bug"
 import { type SyncMessage, type TransferData } from "../../src/types"
 
 /**
@@ -229,13 +228,11 @@ describe("Category O — per-task-type error paths", () => {
 		expect(result.finalLocal).toEqual(result.finalRemote)
 	})
 
-	knownBug("BUG-007", "O7: a local delete I/O failure should surface a deleteLocalFile error", async () => {
-		// The deleteLocal catch re-checks `localFileSystem.pathExists(delta.path)` with the RELATIVE path
-		// ("/a.txt") — but pathExists forwards straight to fs.exists without joining the local root (unlike
-		// uploadFile/renameLocal, which join `syncPair.localPath` first). So the re-check probes "/a.txt"
-		// (which never exists; the file is at "/local/a.txt"), always returns false, and the engine SWALLOWS
-		// every deleteLocal I/O error — silently treating a failed delete as "already gone" and persisting
-		// state as if it succeeded. Correct behavior (asserted below, fails today): surface the error.
+	it("O7: a local delete I/O failure surfaces a deleteLocalFile error (not silently swallowed)", async () => {
+		// The deleteLocal catch re-checks `localFileSystem.pathExists(join(syncPair.localPath, delta.path))`,
+		// so when the unlink fails while the file is still present the re-check returns true and the error
+		// surfaces — a failed delete is no longer swallowed and mis-recorded as success. (BUG-007 fix: the
+		// re-check previously used the RELATIVE path, which never existed, so every failure was swallowed.)
 		const result = await runScenario({
 			name: "O7",
 			mode: "cloudToLocal",

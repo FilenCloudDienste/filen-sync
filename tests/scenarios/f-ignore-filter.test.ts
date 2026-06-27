@@ -293,4 +293,27 @@ describe("Category F — ignore / filter", () => {
 		expect(result.finalRemote["/keep-me.txt"]).toMatchObject({ type: "file" })
 		expect(result.finalLocal["/keep-me.txt"]).toMatchObject({ type: "file" })
 	})
+
+	it("F14: a directory-only ignore pattern does not ignore a remote FILE of the same name (BUG-005)", async () => {
+		// BUG-005 regression: the remote walk must ignore-check a file AS a file. It previously passed
+		// type:"directory", appending a trailing slash, so a file named "build" was matched by the
+		// directory-only pattern "build/" and wrongly skipped. A file named "build" must still sync, while
+		// a real directory "cache" is still correctly ignored by "cache/".
+		const result = await runScenario({
+			name: "F14",
+			mode: "cloudToLocal",
+			filenIgnore: "build/\ncache/",
+			initialRemote: {
+				"/build": "i am a file, not a directory",
+				"/cache/tmp.txt": "real dir content"
+			},
+			steps: [runCycle(), runCycle()]
+		})
+
+		// "build" is a FILE, so the directory-only pattern "build/" must NOT match it → it downloads.
+		expect(result.finalLocal["/build"]).toMatchObject({ type: "file" })
+		// "cache" IS a directory, so "cache/" correctly ignores it and its contents.
+		expect(result.finalLocal["/cache"]).toBeUndefined()
+		expect(result.finalLocal["/cache/tmp.txt"]).toBeUndefined()
+	})
 })

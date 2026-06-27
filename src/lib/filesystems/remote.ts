@@ -388,7 +388,7 @@ export class RemoteFileSystem {
 						absolutePath: localPath,
 						relativePath: filePath,
 						name: decrypted.name,
-						type: "directory"
+						type: "file"
 					})
 
 					if (ignored.ignored) {

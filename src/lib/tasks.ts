@@ -255,7 +255,7 @@ export class Tasks {
 					return delta
 				} catch (e) {
 					// Don't throw if the file/directory does not exist anymore (it has been changed while we were inside the sync cycle, after deltas have been calculated).
-					if (!(await this.sync.localFileSystem.pathExists(delta.path))) {
+					if (!(await this.sync.localFileSystem.pathExists(pathModule.join(this.sync.syncPair.localPath, delta.path)))) {
 						return delta
 					}
 

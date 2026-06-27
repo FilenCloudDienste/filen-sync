@@ -57,6 +57,18 @@ export async function existsLocal(world: E2EWorld, relativePath: string): Promis
 	return await fs.pathExists(abs(world, relativePath))
 }
 
+/**
+ * Create a symlink at `linkRelativePath` pointing at `target` (raw link contents — typically an
+ * absolute path). Throws on platforms/permissions that forbid symlink creation (e.g. Windows without
+ * Developer Mode); callers skip the test in that case.
+ */
+export async function symlinkLocal(world: E2EWorld, linkRelativePath: string, target: string): Promise<void> {
+	const full = abs(world, linkRelativePath)
+
+	await fs.ensureDir(pathModule.dirname(full))
+	await fs.symlink(target, full)
+}
+
 // ---- Remote mutations (real SDK calls under the /<runId> root) ---------------------------------------
 
 const segments = (relativePath: string): string[] => relativePath.split("/").map(segment => segment.trim()).filter(Boolean)

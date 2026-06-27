@@ -1,10 +1,13 @@
-import { defineConfig } from "vitest/config"
+import { defineConfig, configDefaults } from "vitest/config"
 
 export default defineConfig({
 	test: {
 		globals: true,
 		environment: "node",
 		include: ["tests/**/*.test.ts"],
+		// The live e2e suite has its own config (vitest.e2e.config.ts): real network, real clock, no
+		// coverage gate. Keep it out of the deterministic suite + its coverage gate.
+		exclude: [...configDefaults.exclude, "tests/e2e/**"],
 		coverage: {
 			provider: "v8",
 			include: ["src/**/*.ts"],

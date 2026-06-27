@@ -112,4 +112,61 @@ describe.skipIf(!E2E_ENABLED)("E2E — one-way mode semantics", () => {
 			expect(Buffer.from("remote-original").length).toBe(remote["/shared.txt"]!.size)
 		})
 	})
+
+	// ---- strict mirror: the foreign side is forced to match the authoritative side ----------------
+
+	it("localToCloud: a remote-only file is mirror-DELETED", async () => {
+		await withE2EWorld({ sdk, mode: "localToCloud" }, async world => {
+			await writeLocal(world, "mine.txt", "mine")
+			await settle(world)
+
+			// Another device adds a file the local side never had; the mirror must remove it.
+			await uploadRemote(world, "foreign.txt", "theirs")
+			await settle(world)
+
+			const remote = await snapshotRemoteReal(world)
+
+			expect(remote["/foreign.txt"]).toBeUndefined()
+			expect(remote["/mine.txt"]).toMatchObject({ type: "file" })
+		})
+	})
+
+	it("cloudToLocal: a local-only file is mirror-DELETED", async () => {
+		await withE2EWorld({ sdk, mode: "cloudToLocal" }, async world => {
+			await uploadRemote(world, "remote.txt", "remote")
+			await settle(world)
+
+			// A local-only file the remote never had; the mirror must remove it.
+			await writeLocal(world, "local-only.txt", "mine")
+			await settle(world)
+
+			expect(await existsLocal(world, "local-only.txt")).toBe(false)
+			expect(await existsLocal(world, "remote.txt")).toBe(true)
+		})
+	})
+
+	it("localToCloud: a foreign remote edit to a synced file is REVERTED (F6)", async () => {
+		await withE2EWorld({ sdk, mode: "localToCloud" }, async world => {
+			await writeLocal(world, "a.txt", "local-content")
+			await settle(world)
+
+			await uploadRemote(world, "a.txt", "FOREIGN")
+			await settle(world)
+
+			expect((await snapshotRemoteReal(world, { withContent: true }))["/a.txt"]!.size).toBe("local-content".length)
+			expect(await readLocal(world, "a.txt")).toBe("local-content")
+		})
+	})
+
+	it("cloudToLocal: a foreign local edit to a synced file is REVERTED (F6)", async () => {
+		await withE2EWorld({ sdk, mode: "cloudToLocal" }, async world => {
+			await uploadRemote(world, "a.txt", "remote-content")
+			await settle(world)
+
+			await modifyLocal(world, "a.txt", "LOCAL-EDIT")
+			await settle(world)
+
+			expect(await readLocal(world, "a.txt")).toBe("remote-content")
+		})
+	})
 })

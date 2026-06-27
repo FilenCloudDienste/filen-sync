@@ -4,7 +4,7 @@ import { E2E_ENABLED, loginTestSDK, teardownTestSDK } from "./harness/account"
 import { withE2EWorld } from "./harness/world"
 import { settle, expectConverged } from "./harness/drive"
 import { snapshotRemoteReal } from "./harness/assert"
-import { writeLocal, modifyLocal, rmLocal, readLocal, uploadRemote, deleteRemote, existsLocal } from "./harness/mutations"
+import { writeLocal, modifyLocal, rmLocal, renameLocal, readLocal, uploadRemote, deleteRemote, existsLocal } from "./harness/mutations"
 
 /**
  * Phase 3 e2e — twoWay conflict resolution against the live backend (both sides changed since the last
@@ -65,6 +65,46 @@ describe.skipIf(!E2E_ENABLED)("E2E — twoWay conflict resolution", () => {
 
 			expect((await snapshotRemoteReal(world))["/g.txt"]).toBeUndefined()
 			await expectConverged(world)
+		})
+	})
+
+	it("remote modify vs local delete: the newer remote modification wins, resurrected (F7)", async () => {
+		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
+			await writeLocal(world, "h.txt", "v1")
+			await settle(world)
+
+			// Symmetric to the local-modify-vs-remote-delete case: the local copy is deleted while the remote
+			// modifies it (a new version). The newer modification wins on EITHER side, so the file survives.
+			await rmLocal(world, "h.txt")
+			await uploadRemote(world, "h.txt", "REMOTE-MODIFIED")
+
+			await settle(world)
+
+			await expectConverged(world)
+			expect(await existsLocal(world, "h.txt")).toBe(true)
+			expect(await readLocal(world, "h.txt")).toBe("REMOTE-MODIFIED")
+		})
+	})
+
+	it("rename + in-place modify in one beat keeps the new name AND the new content (F1)", async () => {
+		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
+			await writeLocal(world, "a.txt", "original-content")
+			await settle(world)
+
+			// Rename, then immediately overwrite the renamed file before the next sync. The rename must not
+			// mask the content change — the remote ends with the NEW bytes under the new name.
+			await renameLocal(world, "a.txt", "b.txt")
+			await writeLocal(world, "b.txt", "BRAND-NEW-CONTENT")
+
+			await settle(world)
+
+			await expectConverged(world)
+
+			const remote = await snapshotRemoteReal(world)
+
+			expect(remote["/a.txt"]).toBeUndefined()
+			expect(remote["/b.txt"]).toMatchObject({ type: "file" })
+			expect(await readLocal(world, "b.txt")).toBe("BRAND-NEW-CONTENT")
 		})
 	})
 })

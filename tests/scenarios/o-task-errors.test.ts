@@ -311,16 +311,17 @@ describe("Category O — per-task-type error paths", () => {
 		expect(result.finalLocal).toEqual(result.finalRemote)
 	})
 
-	it("O10: a local rename whose source already vanished is skipped without error (renameLocalFile vanish)", async () => {
+	it("O10: cloudToLocal — a remote rename racing a local delete of the source converges (no doomed rename)", async () => {
 		const result = await runScenario({
 			name: "O10",
 			mode: "cloudToLocal",
 			initialRemote: { "/a.txt": "x" },
 			steps: [
 				runCycle(),
-				// The remote renames a.txt→b.txt (→ renameLocalFile), but the local source is removed in the
-				// same beat: rename() finds no source, the re-check pathExists(from) confirms it is gone, and
-				// the task returns null — a silent skip, no error and no rename performed.
+				// The remote renames a.txt→b.txt while the local source a is removed in the same beat. In
+				// cloudToLocal the remote is authoritative: renaming a local source that the local side just
+				// changed (here: deleted) would target a stale/absent node, so the engine correctly does NOT
+				// emit the rename — it downloads the remote's b instead, so the worlds still converge. (F2)
 				remoteMutate(world => world.cloud.controls.movePath("/a.txt", "/b.txt")),
 				localMutate(world => rmLocal(world, "a.txt")),
 				runCycle(),
@@ -328,14 +329,11 @@ describe("Category O — per-task-type error paths", () => {
 			]
 		})
 
-		// The vanished-source rename is swallowed: no task error, and neither a success nor an error transfer
-		// (the task returned null). The remote rename stands; the local copy is simply not re-created in this
-		// run (re-download would need a fresh local-change signal, which the manual watcher does not emit here).
+		// No task error and no errored rename transfer; the remote's b is mirrored down and both sides agree.
 		expect(taskErrorCount(result.messages)).toBe(0)
 		expect(hasTransfer(result.messages, "renameLocalFile", "error")).toBe(false)
-		expect(hasTransfer(result.messages, "renameLocalFile", "success")).toBe(false)
-		expect(result.finalLocal["/b.txt"]).toBeUndefined()
 		expect(result.finalRemote["/b.txt"]).toMatchObject({ type: "file", size: 1 })
+		expect(result.finalLocal).toEqual(result.finalRemote)
 	})
 
 	// Directory variants of the shared deleteLocal / renameLocal cases (the file variants are O7/O8/O10):

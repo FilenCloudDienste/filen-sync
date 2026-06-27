@@ -296,6 +296,20 @@ export class Deltas {
 					// Because only comparing strings can be weird sometimes
 					Buffer.from(currentItem.path, "utf-8").toString("hex") !== Buffer.from(previousItem.path, "utf-8").toString("hex")
 				) {
+					// Only propagate the rename if the REMOTE source is unchanged since the base — the same
+					// node (uuid) still sits at the old path. If the other side deleted, modified, or renamed
+					// that file/directory in the same window, renaming the stale remote node is invalid: skip
+					// it, leave the paths unmarked, and let the renamed item be re-added under its new name
+					// while the other side's change is applied by its own pass. The worlds still converge,
+					// keeping both edits rather than silently dropping one. (F2–F4)
+					const remoteSource = currentRemoteTree.tree[previousItem.path]
+					const baseRemoteSource = previousRemoteTree.tree[previousItem.path]
+					const remoteSourceUnchanged = !!remoteSource && !!baseRemoteSource && remoteSource.uuid === baseRemoteSource.uuid
+
+					if (!remoteSourceUnchanged) {
+						continue
+					}
+
 					const delta: Delta = {
 						type: currentItem.type === "directory" ? "renameRemoteDirectory" : "renameRemoteFile",
 						path: currentItem.path,
@@ -311,6 +325,26 @@ export class Deltas {
 
 					pathsAdded[currentItem.path] = true
 					pathsAdded[previousItem.path] = true
+
+					// Rename + in-place content modify of the SAME file in ONE cycle: the rename marks the new
+					// path "added", so the modification pass below would skip it and the new bytes would never
+					// upload (the remote would keep the OLD content under the new name, forever). Detect the
+					// content change here against the base and emit the upload too; phase order runs the rename
+					// (phase 4) before the upload (phase 11), so it lands on the renamed remote node. (F1)
+					if (currentItem.type === "file") {
+						const contentChanged =
+							currentItem.size !== previousItem.size ||
+							normalizeLastModifiedMsForComparison(currentItem.lastModified) !==
+								normalizeLastModifiedMsForComparison(previousItem.lastModified)
+
+						if (contentChanged) {
+							deltas.push({
+								type: "uploadFile",
+								path: currentItem.path,
+								size: currentItem.size
+							})
+						}
+					}
 				}
 			}
 		}
@@ -334,6 +368,27 @@ export class Deltas {
 					// Because only comparing strings can be weird sometimes
 					Buffer.from(currentItem.path, "utf-8").toString("hex") !== Buffer.from(previousItem.path, "utf-8").toString("hex")
 				) {
+					// Symmetric to the local rename pass: only propagate the remote rename if the LOCAL source
+					// is unchanged since the base — same inode AND (for files) same content. A remote modify
+					// mints a new uuid, but a LOCAL modify keeps the inode, so checking the inode alone would
+					// let a remote rename fire over a file the user edited in the same window and silently drop
+					// that edit. If the local side deleted, modified, or renamed it, skip the rename and let
+					// the file be handled by the deletion/addition passes → convergence, keeping both. (F2–F4)
+					const localSource = currentLocalTree.tree[previousItem.path]
+					const baseLocalSource = previousLocalTree.tree[previousItem.path]
+					const localSourceUnchanged =
+						!!localSource &&
+						!!baseLocalSource &&
+						localSource.inode === baseLocalSource.inode &&
+						(currentItem.type === "directory" ||
+							(localSource.size === baseLocalSource.size &&
+								normalizeLastModifiedMsForComparison(localSource.lastModified) ===
+									normalizeLastModifiedMsForComparison(baseLocalSource.lastModified)))
+
+					if (!localSourceUnchanged) {
+						continue
+					}
+
 					const delta: Delta = {
 						type: currentItem.type === "directory" ? "renameLocalDirectory" : "renameLocalFile",
 						path: currentItem.path,
@@ -371,6 +426,25 @@ export class Deltas {
 						previousLocalItem //&&
 						//(this.sync.mode !== "localToCloud" ? !currentLocalTree.inodes[previousLocalItem.inode] : true)
 					) {
+						// Symmetric to the remote-deletions resurrect (OBS-001): the local copy was deleted, but
+						// if the REMOTE file was modified since the base — a new uuid, i.e. a real re-upload — the
+						// newer modification wins over the delete. Skip the delete and leave the path unmarked so
+						// the remote-additions pass downloads (resurrects) it locally. A newer modify always beats
+						// a delete, in either direction. (F7)
+						if (previousLocalItem.type === "file") {
+							const previousRemoteItem = previousRemoteTree.tree[path]
+							const currentRemoteItem = currentRemoteTree.tree[path]
+
+							if (
+								currentRemoteItem &&
+								currentRemoteItem.type === "file" &&
+								previousRemoteItem &&
+								currentRemoteItem.uuid !== previousRemoteItem.uuid
+							) {
+								continue
+							}
+						}
+
 						const delta: Delta = {
 							type: previousLocalItem.type === "directory" ? "deleteRemoteDirectory" : "deleteRemoteFile",
 							path
@@ -699,18 +773,34 @@ export class Deltas {
 						: normalizeLastModifiedMsForComparison(currentLocalItem.lastModified) >
 							normalizeLastModifiedMsForComparison(currentRemoteItem.lastModified)
 					const remoteChanged = !previousRemoteItem || currentRemoteItem.uuid !== previousRemoteItem.uuid
+					// Directional push modes (localToCloud / localBackup): the LOCAL side is authoritative, so a
+					// local change ALWAYS wins. The newer-mtime tiebreak is twoWay conflict resolution and must
+					// not let a foreign remote edit (with a newer mtime) suppress the push. (F5)
+					const directionalPush = this.sync.mode === "localToCloud" || this.sync.mode === "localBackup"
 					const localWins =
+						directionalPush ||
 						!remoteChanged ||
 						normalizeLastModifiedMsForComparison(currentLocalItem.lastModified) >=
 							normalizeLastModifiedMsForComparison(currentRemoteItem.lastModified)
 
-					if (localChanged && localWins) {
+					// Strict mirror (localToCloud only): the remote MUST equal local. If the remote was edited
+					// away from what we last pushed (a new uuid) — even when the local file itself is unchanged —
+					// re-assert the local copy to revert that foreign edit, bypassing the md5 dedup below (local
+					// bytes still equal the last upload, so the dedup would otherwise skip). localBackup is
+					// additive and deliberately tolerates foreign edits, so it is excluded. (F6)
+					const mirrorRevert = this.sync.mode === "localToCloud" && remoteChanged
+					// Directional push with NO remote base: a stray remote file occupies a path local also has.
+					// It cannot be the synced copy if the SIZES differ, so the authoritative local wins — push it
+					// up over the stray. (F9, symmetric to the pull side.)
+					const noBaseSizeDiverged = directionalPush && !previousRemoteItem && currentLocalItem.size !== currentRemoteItem.size
+
+					if ((localChanged || mirrorRevert || noBaseSizeDiverged) && localWins) {
 						const md5Hash = await this.sync.localFileSystem.createFileHash({
 							relativePath: path,
 							algorithm: "md5"
 						})
 
-						if (md5Hash !== this.sync.localFileHashes[currentLocalItem.path]) {
+						if (mirrorRevert || noBaseSizeDiverged || md5Hash !== this.sync.localFileHashes[currentLocalItem.path]) {
 							deltas.push({
 								type: "uploadFile",
 								path,
@@ -759,23 +849,53 @@ export class Deltas {
 
 				const previousRemoteItem = previousRemoteTree.tree[path]
 
-				// If the item exists in both trees and the mod time changed, we download it.
-				if (
-					currentRemoteItem &&
-					currentRemoteItem.type === "file" &&
-					currentLocalItem &&
-					previousRemoteItem &&
-					normalizeLastModifiedMsForComparison(currentRemoteItem.lastModified) >
-						normalizeLastModifiedMsForComparison(currentLocalItem.lastModified) &&
-					currentRemoteItem.uuid !== previousRemoteItem.uuid
-				) {
-					deltas.push({
-						type: "downloadFile",
-						path,
-						size: currentRemoteItem.size
-					})
+				// If the item exists in both trees and the remote copy changed since the base, download it.
+				// This MIRRORS the local-additions modify branch. With a base the remote changed iff its uuid
+				// changed (every re-upload mints one); with NO base — a fresh add-vs-add, or lost/corrupt state
+				// — fall back to side-vs-side and treat it as changed only when the remote is strictly newer
+				// (otherwise identical content on both sides would be needlessly downloaded). The local pass ran
+				// first and claimed the path (pathsAdded) when local won; reaching here means the remote wins.
+				// Without this no-base fallback an add-vs-add where the REMOTE is newer never converged. (F8)
+				if (currentRemoteItem && currentRemoteItem.type === "file" && currentLocalItem && currentLocalItem.type === "file") {
+					const previousLocalItem = previousLocalTree.tree[path]
+					const remoteChanged = previousRemoteItem
+						? currentRemoteItem.uuid !== previousRemoteItem.uuid
+						: normalizeLastModifiedMsForComparison(currentRemoteItem.lastModified) >
+							normalizeLastModifiedMsForComparison(currentLocalItem.lastModified)
+					// Directional pull modes (cloudToLocal / cloudBackup): the REMOTE side is authoritative, so a
+					// remote change ALWAYS wins; the newer-mtime tiebreak is twoWay-only and must not let a
+					// foreign local edit (with a newer mtime) suppress the pull. (F5)
+					const directionalPull = this.sync.mode === "cloudToLocal" || this.sync.mode === "cloudBackup"
+					const remoteWins =
+						directionalPull ||
+						!previousLocalItem ||
+						normalizeLastModifiedMsForComparison(currentRemoteItem.lastModified) >
+							normalizeLastModifiedMsForComparison(currentLocalItem.lastModified)
 
-					pathsAdded[path] = true
+					// Strict mirror (cloudToLocal only): local MUST equal remote. If the local copy was edited
+					// away from what we last pulled (size or whole-second mtime differs from the base) — even when
+					// the remote is unchanged — re-download to revert that foreign local edit. cloudBackup is
+					// additive and deliberately tolerates local edits, so it is excluded. (F6)
+					const localDiverged =
+						!!previousLocalItem &&
+						(previousLocalItem.size !== currentLocalItem.size ||
+							normalizeLastModifiedMsForComparison(previousLocalItem.lastModified) !==
+								normalizeLastModifiedMsForComparison(currentLocalItem.lastModified))
+					const mirrorRevert = this.sync.mode === "cloudToLocal" && localDiverged
+					// Directional pull with NO local base: a stray local file occupies a path the remote also has
+					// (e.g. the local copy was deleted then re-created with different content). It cannot be the
+					// synced copy if the SIZES differ, so the authoritative remote wins — pull it down. (F9)
+					const noBaseSizeDiverged = directionalPull && !previousLocalItem && currentLocalItem.size !== currentRemoteItem.size
+
+					if ((remoteChanged || mirrorRevert || noBaseSizeDiverged) && remoteWins) {
+						deltas.push({
+							type: "downloadFile",
+							path,
+							size: currentRemoteItem.size
+						})
+
+						pathsAdded[path] = true
+					}
 				}
 			}
 		}

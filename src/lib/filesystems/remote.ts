@@ -224,11 +224,10 @@ export class RemoteFileSystem {
 		changed: boolean
 	}> {
 		const deviceId = await this.getDeviceId()
-		const dir = await this.sync.sdk.api(3).dir().tree({
+		const dir = await this.sync.environment.fetchDirTree(this.sync.sdk, {
 			uuid: this.sync.syncPair.remoteParentUUID,
 			deviceId,
-			skipCache,
-			includeRaw: false
+			skipCache
 		})
 		const now = Date.now()
 

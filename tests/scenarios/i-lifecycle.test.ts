@@ -72,7 +72,8 @@ describe("Category I — lifecycle / control / transfers", () => {
 					},
 					createWatcher: async (_path, _onChange) => ({
 						close: async (): Promise<void> => {}
-					})
+					}),
+					fetchDirTree: (_sdk, request) => world.cloud.sdk.api(3).dir().tree(request)
 				}
 
 				const worker = new SyncWorker({

@@ -93,7 +93,10 @@ export async function createWorld(options: CreateWorldOptions): Promise<World> {
 		writeFileAtomic: async (filename, data, writeOptions): Promise<void> => {
 			await vfs.fs.writeFile(filename, data, writeOptions)
 		},
-		createWatcher: watcher.factory
+		createWatcher: watcher.factory,
+		// Route the tree fetch back through the fake cloud's SDK so every scenario exercises the real
+		// engine logic without HTTP/msgpack (the production msgpack path is unit-tested separately).
+		fetchDirTree: (_sdk, request) => cloud.sdk.api(3).dir().tree(request)
 	}
 
 	const messages: SyncMessage[] = []
@@ -156,7 +159,8 @@ export async function restartSync(world: World): Promise<void> {
 		writeFileAtomic: async (filename, data, writeOptions): Promise<void> => {
 			await world.vfs.fs.writeFile(filename, data, writeOptions)
 		},
-		createWatcher: watcher.factory
+		createWatcher: watcher.factory,
+		fetchDirTree: (_sdk, request) => world.cloud.sdk.api(3).dir().tree(request)
 	}
 
 	const worker = new SyncWorker({

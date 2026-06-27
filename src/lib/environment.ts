@@ -2,6 +2,7 @@ import fsExtra from "fs-extra"
 import fs from "fs"
 import FastGlob from "fast-glob"
 import writeFileAtomicReal from "write-file-atomic"
+import { type SyncDirTreeFetcher, fetchDirTreeMsgpack } from "./filesystems/dirTree"
 
 /**
  * The subset of the fs-extra promise API that the sync engine awaits directly.
@@ -58,6 +59,11 @@ export type SyncEnvironment = {
 	globFs: SyncGlobFS
 	writeFileAtomic: SyncWriteFileAtomic
 	createWatcher: SyncWatcherFactory
+	/**
+	 * Fetches the remote directory tree. Production uses a msgpack reimplementation of `/v3/dir/tree`;
+	 * tests inject a fetcher backed by the fake cloud. Swappable so the wire format is not baked in.
+	 */
+	fetchDirTree: SyncDirTreeFetcher
 }
 
 /**
@@ -68,6 +74,7 @@ export function defaultEnvironment(): SyncEnvironment {
 		fs: fsExtra,
 		globFs: fsExtra,
 		writeFileAtomic: writeFileAtomicReal,
+		fetchDirTree: (sdk, request) => fetchDirTreeMsgpack(sdk, request),
 		createWatcher: async (path: string, onChange: () => void): Promise<SyncWatcher> => {
 			let closed = false
 			let watcher: fs.FSWatcher | undefined

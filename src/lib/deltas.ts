@@ -73,6 +73,45 @@ export type Delta = { path: string } & (
  *      The old loop spliced `deltas[i]` in place, so a removal shifted an unrelated delta into slot `i`
  *      that a later iteration could overwrite — silently dropping a real op and leaving a bogus one.
  */
+/**
+ * Walk `path`'s ancestor directories from the immediate parent upward, returning the value of the FIRST
+ * (deepest, i.e. longest) ancestor that is a key of `map` — the most-specific enclosing entry — or
+ * `undefined`. Equivalent to scanning every entry for the longest key that is a strict ancestor of `path`
+ * (`path.startsWith(key + "/")`), but O(depth) map lookups instead of O(entries) prefix comparisons. The
+ * walk stops above the root and never returns `path` itself, matching the original `startsWith(key + "/")`
+ * (strict-ancestor) semantics, including the "/" boundary that stops "/abc" matching a key of "/ab".
+ */
+function nearestAncestor<T>(path: string, map: ReadonlyMap<string, T>): T | undefined {
+	let end = path.lastIndexOf("/")
+
+	while (end > 0) {
+		const hit = map.get(path.slice(0, end))
+
+		if (hit !== undefined) {
+			return hit
+		}
+
+		end = path.lastIndexOf("/", end - 1)
+	}
+
+	return undefined
+}
+
+/** Whether any strict ancestor directory of `path` is in `set` (same ancestor-walk as {@link nearestAncestor}). */
+function hasAncestorIn(path: string, set: ReadonlySet<string>): boolean {
+	let end = path.lastIndexOf("/")
+
+	while (end > 0) {
+		if (set.has(path.slice(0, end))) {
+			return true
+		}
+
+		end = path.lastIndexOf("/", end - 1)
+	}
+
+	return false
+}
+
 export function collapseDeltas({
 	deltas,
 	renamedLocalDirectories,
@@ -86,21 +125,43 @@ export function collapseDeltas({
 	deletedLocalDirectories: Delta[]
 	deletedRemoteDirectories: Delta[]
 }): Delta[] {
+	// Index the renamed/deleted directories by path so each child delta finds its nearest enclosing ancestor
+	// via an O(depth) ancestor-walk instead of an O(directories) scan. A deep/wide directory move otherwise
+	// makes this pass O(deltas * directories * pathLength) — super-linear, seconds-long for a large move (P1).
+	const localRenameByFrom = new Map<string, Extract<Delta, { type: "renameLocalDirectory" }>>()
+	const remoteRenameByFrom = new Map<string, Extract<Delta, { type: "renameRemoteDirectory" }>>()
+	const localDeletedDirs = new Set<string>()
+	const remoteDeletedDirs = new Set<string>()
+
+	for (const directoryDelta of renamedLocalDirectories) {
+		if (directoryDelta.type === "renameLocalDirectory") {
+			localRenameByFrom.set(directoryDelta.from, directoryDelta)
+		}
+	}
+
+	for (const directoryDelta of renamedRemoteDirectories) {
+		if (directoryDelta.type === "renameRemoteDirectory") {
+			remoteRenameByFrom.set(directoryDelta.from, directoryDelta)
+		}
+	}
+
+	for (const directoryDelta of deletedLocalDirectories) {
+		if (directoryDelta.type === "deleteLocalDirectory") {
+			localDeletedDirs.add(directoryDelta.path)
+		}
+	}
+
+	for (const directoryDelta of deletedRemoteDirectories) {
+		if (directoryDelta.type === "deleteRemoteDirectory") {
+			remoteDeletedDirs.add(directoryDelta.path)
+		}
+	}
+
 	const collapsed: Delta[] = []
 
 	for (const delta of deltas) {
 		if (delta.type === "renameLocalDirectory" || delta.type === "renameLocalFile") {
-			let parent: Extract<Delta, { type: "renameLocalDirectory" }> | undefined
-
-			for (const directoryDelta of renamedLocalDirectories) {
-				if (
-					directoryDelta.type === "renameLocalDirectory" &&
-					delta.from.startsWith(directoryDelta.from + "/") &&
-					(!parent || directoryDelta.from.length > parent.from.length)
-				) {
-					parent = directoryDelta
-				}
-			}
+			const parent = nearestAncestor(delta.from, localRenameByFrom)
 
 			if (parent) {
 				const newFromPath = replacePathStartWithFromAndTo(delta.from, parent.from, parent.to)
@@ -113,17 +174,7 @@ export function collapseDeltas({
 				continue
 			}
 		} else if (delta.type === "renameRemoteDirectory" || delta.type === "renameRemoteFile") {
-			let parent: Extract<Delta, { type: "renameRemoteDirectory" }> | undefined
-
-			for (const directoryDelta of renamedRemoteDirectories) {
-				if (
-					directoryDelta.type === "renameRemoteDirectory" &&
-					delta.from.startsWith(directoryDelta.from + "/") &&
-					(!parent || directoryDelta.from.length > parent.from.length)
-				) {
-					parent = directoryDelta
-				}
-			}
+			const parent = nearestAncestor(delta.from, remoteRenameByFrom)
 
 			if (parent) {
 				const newFromPath = replacePathStartWithFromAndTo(delta.from, parent.from, parent.to)
@@ -135,19 +186,11 @@ export function collapseDeltas({
 				continue
 			}
 		} else if (delta.type === "deleteLocalDirectory" || delta.type === "deleteLocalFile") {
-			if (
-				deletedLocalDirectories.some(
-					directoryDelta => directoryDelta.type === "deleteLocalDirectory" && delta.path.startsWith(directoryDelta.path + "/")
-				)
-			) {
+			if (hasAncestorIn(delta.path, localDeletedDirs)) {
 				continue
 			}
 		} else if (delta.type === "deleteRemoteDirectory" || delta.type === "deleteRemoteFile") {
-			if (
-				deletedRemoteDirectories.some(
-					directoryDelta => directoryDelta.type === "deleteRemoteDirectory" && delta.path.startsWith(directoryDelta.path + "/")
-				)
-			) {
+			if (hasAncestorIn(delta.path, remoteDeletedDirs)) {
 				continue
 			}
 		}
@@ -271,12 +314,21 @@ export function rebasePathAcrossRenames(path: string, renames: { from: string; t
  * correct post-rename path (BUG-A / BUG-B).
  */
 export function rebaseLocalTreeAcrossRenames(tree: LocalTree, renames: { from: string; to: string }[]): LocalTree {
+	// No rename touches this tree (the common single-direction cycle) — return it as-is rather than copying
+	// the whole map for nothing. (P1)
+	if (renames.length === 0) {
+		return tree
+	}
+
+	// Index renames by `from` so each entry locates its nearest renamed ancestor in O(depth), not O(renames).
+	const renameByFrom = new Map(renames.map(rename => [rename.from, rename]))
 	const newTree: LocalTree["tree"] = {}
 	const newINodes: LocalTree["inodes"] = {}
 
 	for (const path in tree.tree) {
 		const item = tree.tree[path]!
-		const rebasedPath = rebasePathAcrossRenames(path, renames)
+		const parent = nearestAncestor(path, renameByFrom)
+		const rebasedPath = parent ? parent.to + path.slice(parent.from.length) : path
 		const newItem = rebasedPath === path ? item : { ...item, path: rebasedPath }
 
 		newTree[rebasedPath] = newItem
@@ -287,12 +339,18 @@ export function rebaseLocalTreeAcrossRenames(tree: LocalTree, renames: { from: s
 }
 
 export function rebaseRemoteTreeAcrossRenames(tree: RemoteTree, renames: { from: string; to: string }[]): RemoteTree {
+	if (renames.length === 0) {
+		return tree
+	}
+
+	const renameByFrom = new Map(renames.map(rename => [rename.from, rename]))
 	const newTree: RemoteTree["tree"] = {}
 	const newUUIDs: RemoteTree["uuids"] = {}
 
 	for (const path in tree.tree) {
 		const item = tree.tree[path]!
-		const rebasedPath = rebasePathAcrossRenames(path, renames)
+		const parent = nearestAncestor(path, renameByFrom)
+		const rebasedPath = parent ? parent.to + path.slice(parent.from.length) : path
 		const newItem = rebasedPath === path ? item : { ...item, path: rebasedPath }
 
 		newTree[rebasedPath] = newItem

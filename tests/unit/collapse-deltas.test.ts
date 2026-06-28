@@ -169,6 +169,45 @@ describe("collapseDeltas", () => {
 
 		expect(out).toEqual(deltas)
 	})
+
+	it("collapses a large wide directory move to the single parent rename (ancestor-walk correctness + scale)", () => {
+		// A realistic large move: /src -> /dst with many subdirectories, each holding many files. Every child
+		// must fold into its nearest renamed-directory ancestor, leaving ONLY the top-level rename. This both
+		// checks the indexed ancestor-walk on a large input and acts as a tripwire for a return to the old
+		// O(deltas * directories * pathLength) scan, which on this input ran for MINUTES — far past the test
+		// runner's timeout — where the indexed version finishes in milliseconds. (P1)
+		const deltas: Delta[] = []
+		const renamedLocalDirectories: Delta[] = []
+		const top: Delta = { type: "renameLocalDirectory", path: "/src", from: "/src", to: "/dst" }
+
+		deltas.push(top)
+		renamedLocalDirectories.push(top)
+
+		for (let s = 0; s < 300; s++) {
+			const fromDir = `/src/sub${s}`
+			const toDir = `/dst/sub${s}`
+			const dirRename: Delta = { type: "renameLocalDirectory", path: fromDir, from: fromDir, to: toDir }
+
+			deltas.push(dirRename)
+			renamedLocalDirectories.push(dirRename)
+
+			for (let f = 0; f < 100; f++) {
+				const from = `${fromDir}/f${f}.txt`
+				const to = `${toDir}/f${f}.txt`
+
+				deltas.push({ type: "renameLocalFile", path: from, from, to })
+			}
+		}
+
+		// 1 top rename + 300 subdir renames + 30000 file renames.
+		expect(deltas.length).toBe(30301)
+
+		const out = collapseDeltas({ ...empty, deltas, renamedLocalDirectories })
+
+		// Everything collapses into /src -> /dst: each subdir rename rewrites to /dst/subN (== its target, so
+		// redundant) and each file folds into its subdir which folds into /src.
+		expect(out).toEqual([{ type: "renameLocalDirectory", path: "/src", from: "/src", to: "/dst" }])
+	})
 })
 
 /**

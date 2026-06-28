@@ -1,6 +1,6 @@
 {
 	"name": "@filen/sync",
-	"version": "0.3.1",
+	"version": "0.3.2",
 	"description": "Filen Sync",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
@@ -59,7 +59,7 @@
 		"wait-on": "^7.2.0"
 	},
 	"dependencies": {
-		"@filen/sdk": "^0.3.12",
+		"@filen/sdk": "^0.4.1",
 		"fast-glob": "^3.3.3",
 		"fs-extra": "^11.3.0",
 		"ignore": "^7.0.3",

@@ -7,7 +7,6 @@ import { type DistributiveOmit, type Prettify } from "../../types"
 import { postMessageToMain } from "../ipc"
 import {
 	convertTimestampToMs,
-	promiseAllChunked,
 	isPathOverMaxLength,
 	isNameOverMaxLength,
 	isValidPath,
@@ -52,6 +51,16 @@ export type RemoteTreeIgnored = {
 
 export const DEVICE_ID_VERSION = 1
 
+/**
+ * How many remote items (folders, then files) are decrypted concurrently while building the tree. The
+ * build decrypts entries in fixed-size batches instead of mapping ALL entries to promises up front — on a
+ * tree with millions of entries that eager map allocated millions of pending promises + closures at once
+ * (an O(n) peak-memory spike). A batch caps peak concurrency — and therefore peak memory — without
+ * reducing throughput (the SDK's decrypt/IO services only a handful in parallel regardless), and the batch
+ * size IS the parallel-decrypt width (it replaces the old 1024-wide listSemaphore).
+ */
+export const REMOTE_BUILD_CONCURRENCY = 1024
+
 export class RemoteFileSystem {
 	private readonly sync: Sync
 	public getDirectoryTreeCache: {
@@ -70,7 +79,6 @@ export class RemoteFileSystem {
 	private readonly mutex = new Semaphore(1)
 	private readonly mkdirMutex = new Semaphore(1)
 	public readonly itemsMutex = new Semaphore(1)
-	public readonly listSemaphore = new Semaphore(1024)
 	private deviceIdCache: string = ""
 	public ignoredCache = new Map<string, { ignored: true; reason: RemoteTreeIgnoredReason } | { ignored: false }>()
 
@@ -245,19 +253,18 @@ export class RemoteFileSystem {
 			}
 		}
 
-		const baseFolder = dir.folders[0]
-
-		if (!baseFolder) {
-			throw new Error("Could not get base folder.")
-		}
-
-		const baseFolderParent = baseFolder[2]
-
-		if (baseFolderParent !== "base") {
+		// The /v3/dir/tree response can arrive UNORDERED — there is no guarantee a parent folder precedes its
+		// children, nor that folders[0] is the sync root. So we decrypt every folder's metadata first (in
+		// bounded-concurrency batches, capping peak pending promises/memory), then resolve each folder's full
+		// path by walking its parent chain to the sync root (memoized). The previous implementation built
+		// paths incrementally in array order and required folders[0].parent === "base", so an out-of-order
+		// response corrupted child paths or threw. We still REQUIRE a sync-root folder (parent "base") to
+		// exist: a response with none is malformed and must NOT be read as an empty tree (that would look like
+		// every remote node was deleted). (perf + unordered correctness)
+		if (!dir.folders.some(folder => folder[2] === "base")) {
 			throw new Error("Invalid base folder parent.")
 		}
 
-		const folderNames: Record<string, string> = { base: "/" }
 		const pathsAdded: Record<string, boolean> = {}
 		let size = 0
 
@@ -266,161 +273,217 @@ export class RemoteFileSystem {
 		this.getDirectoryTreeCache.uuids = {}
 		this.getDirectoryTreeCache.size = 0
 
+		const folderMeta = new Map<string, { name: string; parent: string }>()
+
+		for (let offset = 0; offset < dir.folders.length; offset += REMOTE_BUILD_CONCURRENCY) {
+			await Promise.all(
+				dir.folders.slice(offset, offset + REMOTE_BUILD_CONCURRENCY).map(async folder => {
+					try {
+						const decrypted = await this.sync.sdk.crypto().decrypt().folderMetadata({ metadata: folder[1] })
+
+						folderMeta.set(folder[0], { name: decrypted.name, parent: folder[2] })
+					} catch (e) {
+						this.sync.worker.logger.log("error", e, "filesystems.remote.getDirectoryTree")
+						this.sync.worker.logger.log("error", e)
+					}
+				})
+			)
+		}
+
+		// Resolve a folder uuid to its relative path ("" = the sync root), memoized. Depth-bounded so a
+		// malformed cyclic chain can never infinite-loop; returns undefined for an orphan (parent absent).
+		// Format matches the old code exactly: root -> "", a child of `parent` -> `${parentPath}/${name}`
+		// (so a top-level dir is "/name", a nested one "/a/b").
+		const folderPathByUUID = new Map<string, string>()
+		const resolveFolderPath = (uuid: string, depth: number): string | undefined => {
+			const cached = folderPathByUUID.get(uuid)
+
+			if (cached !== undefined) {
+				return cached
+			}
+
+			if (depth > dir.folders.length) {
+				return undefined
+			}
+
+			const meta = folderMeta.get(uuid)
+
+			if (!meta) {
+				return undefined
+			}
+
+			if (meta.parent === "base") {
+				folderPathByUUID.set(uuid, "")
+
+				return ""
+			}
+
+			const parentPath = resolveFolderPath(meta.parent, depth + 1)
+
+			if (parentPath === undefined) {
+				return undefined
+			}
+
+			const path = `${parentPath}/${meta.name}`
+
+			folderPathByUUID.set(uuid, path)
+
+			return path
+		}
+
+		// Build the folder tree. Iterate the response array (preserving first-occurrence-wins dedup order);
+		// only the PATH resolution above is order-independent.
 		for (const folder of dir.folders) {
-			try {
-				const decrypted = await this.sync.sdk.crypto().decrypt().folderMetadata({ metadata: folder[1] })
-				const parentPath = folder[2] === "base" ? "" : `${folderNames[folder[2]]}/`
-				const folderPath = folder[2] === "base" ? "" : `${parentPath}${decrypted.name}`
-				const localPath = pathModule.join(this.sync.syncPair.localPath, folderPath)
+			const meta = folderMeta.get(folder[0])
 
-				folderNames[folder[0]] = folderPath
+			if (!meta) {
+				continue
+			}
 
-				if (
-					folderPath.startsWith(LOCAL_TRASH_NAME) ||
-					decrypted.name.startsWith(LOCAL_TRASH_NAME) ||
-					(folder[2] !== "base" && decrypted.name.length === 0)
-				) {
-					continue
-				}
+			const folderPath = resolveFolderPath(folder[0], 0)
 
-				const lowercasePath = folderPath.toLowerCase()
+			// undefined => orphan (broken parent chain); "" => the sync root. Neither is a tree entry.
+			if (folderPath === undefined || folderPath.length === 0) {
+				continue
+			}
 
-				if (pathsAdded[lowercasePath]) {
-					this.getDirectoryTreeCache.ignored.push({
-						localPath,
-						relativePath: folderPath,
-						reason: "duplicate"
-					})
+			const localPath = pathModule.join(this.sync.syncPair.localPath, folderPath)
 
-					continue
-				}
+			if (folderPath.startsWith(LOCAL_TRASH_NAME) || meta.name.startsWith(LOCAL_TRASH_NAME) || meta.name.length === 0) {
+				continue
+			}
 
-				pathsAdded[lowercasePath] = true
+			const lowercasePath = folderPath.toLowerCase()
 
-				if (folderPath.length === 0) {
-					continue
-				}
-
-				const ignored = this.isPathIgnored({
-					absolutePath: localPath,
+			if (pathsAdded[lowercasePath]) {
+				this.getDirectoryTreeCache.ignored.push({
+					localPath,
 					relativePath: folderPath,
-					name: decrypted.name,
-					type: "directory"
+					reason: "duplicate"
 				})
 
-				if (ignored.ignored) {
-					this.getDirectoryTreeCache.ignored.push({
-						localPath,
-						relativePath: folderPath,
-						reason: ignored.reason
-					})
-
-					continue
-				}
-
-				const item: RemoteItem = {
-					type: "directory",
-					uuid: folder[0],
-					name: decrypted.name,
-					size: 0,
-					path: folderPath
-				}
-
-				this.getDirectoryTreeCache.tree[folderPath] = item
-				this.getDirectoryTreeCache.uuids[folder[0]] = item
-
-				size += 1
-			} catch (e) {
-				this.sync.worker.logger.log("error", e, "filesystems.remote.getDirectoryTree")
-				this.sync.worker.logger.log("error", e)
+				continue
 			}
+
+			pathsAdded[lowercasePath] = true
+
+			const ignored = this.isPathIgnored({
+				absolutePath: localPath,
+				relativePath: folderPath,
+				name: meta.name,
+				type: "directory"
+			})
+
+			if (ignored.ignored) {
+				this.getDirectoryTreeCache.ignored.push({
+					localPath,
+					relativePath: folderPath,
+					reason: ignored.reason
+				})
+
+				continue
+			}
+
+			const item: RemoteItem = {
+				type: "directory",
+				uuid: folder[0],
+				name: meta.name,
+				size: 0,
+				path: folderPath
+			}
+
+			this.getDirectoryTreeCache.tree[folderPath] = item
+			this.getDirectoryTreeCache.uuids[folder[0]] = item
+
+			size += 1
 		}
 
-		if (Object.keys(folderNames).length === 0) {
-			throw new Error("Could not build directory tree.")
+		// Files: decrypt + place in bounded-concurrency batches (caps peak pending promises/memory; the batch
+		// size IS the parallel-decrypt width, replacing the eager `map` + 1024 semaphore that created N
+		// promises up front). Folders were fully resolved above, so every file's parent path is available.
+		for (let offset = 0; offset < dir.files.length; offset += REMOTE_BUILD_CONCURRENCY) {
+			await Promise.all(
+				dir.files.slice(offset, offset + REMOTE_BUILD_CONCURRENCY).map(async file => {
+					try {
+						const decrypted = await this.sync.sdk.crypto().decrypt().fileMetadata({ metadata: file[5] })
+
+						if (decrypted.name.length === 0) {
+							return
+						}
+
+						const parentPath = folderPathByUUID.get(file[4])
+
+						// Orphan file (its parent folder was absent from the response) — skip it.
+						if (parentPath === undefined) {
+							return
+						}
+
+						const filePath = `${parentPath}/${decrypted.name}`
+						const localPath = pathModule.join(this.sync.syncPair.localPath, filePath)
+
+						if (filePath.startsWith(LOCAL_TRASH_NAME) || decrypted.name.startsWith(LOCAL_TRASH_NAME) || filePath.length === 0) {
+							return
+						}
+
+						const lowercasePath = filePath.toLowerCase()
+
+						if (pathsAdded[lowercasePath]) {
+							this.getDirectoryTreeCache.ignored.push({
+								localPath,
+								relativePath: filePath,
+								reason: "duplicate"
+							})
+
+							return
+						}
+
+						pathsAdded[lowercasePath] = true
+
+						const ignored = this.isPathIgnored({
+							absolutePath: localPath,
+							relativePath: filePath,
+							name: decrypted.name,
+							type: "file"
+						})
+
+						if (ignored.ignored) {
+							this.getDirectoryTreeCache.ignored.push({
+								localPath,
+								relativePath: filePath,
+								reason: ignored.reason
+							})
+
+							return
+						}
+
+						const item: RemoteItem = {
+							type: "file",
+							uuid: file[0],
+							name: decrypted.name,
+							size: decrypted.size,
+							mime: decrypted.mime,
+							lastModified: convertTimestampToMs(decrypted.lastModified),
+							version: file[6],
+							chunks: file[3],
+							key: decrypted.key,
+							bucket: file[1],
+							region: file[2],
+							...(decrypted.creation !== undefined ? { creation: decrypted.creation } : {}),
+							...(decrypted.hash !== undefined ? { hash: decrypted.hash } : {}),
+							path: filePath
+						}
+
+						this.getDirectoryTreeCache.tree[filePath] = item
+						this.getDirectoryTreeCache.uuids[item.uuid] = item
+
+						size += 1
+					} catch (e) {
+						this.sync.worker.logger.log("error", e, "filesystems.remote.getDirectoryTree")
+						this.sync.worker.logger.log("error", e)
+					}
+				})
+			)
 		}
-
-		await promiseAllChunked(
-			dir.files.map(async file => {
-				await this.listSemaphore.acquire()
-
-				try {
-					const decrypted = await this.sync.sdk.crypto().decrypt().fileMetadata({ metadata: file[5] })
-
-					if (decrypted.name.length === 0) {
-						return
-					}
-
-					const parentPath = folderNames[file[4]]
-					const filePath = `${parentPath}/${decrypted.name}`
-					const localPath = pathModule.join(this.sync.syncPair.localPath, filePath)
-
-					if (filePath.startsWith(LOCAL_TRASH_NAME) || decrypted.name.startsWith(LOCAL_TRASH_NAME) || filePath.length === 0) {
-						return
-					}
-
-					const lowercasePath = filePath.toLowerCase()
-
-					if (pathsAdded[lowercasePath]) {
-						this.getDirectoryTreeCache.ignored.push({
-							localPath,
-							relativePath: filePath,
-							reason: "duplicate"
-						})
-
-						return
-					}
-
-					pathsAdded[lowercasePath] = true
-
-					const ignored = this.isPathIgnored({
-						absolutePath: localPath,
-						relativePath: filePath,
-						name: decrypted.name,
-						type: "file"
-					})
-
-					if (ignored.ignored) {
-						this.getDirectoryTreeCache.ignored.push({
-							localPath,
-							relativePath: filePath,
-							reason: ignored.reason
-						})
-
-						return
-					}
-
-					const item: RemoteItem = {
-						type: "file",
-						uuid: file[0],
-						name: decrypted.name,
-						size: decrypted.size,
-						mime: decrypted.mime,
-						lastModified: convertTimestampToMs(decrypted.lastModified),
-						version: file[6],
-						chunks: file[3],
-						key: decrypted.key,
-						bucket: file[1],
-						region: file[2],
-						...(decrypted.creation !== undefined ? { creation: decrypted.creation } : {}),
-						...(decrypted.hash !== undefined ? { hash: decrypted.hash } : {}),
-						path: filePath
-					}
-
-					this.getDirectoryTreeCache.tree[filePath] = item
-					this.getDirectoryTreeCache.uuids[item.uuid] = item
-
-					size += 1
-				} catch (e) {
-					this.sync.worker.logger.log("error", e, "filesystems.remote.getDirectoryTree")
-					this.sync.worker.logger.log("error", e)
-				} finally {
-					this.listSemaphore.release()
-				}
-			}),
-			10000,
-			false
-		)
 
 		this.getDirectoryTreeCache.size = size
 		this.getDirectoryTreeCache.timestamp = now

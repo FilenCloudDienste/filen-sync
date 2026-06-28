@@ -631,88 +631,74 @@ export class Tasks {
 		// 11. File uploads
 		// 12. File downloads
 
-		for (const delta of deltasSorted) {
-			if (delta.type !== "renameLocalDirectory") {
-				continue
-			}
-
-			await process(delta)
+		// Partition the deltas into per-type buckets in ONE pass, then drain the buckets in the fixed order
+		// above — instead of scanning the whole deltasSorted array 12 times (10 sequential `if type !== X
+		// continue` passes + 2 filters), which is 12·O(deltas) just to order the work and costs real time on a
+		// bulk cycle (e.g. an initial sync of a huge tree). Each bucket keeps deltasSorted order (we push in
+		// iteration order), so the executed order — and therefore behavior — is identical. (perf)
+		const byType: Record<Delta["type"], Delta[]> = {
+			renameLocalDirectory: [],
+			renameLocalFile: [],
+			renameRemoteDirectory: [],
+			renameRemoteFile: [],
+			deleteLocalDirectory: [],
+			deleteLocalFile: [],
+			deleteRemoteDirectory: [],
+			deleteRemoteFile: [],
+			createLocalDirectory: [],
+			createRemoteDirectory: [],
+			uploadFile: [],
+			downloadFile: []
 		}
 
 		for (const delta of deltasSorted) {
-			if (delta.type !== "renameLocalFile") {
-				continue
-			}
+			byType[delta.type].push(delta)
+		}
 
+		// Sequential, in the documented type order (state-mutating ops one after another).
+		for (const delta of byType.renameLocalDirectory) {
 			await process(delta)
 		}
 
-		for (const delta of deltasSorted) {
-			if (delta.type !== "renameRemoteDirectory") {
-				continue
-			}
-
+		for (const delta of byType.renameLocalFile) {
 			await process(delta)
 		}
 
-		for (const delta of deltasSorted) {
-			if (delta.type !== "renameRemoteFile") {
-				continue
-			}
-
+		for (const delta of byType.renameRemoteDirectory) {
 			await process(delta)
 		}
 
-		for (const delta of deltasSorted) {
-			if (delta.type !== "deleteLocalDirectory") {
-				continue
-			}
-
+		for (const delta of byType.renameRemoteFile) {
 			await process(delta)
 		}
 
-		for (const delta of deltasSorted) {
-			if (delta.type !== "deleteLocalFile") {
-				continue
-			}
-
+		for (const delta of byType.deleteLocalDirectory) {
 			await process(delta)
 		}
 
-		for (const delta of deltasSorted) {
-			if (delta.type !== "deleteRemoteDirectory") {
-				continue
-			}
-
+		for (const delta of byType.deleteLocalFile) {
 			await process(delta)
 		}
 
-		for (const delta of deltasSorted) {
-			if (delta.type !== "deleteRemoteFile") {
-				continue
-			}
-
+		for (const delta of byType.deleteRemoteDirectory) {
 			await process(delta)
 		}
 
-		for (const delta of deltasSorted) {
-			if (delta.type !== "createLocalDirectory") {
-				continue
-			}
-
+		for (const delta of byType.deleteRemoteFile) {
 			await process(delta)
 		}
 
-		for (const delta of deltasSorted) {
-			if (delta.type !== "createRemoteDirectory") {
-				continue
-			}
-
+		for (const delta of byType.createLocalDirectory) {
 			await process(delta)
 		}
 
-		await promiseAllChunked(deltasSorted.filter(delta => delta.type === "uploadFile").map(process), 10000, false)
-		await promiseAllChunked(deltasSorted.filter(delta => delta.type === "downloadFile").map(process), 10000, false)
+		for (const delta of byType.createRemoteDirectory) {
+			await process(delta)
+		}
+
+		// Uploads then downloads, in parallel (bounded by the transfers semaphore inside `process`).
+		await promiseAllChunked(byType.uploadFile.map(process), 10000, false)
+		await promiseAllChunked(byType.downloadFile.map(process), 10000, false)
 
 		return {
 			doneTasks: executed,

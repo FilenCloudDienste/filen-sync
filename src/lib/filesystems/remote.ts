@@ -138,9 +138,11 @@ export class RemoteFileSystem {
 		type: "file" | "directory"
 	}): { ignored: true; reason: RemoteTreeIgnoredReason } | { ignored: false } {
 		const key = absolutePath + ":" + type
+		// One cache lookup, not two (the second redundant get() ran per item on every tree build).
+		const cached = this.ignoredCache.get(key)
 
-		if (this.ignoredCache.get(key)) {
-			return this.ignoredCache.get(key)!
+		if (cached) {
+			return cached
 		}
 
 		if (isPathOverMaxLength(absolutePath)) {
@@ -521,8 +523,10 @@ export class RemoteFileSystem {
 			return this.sync.syncPair.remoteParentUUID
 		}
 
-		if (this.getDirectoryTreeCache.tree[relativePath] && acceptedTypes.includes(this.getDirectoryTreeCache.tree[relativePath]!.type)) {
-			return this.getDirectoryTreeCache.tree[relativePath]!.uuid
+		const item = this.getDirectoryTreeCache.tree[relativePath]
+
+		if (item && acceptedTypes.includes(item.type)) {
+			return item.uuid
 		}
 
 		return null

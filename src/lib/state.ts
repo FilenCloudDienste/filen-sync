@@ -448,7 +448,9 @@ export class State {
 
 		try {
 			for await (const line of rl) {
-				if (line.trim()) {
+				// Cheap non-empty check instead of allocating a trimmed copy per line on the load hot path; a
+				// whitespace-only line still drops harmlessly via the JSON.parse failure caught below.
+				if (line.length > 0) {
 					try {
 						const parsed: {
 							prop: string

@@ -133,8 +133,12 @@ export class LocalFileSystem {
 		absolutePath: string,
 		type: "file" | "directory"
 	): { ignored: true; reason: LocalTreeIgnoredReason } | { ignored: false } {
-		if (this.ignoredCache.get(relativePath)) {
-			return this.ignoredCache.get(relativePath)!
+		// One cache lookup, not two — this runs per file on every scan (a cache hit for every unchanged
+		// path now that the cache survives a cycle), so the second redundant get() was pure overhead.
+		const cached = this.ignoredCache.get(relativePath)
+
+		if (cached) {
+			return cached
 		}
 
 		if (isPathOverMaxLength(absolutePath)) {

@@ -712,9 +712,23 @@ export class Sync {
 								syncPair: this.syncPair
 							})
 
-							// Deep cloning is needed, otherwise we just pass the reference
-							this.previousLocalTree = structuredClone(currentLocalTree.result)
-							this.previousRemoteTree = structuredClone(currentRemoteTree.result)
+							// Snapshot the trees as the next cycle's base. We need NEW tree/inode/uuid MAPS so the
+							// directory-tree cache's in-place incremental updates (the watcher add/remove/rename path)
+							// can never bleed into the base — but the item objects can be SHARED by reference: an item
+							// is always created fresh and replaced in the map, never mutated field-by-field, so the
+							// base's items are immutable once snapshotted. A full structuredClone instead deep-copied
+							// every item on every change-cycle — O(tree) CPU plus a second full copy of the tree in
+							// memory — for isolation a shallow map copy already provides. (P3)
+							this.previousLocalTree = {
+								tree: { ...currentLocalTree.result.tree },
+								inodes: { ...currentLocalTree.result.inodes },
+								size: currentLocalTree.result.size
+							}
+							this.previousRemoteTree = {
+								tree: { ...currentRemoteTree.result.tree },
+								uuids: { ...currentRemoteTree.result.uuids },
+								size: currentRemoteTree.result.size
+							}
 
 							await this.state.save()
 

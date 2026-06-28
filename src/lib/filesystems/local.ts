@@ -8,8 +8,7 @@ import {
 	isAbsolutePathIgnoredByDefault,
 	isPathOverMaxLength,
 	isNameOverMaxLength,
-	isValidPath,
-	promiseAllChunked
+	isValidPath
 } from "../../utils"
 import pathModule from "path"
 import type Sync from "../sync"
@@ -25,6 +24,19 @@ import { type SyncWatcher } from "../environment"
 import FastGlob from "fast-glob"
 
 const pipelineAsync = promisify(pipeline)
+
+/**
+ * Upper bound on how many local entries are stat'd concurrently during a single tree scan.
+ *
+ * The scan fans a filesystem `lstat` (+ `access`) out over every glob entry. Mapping all entries to
+ * promises up front would, on a tree with millions of entries, allocate millions of pending promises
+ * and in-flight stat results at once — an O(n) peak-memory spike on top of the (unavoidable) result
+ * tree, plus unbounded pressure on the libuv thread pool and open file descriptors. Walking the entries
+ * in fixed-size batches caps peak concurrency — and therefore peak memory — without reducing throughput,
+ * since the thread pool only services a handful of these operations in parallel regardless of how many
+ * are queued. Batches run sequentially, so the first-occurrence-wins dedup order is preserved exactly.
+ */
+export const LOCAL_SCAN_CONCURRENCY = 1000
 
 export type LocalItem = {
 	lastModified: number
@@ -272,8 +284,8 @@ export class LocalFileSystem {
 					objectMode: false
 				})
 
-				await promiseAllChunked(
-					entries.map(async entry => {
+				for (let offset = 0; offset < entries.length; offset += LOCAL_SCAN_CONCURRENCY) {
+					await Promise.all(entries.slice(offset, offset + LOCAL_SCAN_CONCURRENCY).map(async entry => {
 						const entryItem = entry as unknown as string | null
 
 						if (!entryItem) {
@@ -375,10 +387,8 @@ export class LocalFileSystem {
 						this.getDirectoryTreeCache.inodes[item.inode] = item
 
 						size += 1
-					}),
-					10000,
-					false
-				)
+					}))
+				}
 
 				this.getDirectoryTreeCache.size = size
 				this.getDirectoryTreeCache.timestamp = scanStartedAt

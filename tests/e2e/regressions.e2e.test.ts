@@ -44,6 +44,13 @@ import { writeLocal, renameLocal, readLocal, existsLocal, uploadRemote, setLocal
  *     races the cycle. The race window is an await INSIDE deltas.process(); reproducing it needs to flip
  *     the mode at that exact await, which is only controllable by stubbing the awaited hash — not via the
  *     backend. Driven deterministically in tests/scenarios/zl-mode-atomicity.test.ts.
+ *   - P4: the local scan must bound how many filesystem stat operations it launches concurrently (the old
+ *     walk mapped every entry to a promise up front — an O(n) pending-promise/memory spike on a huge tree).
+ *     This is a client-side memory/concurrency property: bounded vs unbounded fan-out produces the identical
+ *     tree, so it has no backend-observable effect, and the bound is only measurable by instrumenting
+ *     fs.lstat. The batched scan's CORRECTNESS is exercised by every live scenario here (it sits in the sync
+ *     hot path); the bound itself is asserted with an lstat-counting wrapper in
+ *     tests/scenarios/zm-scan-concurrency.test.ts.
  */
 describe.skipIf(!E2E_ENABLED)("E2E — audit regression fixes against live backend", () => {
 	let sdk: FilenSDK

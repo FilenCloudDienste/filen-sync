@@ -115,6 +115,37 @@ describe("Category N — utils.isValidPath (win32)", () => {
 			expect(isValidPath("C:/folder/com1.log")).toBe(false)
 		})
 	})
+
+	it("rejects a component that ends with a dot or a space (Windows strips them)", () => {
+		withPlatform("win32", () => {
+			// A name Windows silently strips would be created under a DIFFERENT name than recorded — an
+			// endless re-sync/duplication loop — so it must be reported invalid and ignored. (M5)
+			expect(isValidPath("C:/folder/report.")).toBe(false)
+			expect(isValidPath("C:/folder/report ")).toBe(false)
+			expect(isValidPath("C:/folder/report...")).toBe(false)
+			expect(isValidPath("C:/folder/report.  ")).toBe(false)
+			// An intermediate DIRECTORY component is just as fatal as the leaf.
+			expect(isValidPath("C:/folder./report.txt")).toBe(false)
+			expect(isValidPath("C:/folder /report.txt")).toBe(false)
+		})
+	})
+
+	it("rejects an all-dots component", () => {
+		withPlatform("win32", () => {
+			expect(isValidPath("C:/folder/...")).toBe(false)
+			expect(isValidPath("C:/folder/..")).toBe(false)
+			expect(isValidPath("C:/folder/.")).toBe(false)
+		})
+	})
+
+	it("still accepts a leading-dot (hidden) name and interior dots", () => {
+		withPlatform("win32", () => {
+			// The fix strips only TRAILING dots/spaces; a leading dot (hidden files) and interior dots are fine.
+			expect(isValidPath("C:/folder/.gitignore")).toBe(true)
+			expect(isValidPath("C:/folder/my.file.txt")).toBe(true)
+			expect(isValidPath("C:/folder/.config/app.json")).toBe(true)
+		})
+	})
 })
 
 describe("Category N — utils.isValidPath (darwin)", () => {
@@ -140,6 +171,15 @@ describe("Category N — utils.isValidPath (darwin)", () => {
 	it("does not treat Windows reserved names as invalid", () => {
 		withPlatform("darwin", () => {
 			expect(isValidPath("/Users/me/con")).toBe(true)
+		})
+	})
+
+	it("permits trailing dots and spaces (legal on macOS, only stripped on Windows)", () => {
+		withPlatform("darwin", () => {
+			// The trailing-dot/space rejection is a Windows-only quirk; macOS represents these names fine, so
+			// the M5 guard must not bleed into the darwin branch.
+			expect(isValidPath("/Users/me/report.")).toBe(true)
+			expect(isValidPath("/Users/me/report ")).toBe(true)
 		})
 	})
 })

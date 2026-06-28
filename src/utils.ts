@@ -166,6 +166,14 @@ export function isValidPath(inputPath: string): boolean {
 				if (parsedName.length > 0 && reservedNamesWindows.test(parsedName)) {
 					return false
 				}
+
+				// Windows silently strips trailing dots and spaces from a name, so a path ending in either would
+				// be created under a DIFFERENT name than recorded — an endless re-sync/duplication loop. Reject it
+				// (this also catches all-dots names like "." / ".." / "...", which strip to nothing) so it is
+				// reported invalid and ignored rather than synced. Leading and interior dots are unaffected. (M5)
+				if (/[. ]$/.test(part)) {
+					return false
+				}
 			}
 
 			return true

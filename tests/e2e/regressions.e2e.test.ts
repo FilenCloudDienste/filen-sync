@@ -35,6 +35,11 @@ import { writeLocal, renameLocal, readLocal, existsLocal, uploadRemote, setLocal
  *     the trigger — a base path that became ignored for a nameLength/invalidPath/defaultIgnore/duplicate
  *     reason — cannot be forced deterministically on the real backend. Driven directly through
  *     deltas.process() with an injected ignored entry in tests/scenarios/zk-ignore-asymmetry.test.ts.
+ *   - M5: isValidPath must reject Windows names that end in a dot/space (Windows strips them, causing a
+ *     re-sync loop). This is a per-OS path rule that only runs on the win32 branch; the e2e backend host
+ *     here is darwin, whose filesystem does NOT strip trailing dots, so the bug cannot manifest in an e2e
+ *     round-trip. It is covered instead by the cross-platform unit suite (stubbed process.platform) run on
+ *     a real Windows host by the matrixed CI: tests/unit/n-unit.test.ts (isValidPath win32).
  */
 describe.skipIf(!E2E_ENABLED)("E2E — audit regression fixes against live backend", () => {
 	let sdk: FilenSDK

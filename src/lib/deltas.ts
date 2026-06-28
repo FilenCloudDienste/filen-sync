@@ -1,4 +1,5 @@
 import type Sync from "./sync"
+import { type SyncMode } from "../types"
 import { type LocalTree, type LocalTreeError, type LocalTreeIgnored } from "./filesystems/local"
 import { type RemoteTree } from "./filesystems/remote"
 import { replacePathStartWithFromAndTo, pathIncludesDotFile, normalizeLastModifiedMsForComparison } from "../utils"
@@ -368,14 +369,24 @@ export class Deltas {
 		deleteLocalFileCountRaw: number
 		deleteRemoteDirectoryCountRaw: number
 		deleteRemoteFileCountRaw: number
+		mode: SyncMode
 	}> {
+		// Snapshot the mode ONCE for the whole cycle. process() is async (it awaits hashing), and updateMode()
+		// mutates this.sync.mode synchronously from the main thread at any time. Reading this.sync.mode live in
+		// each of the ~20 passes below let a mid-cycle mode switch split one cycle across two modes — e.g. the
+		// local-deletions pass running as twoWay while the remote-deletions pass runs as cloudToLocal — yielding
+		// a self-contradictory delta set. The snapshot is returned so the caller's deletion-confirmation gate
+		// evaluates against the SAME mode the deltas were computed under; a mode change takes effect next cycle.
+		const mode = this.sync.mode
+
 		if (this.sync.removed) {
 			return {
 				deltas: [],
 				deleteLocalDirectoryCountRaw: 0,
 				deleteLocalFileCountRaw: 0,
 				deleteRemoteDirectoryCountRaw: 0,
-				deleteRemoteFileCountRaw: 0
+				deleteRemoteFileCountRaw: 0,
+				mode
 			}
 		}
 
@@ -415,7 +426,7 @@ export class Deltas {
 		// 6. Remote additions/filemodifications
 
 		// Local file/directory move/rename
-		if (this.sync.mode === "twoWay" || this.sync.mode === "localBackup" || this.sync.mode === "localToCloud") {
+		if (mode === "twoWay" || mode === "localBackup" || mode === "localToCloud") {
 			for (const inode in currentLocalTree.inodes) {
 				const currentItem = currentLocalTree.inodes[inode]
 				const previousItem = previousLocalTree.inodes[inode]
@@ -505,7 +516,7 @@ export class Deltas {
 		}
 
 		// Remote file/directory move/rename
-		if (this.sync.mode === "twoWay" || this.sync.mode === "cloudBackup" || this.sync.mode === "cloudToLocal") {
+		if (mode === "twoWay" || mode === "cloudBackup" || mode === "cloudToLocal") {
 			for (const uuid in currentRemoteTree.uuids) {
 				const currentItem = currentRemoteTree.uuids[uuid]
 				const previousItem = previousRemoteTree.uuids[uuid]
@@ -595,8 +606,8 @@ export class Deltas {
 		}
 
 		// Local deletions
-		if (this.sync.mode === "twoWay" || this.sync.mode === "localToCloud") {
-			if (this.sync.mode === "twoWay") {
+		if (mode === "twoWay" || mode === "localToCloud") {
+			if (mode === "twoWay") {
 				for (const path in previousLocalTree.tree) {
 					if (pathsAdded[path] || erroredLocalPaths[path] || ignoredLocalPaths[path]) {
 						continue
@@ -610,7 +621,7 @@ export class Deltas {
 					if (
 						!currentLocalItem &&
 						previousLocalItem //&&
-						//(this.sync.mode !== "localToCloud" ? !currentLocalTree.inodes[previousLocalItem.inode] : true)
+						//(mode !== "localToCloud" ? !currentLocalTree.inodes[previousLocalItem.inode] : true)
 					) {
 						// Symmetric to the remote-deletions resurrect (OBS-001): the local copy was deleted, but
 						// if the REMOTE file was modified since the base — a new uuid, i.e. a real re-upload — the
@@ -683,8 +694,8 @@ export class Deltas {
 		}
 
 		// Remote deletions
-		if (this.sync.mode === "twoWay" || this.sync.mode === "cloudToLocal") {
-			if (this.sync.mode === "twoWay") {
+		if (mode === "twoWay" || mode === "cloudToLocal") {
+			if (mode === "twoWay") {
 				for (const path in previousRemoteTree.tree) {
 					// Symmetric to the local-deletions guard (BUG-006): never delete the LOCAL copy of a path the
 					// local scan ignored or errored on. Such a path is physically present on disk but absent from
@@ -705,7 +716,7 @@ export class Deltas {
 					if (
 						!currentRemoteItem &&
 						previousRemoteItem //&&
-						//(this.sync.mode !== "cloudToLocal" ? !currentRemoteTree.uuids[previousRemoteItem.uuid] : true)
+						//(mode !== "cloudToLocal" ? !currentRemoteTree.uuids[previousRemoteItem.uuid] : true)
 					) {
 						// E2E-OBS-001 (newer-modify-wins): the remote deleted this path, but if the local FILE
 						// was modified since the last sync the modification wins — skip the delete and leave the
@@ -876,9 +887,9 @@ export class Deltas {
 		// stay unmarked and sync normally.
 		{
 			const canWriteRemote =
-				this.sync.mode === "twoWay" || this.sync.mode === "localBackup" || this.sync.mode === "localToCloud"
+				mode === "twoWay" || mode === "localBackup" || mode === "localToCloud"
 			const canWriteLocal =
-				this.sync.mode === "twoWay" || this.sync.mode === "cloudBackup" || this.sync.mode === "cloudToLocal"
+				mode === "twoWay" || mode === "cloudBackup" || mode === "cloudToLocal"
 			const markSubtreeAdded = (treePaths: Record<string, unknown>, parentPath: string): void => {
 				const prefix = `${parentPath}/`
 
@@ -909,9 +920,9 @@ export class Deltas {
 
 				let localWins: boolean
 
-				if (this.sync.mode === "localBackup" || this.sync.mode === "localToCloud") {
+				if (mode === "localBackup" || mode === "localToCloud") {
 					localWins = true
-				} else if (this.sync.mode === "cloudBackup" || this.sync.mode === "cloudToLocal") {
+				} else if (mode === "cloudBackup" || mode === "cloudToLocal") {
 					localWins = false
 				} else {
 					// twoWay: whoever's type diverged from base wins; local wins a tie / a both-changed conflict.
@@ -973,7 +984,7 @@ export class Deltas {
 		}
 
 		// Local additions/fileModifications
-		if (this.sync.mode === "twoWay" || this.sync.mode === "localBackup" || this.sync.mode === "localToCloud") {
+		if (mode === "twoWay" || mode === "localBackup" || mode === "localToCloud") {
 			for (const path in currentLocalTree.tree) {
 				if (pathsAdded[path] || erroredLocalPaths[path]) {
 					continue
@@ -987,7 +998,7 @@ export class Deltas {
 				if (
 					!currentRemoteItem &&
 					currentLocalItem &&
-					//(this.sync.mode !== "localBackup" && this.sync.mode !== "localToCloud"
+					//(mode !== "localBackup" && mode !== "localToCloud"
 					//	? !previousLocalTree.inodes[currentLocalItem.inode]
 					//	: true) &&
 					// Does an item with the same path and type already exist in the current remote tree (probably uploaded by something else prior)?
@@ -1032,7 +1043,7 @@ export class Deltas {
 					// Directional push modes (localToCloud / localBackup): the LOCAL side is authoritative, so a
 					// local change ALWAYS wins. The newer-mtime tiebreak is twoWay conflict resolution and must
 					// not let a foreign remote edit (with a newer mtime) suppress the push. (F5)
-					const directionalPush = this.sync.mode === "localToCloud" || this.sync.mode === "localBackup"
+					const directionalPush = mode === "localToCloud" || mode === "localBackup"
 					const localWins =
 						directionalPush ||
 						!remoteChanged ||
@@ -1044,7 +1055,7 @@ export class Deltas {
 					// re-assert the local copy to revert that foreign edit, bypassing the md5 dedup below (local
 					// bytes still equal the last upload, so the dedup would otherwise skip). localBackup is
 					// additive and deliberately tolerates foreign edits, so it is excluded. (F6)
-					const mirrorRevert = this.sync.mode === "localToCloud" && remoteChanged
+					const mirrorRevert = mode === "localToCloud" && remoteChanged
 					// Directional push with NO remote base: a stray remote file occupies a path local also has.
 					// It cannot be the synced copy if the SIZES differ, so the authoritative local wins — push it
 					// up over the stray. (F9, symmetric to the pull side.)
@@ -1089,7 +1100,7 @@ export class Deltas {
 		}
 
 		// Remote additions/changes
-		if (this.sync.mode === "twoWay" || this.sync.mode === "cloudBackup" || this.sync.mode === "cloudToLocal") {
+		if (mode === "twoWay" || mode === "cloudBackup" || mode === "cloudToLocal") {
 			for (const path in currentRemoteTree.tree) {
 				if (pathsAdded[path]) {
 					continue
@@ -1103,7 +1114,7 @@ export class Deltas {
 				if (
 					!currentLocalItem &&
 					currentRemoteItem &&
-					//(this.sync.mode !== "cloudBackup" && this.sync.mode !== "cloudToLocal"
+					//(mode !== "cloudBackup" && mode !== "cloudToLocal"
 					//	? !previousRemoteTree.uuids[currentRemoteItem.uuid]
 					//	: true) &&
 					// Does an item with the same path and type already exist in the current local tree (probably downloaded by something else prior)?
@@ -1138,7 +1149,7 @@ export class Deltas {
 					// Directional pull modes (cloudToLocal / cloudBackup): the REMOTE side is authoritative, so a
 					// remote change ALWAYS wins; the newer-mtime tiebreak is twoWay-only and must not let a
 					// foreign local edit (with a newer mtime) suppress the pull. (F5)
-					const directionalPull = this.sync.mode === "cloudToLocal" || this.sync.mode === "cloudBackup"
+					const directionalPull = mode === "cloudToLocal" || mode === "cloudBackup"
 					// The local copy is unchanged since the base (size + whole-second mtime both match). Then a
 					// remote change is NOT a conflict — there is nothing local to lose — so it must win outright.
 					// Mirrors the local pass, which already declines to claim an unchanged-local path. Without
@@ -1168,7 +1179,7 @@ export class Deltas {
 						(previousLocalItem.size !== currentLocalItem.size ||
 							normalizeLastModifiedMsForComparison(previousLocalItem.lastModified) !==
 								normalizeLastModifiedMsForComparison(currentLocalItem.lastModified))
-					const mirrorRevert = this.sync.mode === "cloudToLocal" && localDiverged
+					const mirrorRevert = mode === "cloudToLocal" && localDiverged
 					// Directional pull with NO local base: a stray local file occupies a path the remote also has
 					// (e.g. the local copy was deleted then re-created with different content). It cannot be the
 					// synced copy if the SIZES differ, so the authoritative remote wins — pull it down. (F9)
@@ -1249,7 +1260,8 @@ export class Deltas {
 			deleteLocalDirectoryCountRaw,
 			deleteLocalFileCountRaw,
 			deleteRemoteDirectoryCountRaw,
-			deleteRemoteFileCountRaw
+			deleteRemoteFileCountRaw,
+			mode
 		}
 	}
 }

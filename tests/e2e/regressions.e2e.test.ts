@@ -40,6 +40,10 @@ import { writeLocal, renameLocal, readLocal, existsLocal, uploadRemote, setLocal
  *     here is darwin, whose filesystem does NOT strip trailing dots, so the bug cannot manifest in an e2e
  *     round-trip. It is covered instead by the cross-platform unit suite (stubbed process.platform) run on
  *     a real Windows host by the matrixed CI: tests/unit/n-unit.test.ts (isValidPath win32).
+ *   - M6: one cycle must compute its whole delta set under a single mode snapshot, even if updateMode()
+ *     races the cycle. The race window is an await INSIDE deltas.process(); reproducing it needs to flip
+ *     the mode at that exact await, which is only controllable by stubbing the awaited hash — not via the
+ *     backend. Driven deterministically in tests/scenarios/zl-mode-atomicity.test.ts.
  */
 describe.skipIf(!E2E_ENABLED)("E2E — audit regression fixes against live backend", () => {
 	let sdk: FilenSDK

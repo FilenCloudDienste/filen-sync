@@ -510,7 +510,11 @@ export class Sync {
 						deleteLocalDirectoryCountRaw,
 						deleteLocalFileCountRaw,
 						deleteRemoteDirectoryCountRaw,
-						deleteRemoteFileCountRaw
+						deleteRemoteFileCountRaw,
+						// The mode the deltas were computed under (snapshotted once inside process()). Use it for the
+						// deletion-confirmation gate below so the gate and the delta set never disagree when
+						// updateMode() races the cycle. (M6)
+						mode: cycleMode
 					} = await this.deltas.process({
 						currentLocalTree: currentLocalTree.result,
 						currentRemoteTree: currentRemoteTree.result,
@@ -549,14 +553,14 @@ export class Sync {
 						currentLocalTree.result.size === 0 &&
 						deleteRemoteDirectoryCountRaw + deleteRemoteFileCountRaw > 0 &&
 						this.previousLocalTree.size <= deleteRemoteDirectoryCountRaw + deleteRemoteFileCountRaw &&
-						(this.mode === "twoWay" || this.mode === "localToCloud")
+						(cycleMode === "twoWay" || cycleMode === "localToCloud")
 
 					const confirmRemoteDeletion =
 						this.previousRemoteTree.size > 0 &&
 						currentRemoteTree.result.size === 0 &&
 						deleteLocalDirectoryCountRaw + deleteLocalFileCountRaw > 0 &&
 						this.previousRemoteTree.size <= deleteLocalDirectoryCountRaw + deleteLocalFileCountRaw &&
-						(this.mode === "twoWay" || this.mode === "cloudToLocal")
+						(cycleMode === "twoWay" || cycleMode === "cloudToLocal")
 
 					let skipSyncDueToConfirmDeletionRestart = false
 

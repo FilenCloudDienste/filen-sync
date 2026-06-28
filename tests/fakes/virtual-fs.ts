@@ -44,6 +44,15 @@ export type VirtualFS = {
 		clearError(path: string): void
 		/** Remove all injected errors. */
 		clearAllErrors(): void
+		/**
+		 * Register a callback invoked synchronously AFTER every `lstat`/`stat` returns, with the posix path
+		 * just stat'd. Lets a test edit a file mid-scan (after the engine has already read it) to reproduce a
+		 * read-during-scan race deterministically. The callback should gate itself (path match + a one-shot
+		 * flag) and is cleared with {@link clearStatHook}. Only one hook is active at a time.
+		 */
+		onStat(hook: (posixPath: string) => void): void
+		/** Remove the {@link onStat} hook. */
+		clearStatHook(): void
 		/** Flat JSON view of the volume (file path → content, dir → null). */
 		toJSON(): Record<string, string | null>
 	}
@@ -119,6 +128,9 @@ export function createVirtualFS(initial: VfsSpec = {}): VirtualFS {
 	// Forced inode numbers (posix path -> ino) so a test can reproduce ext4-style inode reuse, which
 	// memfs's allocator does not surface naturally.
 	const inodeOverrides = new Map<string, number>()
+	// Optional one-shot-friendly hook fired after each lstat/stat returns, so a test can mutate a file
+	// mid-scan (after the engine read it) to reproduce a read-during-scan race deterministically.
+	let statHook: ((posixPath: string) => void) | null = null
 	// `guard` is always called with an already-posix-normalized path (each method normalizes its inputs
 	// at entry), so the error map — keyed by the posix paths tests inject — matches on every host.
 	const guard = (path: string): void => {
@@ -144,6 +156,10 @@ export function createVirtualFS(initial: VfsSpec = {}): VirtualFS {
 				stats.ino = overriddenInode
 			}
 
+			if (statHook) {
+				statHook(path)
+			}
+
 			return stats
 		},
 		lstat: async (path: string) => {
@@ -155,6 +171,10 @@ export function createVirtualFS(initial: VfsSpec = {}): VirtualFS {
 
 			if (overriddenInode !== undefined) {
 				stats.ino = overriddenInode
+			}
+
+			if (statHook) {
+				statHook(path)
 			}
 
 			return stats
@@ -314,6 +334,12 @@ export function createVirtualFS(initial: VfsSpec = {}): VirtualFS {
 		},
 		clearAllErrors: (): void => {
 			errors.clear()
+		},
+		onStat: (hook: (posixPath: string) => void): void => {
+			statHook = hook
+		},
+		clearStatHook: (): void => {
+			statHook = null
 		},
 		toJSON: (): Record<string, string | null> => vol.toJSON()
 	}

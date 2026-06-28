@@ -247,6 +247,14 @@ export class LocalFileSystem {
 				this.getDirectoryTreeCache.errors = []
 				this.getDirectoryTreeCache.size = 0
 
+				// Stamp the cache as of the moment the walk BEGINS, not when it ends. The freshness check above
+				// skips a rescan while `lastDirectoryChangeTimestamp < cache.timestamp`; a file edited DURING
+				// this walk (after we lstat it, before the walk returns) fires the watcher with a change time
+				// that is earlier than an end-of-walk stamp, so the next cycle would wrongly consider the cache
+				// fresh and never re-read the edit — a silently lost update until some later change. Stamping at
+				// the start guarantees any change racing with or following the walk has a change time >= this
+				// stamp, so the strict `<` fails and the next cycle rescans.
+				const scanStartedAt = Date.now()
 				const pathsAdded: Record<string, boolean> = {}
 				let size = 0
 				const entries = await FastGlob.async("**/*", {
@@ -373,7 +381,7 @@ export class LocalFileSystem {
 				)
 
 				this.getDirectoryTreeCache.size = size
-				this.getDirectoryTreeCache.timestamp = Date.now()
+				this.getDirectoryTreeCache.timestamp = scanStartedAt
 
 				// Clear old local file hashes that are not present anymore
 				for (const path in this.sync.localFileHashes) {

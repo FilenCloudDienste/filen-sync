@@ -11,9 +11,12 @@ import { writeLocal, renameLocal, readLocal, existsLocal, uploadRemote, setLocal
  * backend and not just the fake cloud (the mocked regressions live in tests/scenarios/z*.test.ts and
  * tests/unit/*lock.test.ts). One login is shared across the whole serial e2e suite.
  *
- * Mocked-only by necessity (no e2e counterpart): H1 (lock teardown after a FORCED releaseResourceLock
- * failure) — the real backend can't be made to fail a release on demand, so it stays a unit test with
- * injected faults. See tests/unit/lock.test.ts + tests/unit/ipc-lock.test.ts.
+ * Mocked-only by necessity (no e2e counterpart):
+ *   - H1: lock teardown after a FORCED releaseResourceLock failure — the real backend can't be made to
+ *     fail a release on demand. Unit test with injected faults: tests/unit/lock.test.ts + ipc-lock.test.ts.
+ *   - H3: a file edited DURING the local scan (a read-during-scan race) — reproducing it needs deterministic
+ *     control of the scan window, which a real filesystem can't provide without flakiness. Deterministic
+ *     mocked regression with a mid-scan lstat hook: tests/scenarios/zg-edit-during-scan.test.ts.
  */
 describe.skipIf(!E2E_ENABLED)("E2E — audit regression fixes against live backend", () => {
 	let sdk: FilenSDK

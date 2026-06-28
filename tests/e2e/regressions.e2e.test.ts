@@ -29,6 +29,12 @@ import { writeLocal, renameLocal, readLocal, existsLocal, uploadRemote, setLocal
  *     setInterval must be torn down with the pair. Both are purely LOCAL — a folder on the local disk and
  *     a client-side timer — with no backend involvement. Deterministic mocked regressions (memfs trash +
  *     atime backdating + fake timers): tests/scenarios/zj-trash-cleanup.test.ts.
+ *   - M4: a remote deletion must not wipe a LOCALLY-IGNORED file (one present on disk but excluded from the
+ *     scanned tree for a non-.filenignore reason). This is client-side delta-attribution logic; the
+ *     backend's only role (a path deleted remotely) is already exercised by the live deletion tests, and
+ *     the trigger — a base path that became ignored for a nameLength/invalidPath/defaultIgnore/duplicate
+ *     reason — cannot be forced deterministically on the real backend. Driven directly through
+ *     deltas.process() with an injected ignored entry in tests/scenarios/zk-ignore-asymmetry.test.ts.
  */
 describe.skipIf(!E2E_ENABLED)("E2E — audit regression fixes against live backend", () => {
 	let sdk: FilenSDK

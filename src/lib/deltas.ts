@@ -686,7 +686,14 @@ export class Deltas {
 		if (this.sync.mode === "twoWay" || this.sync.mode === "cloudToLocal") {
 			if (this.sync.mode === "twoWay") {
 				for (const path in previousRemoteTree.tree) {
-					if (pathsAdded[path]) {
+					// Symmetric to the local-deletions guard (BUG-006): never delete the LOCAL copy of a path the
+					// local scan ignored or errored on. Such a path is physically present on disk but absent from
+					// the scanned tree (an over-long name, an invalid path, a default-ignore that grew across an
+					// upgrade, a case-duplicate); when its REMOTE copy is deleted, propagating that delete would
+					// wipe a file the user never asked to sync. The end-of-process ignore filter does not catch
+					// these — it only knows the .filenignore matcher, not the nameLength/pathLength/invalidPath/
+					// defaultIgnore/duplicate reasons carried in ignoredLocalPaths. (M4)
+					if (pathsAdded[path] || erroredLocalPaths[path] || ignoredLocalPaths[path]) {
 						continue
 					}
 

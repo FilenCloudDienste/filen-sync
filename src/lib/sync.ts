@@ -98,47 +98,56 @@ export class Sync {
 	}
 
 	public async smokeTest(): Promise<void> {
-		if (this.removed) {
-			throw new Error("Aborted")
-		}
+		// Loop rather than recurse: during a prolonged outage this retries once per SYNC_INTERVAL, and the
+		// old `return await this.smokeTest()` tail-recursion accumulated one suspended async frame per retry
+		// (unbounded memory growth over a long outage). `this.removed` is re-checked every iteration so a
+		// pair removed mid-outage aborts promptly. The caller runs this BEFORE acquiring the lock, so an
+		// outage stalls only this pair's cycle and never holds the account lock (cross-device starvation).
+		while (true) {
+			if (this.removed) {
+				throw new Error("Aborted")
+			}
 
-		const localSmokeTest =
-			this.mode === "cloudBackup" || this.mode === "cloudToLocal" || this.mode === "twoWay"
-				? await this.localFileSystem.isPathWritable(this.syncPair.localPath)
-				: await this.localFileSystem.isPathReadable(this.syncPair.localPath)
+			const localSmokeTest =
+				this.mode === "cloudBackup" || this.mode === "cloudToLocal" || this.mode === "twoWay"
+					? await this.localFileSystem.isPathWritable(this.syncPair.localPath)
+					: await this.localFileSystem.isPathReadable(this.syncPair.localPath)
 
-		if (!localSmokeTest) {
-			await this.localFileSystem.stopDirectoryWatcher()
+			if (!localSmokeTest) {
+				await this.localFileSystem.stopDirectoryWatcher()
 
-			this.worker.logger.log(
-				"error",
-				"Local smoke test failed, path not existing or not readable or writable",
-				this.syncPair.localPath
-			)
+				this.worker.logger.log(
+					"error",
+					"Local smoke test failed, path not existing or not readable or writable",
+					this.syncPair.localPath
+				)
 
-			postMessageToMain({
-				type: "cycleLocalSmokeTestFailed",
-				syncPair: this.syncPair
-			})
+				postMessageToMain({
+					type: "cycleLocalSmokeTestFailed",
+					syncPair: this.syncPair
+				})
 
-			await new Promise<void>(resolve => setTimeout(resolve, SYNC_INTERVAL))
+				await new Promise<void>(resolve => setTimeout(resolve, SYNC_INTERVAL))
 
-			return await this.smokeTest()
-		}
+				continue
+			}
 
-		const remoteSmokeTest = await this.remoteFileSystem.remoteDirPathExisting()
+			const remoteSmokeTest = await this.remoteFileSystem.remoteDirPathExisting()
 
-		if (!remoteSmokeTest) {
-			this.worker.logger.log("error", "Remote smoke test failed, path does not exist or is in the trash", this.syncPair.remotePath)
+			if (!remoteSmokeTest) {
+				this.worker.logger.log("error", "Remote smoke test failed, path does not exist or is in the trash", this.syncPair.remotePath)
 
-			postMessageToMain({
-				type: "cycleRemoteSmokeTestFailed",
-				syncPair: this.syncPair
-			})
+				postMessageToMain({
+					type: "cycleRemoteSmokeTestFailed",
+					syncPair: this.syncPair
+				})
 
-			await new Promise<void>(resolve => setTimeout(resolve, SYNC_INTERVAL))
+				await new Promise<void>(resolve => setTimeout(resolve, SYNC_INTERVAL))
 
-			return await this.smokeTest()
+				continue
+			}
+
+			return
 		}
 	}
 
@@ -374,6 +383,12 @@ export class Sync {
 				syncPair: this.syncPair
 			})
 
+			// Smoke-test BEFORE acquiring the lock. The local smoke test retries every SYNC_INTERVAL for as
+			// long as the local path is unavailable (an unmounted drive, a disconnected network FS). Under the
+			// lock that would hold the account lock for the WHOLE outage and starve every other device; run
+			// outside it, an outage stalls only this pair's cycle.
+			await this.smokeTest()
+
 			const acquireLockMessageTimeout = setTimeout(() => {
 				postMessageToMain({
 					type: "cycleAcquiringLockStarted",
@@ -391,7 +406,6 @@ export class Sync {
 			})
 
 			try {
-				await this.smokeTest()
 				await this.localFileSystem.waitForLocalDirectoryChanges()
 
 				postMessageToMain({

@@ -21,6 +21,9 @@ import { writeLocal, renameLocal, readLocal, existsLocal, uploadRemote, setLocal
  *     This is client-side control flow — the backend plays no part — driven deterministically with fake
  *     timers in tests/scenarios/g-large-deletion.test.ts (G6/G7); the gate itself is covered live in
  *     tests/e2e/confirm.e2e.test.ts.
+ *   - H7: the local smoke test must run BEFORE the lock so a local outage never holds the account lock.
+ *     Lock ORDERING during a LOCAL filesystem outage — no backend semantics — driven deterministically
+ *     with an injected fs error + fake timers in tests/scenarios/zi-smoke-test-outage.test.ts.
  */
 describe.skipIf(!E2E_ENABLED)("E2E — audit regression fixes against live backend", () => {
 	let sdk: FilenSDK

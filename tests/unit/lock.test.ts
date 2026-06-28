@@ -3,13 +3,19 @@ import Lock from "../../src/lib/lock"
 import type Sync from "../../src/lib/sync"
 
 /**
- * Lock refresh resilience (F2). The lock auto-refreshes its server-side hold on a 5s interval. The release
- * path must NOT tear that interval down before the release has durably succeeded: a transient
- * releaseResourceLock failure restores acquiredCount to >= 1, and if the refresh timer was already gone (and
- * not restarted) every later acquire() short-circuits (count > 1) without re-installing it, so the lock
- * silently lapses while the engine still believes it holds it — letting another device acquire it
- * concurrently (split-brain). These tests pin that the timer survives a failed release and is only torn down
- * once a release actually succeeds.
+ * Lock teardown on release (H1). The lock auto-refreshes its server-side hold on a 5s interval. When the
+ * LAST holder releases, the refresh interval AND the held state must be torn down UNCONDITIONALLY — even if
+ * the server releaseResourceLock call fails. The implementation keeps the invariant "refresh timer alive iff
+ * acquiredCount > 0", which closes both failure modes at once:
+ *
+ *  - Keeping the timer alive after the holder is gone (the earlier "restore the count so it can retry"
+ *    behavior) renews a lock NOBODY holds forever: the count never returns to 0, the release is never
+ *    retried, and no other device can ever acquire it (cross-device starvation).
+ *  - Leaving acquiredCount >= 1 with a DEAD timer is the opposite hazard — the engine believes it holds a
+ *    lock the server has let lapse (split-brain).
+ *
+ * A failed release therefore STOPS refreshing and resets to the unheld state; the server-side lock TTL
+ * lapses the now-un-refreshed hold, and the retained uuid lets the next acquire re-acquire cleanly.
  */
 
 type LockHandlers = {
@@ -28,11 +34,11 @@ function makeLock(handlers: LockHandlers): Lock {
 	return new Lock({ sync, resource: "sync-test-resource" })
 }
 
-describe("Lock — refresh survives a release failure (F2)", () => {
+describe("Lock — teardown on release survives a server release failure (H1)", () => {
 	beforeEach(() => vi.useFakeTimers())
 	afterEach(() => vi.useRealTimers())
 
-	it("keeps refreshing the still-held lock after releaseResourceLock fails, then tears down on a successful release", async () => {
+	it("stops refreshing and resets to the unheld state after a failed release (no held-forever)", async () => {
 		let releaseShouldFail = true
 		const handlers: LockHandlers = {
 			acquireResourceLock: vi.fn(async () => {}),
@@ -49,32 +55,64 @@ describe("Lock — refresh survives a release failure (F2)", () => {
 		await lock.acquire()
 		expect(handlers.acquireResourceLock).toHaveBeenCalledTimes(1)
 
-		// The refresh interval is live: advancing 5s fires one refresh.
+		// The refresh interval is live while held.
 		await vi.advanceTimersByTimeAsync(5000)
 		expect(handlers.refreshResourceLock.mock.calls.length).toBeGreaterThanOrEqual(1)
 
-		// A transient release failure must NOT kill the refresh timer.
+		// The (last) release fails at the server, but the holder is gone: the failure surfaces...
 		await expect(lock.release()).rejects.toThrow("release boom")
 		expect(handlers.releaseResourceLock).toHaveBeenCalledTimes(1)
+
+		// ...and refreshing STOPS. A lock that kept refreshing here would be held forever (the H1 bug);
+		// with the timer torn down the server-side TTL lapses the un-refreshed hold.
+		const refreshesAfterFailure = handlers.refreshResourceLock.mock.calls.length
+		await vi.advanceTimersByTimeAsync(20000)
+		expect(
+			handlers.refreshResourceLock.mock.calls.length,
+			"a relinquished lock must not keep refreshing after a failed release"
+		).toBe(refreshesAfterFailure)
+
+		// The held state was reset (acquiredCount back to 0), so the next acquire is a REAL server acquire —
+		// not a re-entrant no-op, which is what a count stuck at >= 1 (believing it still holds) would yield.
+		releaseShouldFail = false
+		await lock.acquire()
+		expect(handlers.acquireResourceLock, "a reset lock must re-acquire from the server").toHaveBeenCalledTimes(2)
+
+		await lock.release()
+		expect(handlers.releaseResourceLock).toHaveBeenCalledTimes(2)
+	})
+
+	it("keeps refreshing while a re-entrant holder remains, and only tears down on the final release", async () => {
+		const handlers: LockHandlers = {
+			acquireResourceLock: vi.fn(async () => {}),
+			refreshResourceLock: vi.fn(async () => {}),
+			releaseResourceLock: vi.fn(async () => {})
+		}
+
+		const lock = makeLock(handlers)
+
+		await lock.acquire()
+		await lock.acquire()
+
+		// Inner release: an outer holder remains, so the timer must stay alive (count > 0) and the sdk is
+		// untouched.
+		await lock.release()
+		expect(handlers.releaseResourceLock).not.toHaveBeenCalled()
 
 		const refreshesBefore = handlers.refreshResourceLock.mock.calls.length
 		await vi.advanceTimersByTimeAsync(5000)
 		expect(
 			handlers.refreshResourceLock.mock.calls.length,
-			"the still-held lock must keep refreshing after a failed release"
+			"the timer lives while any holder remains"
 		).toBeGreaterThan(refreshesBefore)
 
-		// A later successful release genuinely releases it and stops refreshing.
-		releaseShouldFail = false
+		// Outer release: last holder gone → release the server lock and stop refreshing.
 		await lock.release()
-		expect(handlers.releaseResourceLock).toHaveBeenCalledTimes(2)
+		expect(handlers.releaseResourceLock).toHaveBeenCalledTimes(1)
 
-		const refreshesAfterRelease = handlers.refreshResourceLock.mock.calls.length
+		const refreshesAfter = handlers.refreshResourceLock.mock.calls.length
 		await vi.advanceTimersByTimeAsync(15000)
-		expect(
-			handlers.refreshResourceLock.mock.calls.length,
-			"no refreshes after the lock is released"
-		).toBe(refreshesAfterRelease)
+		expect(handlers.refreshResourceLock.mock.calls.length).toBe(refreshesAfter)
 	})
 
 	it("a clean acquire/release leaves no refresh timer running", async () => {

@@ -114,8 +114,6 @@ export class Lock {
 	public async release(): Promise<void> {
 		await this.mutex.acquire()
 
-		const previousCount = structuredClone(this.acquiredCount)
-
 		try {
 			if (this.acquiredCount === 0 || !this.lockUUID) {
 				return
@@ -127,28 +125,29 @@ export class Lock {
 				return
 			}
 
-			try {
-				await this.sync.sdk.user().releaseResourceLock({
-					resource: this.resource,
-					lockUUID: this.lockUUID
-				})
+			// The last holder has released. Stop refreshing and drop to the unheld state UNCONDITIONALLY,
+			// before awaiting the server release — keeping the invariant "refresh timer alive iff
+			// acquiredCount > 0". The earlier revision restored acquiredCount to >= 1 on a release failure
+			// (so the holder could "retry"), but the holder is already gone: the count never returned to 0
+			// again, so the 5s interval renewed a lock NOBODY held, forever — the server lock could never
+			// lapse and no other device could ever acquire it (cross-device starvation). Resetting the count
+			// instead also forecloses the opposite hazard the restore was meant to avoid (count >= 1 with a
+			// dead timer → the engine believing it holds a lock the server has let expire → split-brain),
+			// because the count and the timer are now always torn down together.
+			clearInterval(this.lockRefreshInterval)
 
-				// Tear down the refresh timer and drop the UUID ONLY after the release durably succeeds.
-				// Clearing the interval before the await (and never restoring it on failure) used to
-				// permanently kill lock refreshing: a transient release error restored acquiredCount to >= 1
-				// but left the timer gone, so every later acquire() short-circuited (count > 1) without
-				// re-installing it — the server-side lock then silently lapsed while the engine still believed
-				// it held it, letting another device acquire it concurrently. Keeping the timer alive on
-				// failure preserves the still-held lock (it keeps refreshing) until a later release succeeds. (F2)
-				clearInterval(this.lockRefreshInterval)
+			this.lockRefreshInterval = undefined
 
-				this.lockRefreshInterval = undefined
-				this.lockUUID = null
-			} catch (error) {
-				this.acquiredCount = previousCount
+			// If the server release call fails the lock is NOT explicitly freed, but with refreshing stopped
+			// its server-side TTL lapses it — the same self-healing path a crashed client relies on. The UUID
+			// is retained on failure (cleared only on a confirmed release) so the next acquire reuses it to
+			// re-acquire our own not-yet-expired lock, mirroring the acquire-failure recovery path.
+			await this.sync.sdk.user().releaseResourceLock({
+				resource: this.resource,
+				lockUUID: this.lockUUID
+			})
 
-				throw error
-			}
+			this.lockUUID = null
 		} finally {
 			this.mutex.release()
 		}

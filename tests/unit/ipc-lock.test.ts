@@ -323,22 +323,39 @@ describe("lock.ts — Lock", () => {
 		})
 	})
 
-	it("restores the count when releaseResourceLock fails, then releases on retry", async () => {
-		await withLock(async ({ lock, controls, releaseResourceLock }) => {
+	it("relinquishes the lock (stops refreshing, resets the held state) when releaseResourceLock fails", async () => {
+		await withLock(async ({ lock, controls, acquireResourceLock, refreshResourceLock, releaseResourceLock }) => {
 			await lock.acquire()
+
+			const firstLockUUID = acquireResourceLock.mock.calls[0]![0].lockUUID
 
 			controls.setError("releaseResourceLock", new Error("release boom"))
 
+			// The last holder releases but the server call fails: the failure surfaces (the fake's guard
+			// throws before deleting, so the fake still holds the lock — a faithful "release didn't land").
 			await expect(lock.release()).rejects.toThrow(/release boom/)
-
-			// The failed release restored the previous count, so the lock is still considered held: a
-			// retry (after clearing the error) drops the count to 0 and releases for real.
 			expect(releaseResourceLock).toHaveBeenCalledTimes(1)
 
+			// The refresh timer is torn down — a lock that kept refreshing here would be held forever, so the
+			// server-side TTL could never lapse it and no other device could acquire it (cross-device starvation).
+			const refreshesAfterFailure = refreshResourceLock.mock.calls.length
+			await vi.advanceTimersByTimeAsync(20000)
+			expect(refreshResourceLock.mock.calls.length, "no refreshes after a relinquished lock").toBe(refreshesAfterFailure)
+
+			// The held state is reset (count back to 0), so a bare release is now a no-op — the lock is NOT
+			// stuck "held" waiting to be retried.
+			await lock.release()
+			expect(releaseResourceLock, "a relinquished lock is not re-released by a bare release").toHaveBeenCalledTimes(1)
+
+			// The next acquire re-acquires for real, reusing the retained uuid (re-taking our own not-yet-
+			// expired hold), and a following release frees it.
 			controls.clearError("releaseResourceLock")
 
-			await lock.release()
+			await lock.acquire()
+			expect(acquireResourceLock).toHaveBeenCalledTimes(2)
+			expect(acquireResourceLock.mock.calls[1]![0].lockUUID).toBe(firstLockUUID)
 
+			await lock.release()
 			expect(releaseResourceLock).toHaveBeenCalledTimes(2)
 		})
 	})

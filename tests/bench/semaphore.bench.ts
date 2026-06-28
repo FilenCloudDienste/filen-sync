@@ -28,9 +28,9 @@ async function drain(maxCount: number, tasks: number): Promise<void> {
 
 describe("Semaphore fan-out throughput", () => {
 	it("width 1024 (remote listSemaphore shape)", async () => {
-		// Moderate sizes for the baseline: the O(N²) shift makes 100k take many seconds. The quadratic
-		// trend is obvious across these; after the fix this is bumped to 100k/500k/1M (now linear).
-		for (const tasks of [5_000, 10_000, 20_000, 40_000]) {
+		// Post-fix sizes — the O(1) head-index dequeue is linear, so these complete fast where the old
+		// O(N²) shift took seconds-to-minutes. (Baseline 00-baseline.md used 5k–40k to show the quadratic.)
+		for (const tasks of [50_000, 200_000, 1_000_000]) {
 			await bench({
 				group: "Semaphore.drain / width 1024",
 				name: `${tasks} tasks`,
@@ -43,7 +43,7 @@ describe("Semaphore fan-out throughput", () => {
 	})
 
 	it("width 10 (transfers semaphore shape — bulk upload/download)", async () => {
-		for (const tasks of [5_000, 10_000, 20_000, 40_000]) {
+		for (const tasks of [50_000, 200_000, 1_000_000]) {
 			await bench({
 				group: "Semaphore.drain / width 10",
 				name: `${tasks} tasks`,

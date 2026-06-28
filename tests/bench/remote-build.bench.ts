@@ -27,9 +27,9 @@ async function worldFor(scene: Scene): Promise<World> {
 
 describe("remoteFileSystem.getDirectoryTree (engine build loop, isolated)", () => {
 	it("wide tree size sweep", async () => {
-		// NOTE: capped at 200k for the BASELINE — the O(N²) Semaphore (finding 001) makes 500k take
-		// minutes. After the semaphore fix this sweep is bumped to 500k/1M (now linear).
-		for (const nodes of [10_000, 50_000, 200_000]) {
+		// Post-fix: linear (finding 001 + 004), so the sweep goes to 500k where the baseline capped at
+		// 200k (which took ~22s under the old O(N²) build).
+		for (const nodes of [10_000, 50_000, 200_000, 500_000]) {
 			resetIdentity()
 
 			const scene = genWideScene(Math.max(1, Math.round(nodes / 101)), 100)

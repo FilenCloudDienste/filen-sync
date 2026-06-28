@@ -988,9 +988,23 @@ export class Deltas {
 					// remote change ALWAYS wins; the newer-mtime tiebreak is twoWay-only and must not let a
 					// foreign local edit (with a newer mtime) suppress the pull. (F5)
 					const directionalPull = this.sync.mode === "cloudToLocal" || this.sync.mode === "cloudBackup"
+					// The local copy is unchanged since the base (size + whole-second mtime both match). Then a
+					// remote change is NOT a conflict — there is nothing local to lose — so it must win outright.
+					// Mirrors the local pass, which already declines to claim an unchanged-local path. Without
+					// this, a genuine remote edit (new uuid) whose mtime was not strictly newer than the local
+					// mtime — equal whole-second, or an out-of-sync editing clock — was dropped and never pulled.
+					const localUnchanged =
+						!!previousLocalItem &&
+						previousLocalItem.size === currentLocalItem.size &&
+						normalizeLastModifiedMsForComparison(previousLocalItem.lastModified) ===
+							normalizeLastModifiedMsForComparison(currentLocalItem.lastModified)
+					// The newer-mtime tiebreak (last term) stays the CONFLICT resolver: it only decides the case
+					// where the local copy ALSO changed. The local pass ran first and claimed the path when local
+					// won that conflict, so reaching here with a changed local means the remote is the newer side.
 					const remoteWins =
 						directionalPull ||
 						!previousLocalItem ||
+						localUnchanged ||
 						normalizeLastModifiedMsForComparison(currentRemoteItem.lastModified) >
 							normalizeLastModifiedMsForComparison(currentLocalItem.lastModified)
 

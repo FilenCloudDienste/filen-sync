@@ -90,26 +90,37 @@ export function convertTimestampToMs(timestamp: number): number {
 
 export function isPathOverMaxLength(path: string): boolean {
 	if (process.platform === "linux") {
-		return path.length + 1 > 4096
+		// Linux PATH_MAX is 4096 BYTES (a pathname is a byte string), so count UTF-8 bytes — String.length
+		// (UTF-16 code units) undercounts a multibyte path and would let one the kernel rejects through.
+		return Buffer.byteLength(path, "utf8") + 1 > 4096
 	} else if (process.platform === "darwin") {
-		return path.length + 1 > 1024
+		// macOS PATH_MAX is 1024 BYTES too (verified empirically: a 473-UTF-16-unit / 1273-byte path is
+		// ENAMETOOLONG), so the full path is measured in UTF-8 bytes — unlike the NAME limit below.
+		return Buffer.byteLength(path, "utf8") + 1 > 1024
 	} else if (process.platform === "win32") {
+		// Windows paths are counted in UTF-16 code units (WCHAR), which is exactly String.length.
 		return path.length + 1 > 512
 	}
 
-	return path.length + 1 > 512
+	return Buffer.byteLength(path, "utf8") + 1 > 512
 }
 
 export function isNameOverMaxLength(name: string): boolean {
 	if (process.platform === "linux") {
-		return name.length + 1 > 255
+		// Linux NAME_MAX is 255 BYTES per path component, so count UTF-8 bytes. A multibyte name that fits
+		// in 255 UTF-16 code units but exceeds 255 bytes (e.g. 100 CJK chars = 300 bytes) was wrongly judged
+		// valid here, then failed at the filesystem with ENAMETOOLONG — retried fruitlessly every cycle.
+		return Buffer.byteLength(name, "utf8") + 1 > 255
 	} else if (process.platform === "darwin") {
+		// macOS limits a NAME to 255 UTF-16 code units (verified: 255 units / 765 bytes is fine, 256 units
+		// fails regardless of byte length), which is exactly String.length — NOT a byte limit.
 		return name.length + 1 > 255
 	} else if (process.platform === "win32") {
+		// NTFS limits a name to 255 UTF-16 code units (WCHAR) = String.length.
 		return name.length + 1 > 255
 	}
 
-	return name.length + 1 > 255
+	return Buffer.byteLength(name, "utf8") + 1 > 255
 }
 
 // eslint-disable-next-line no-control-regex

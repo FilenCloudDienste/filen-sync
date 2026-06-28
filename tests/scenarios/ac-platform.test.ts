@@ -272,4 +272,49 @@ describe("Category AC — cross-platform path rules", () => {
 
 		expect(hadTransfers(lastCycle.messages)).toBe(false)
 	})
+
+	// A name that fits in 255 UTF-16 code units but exceeds 255 UTF-8 BYTES — legal on macOS/Windows
+	// (which count code units) but over Linux's byte-based NAME_MAX. "あ" is 1 code unit / 3 bytes, so
+	// 100 of them is 100 units (under 255) yet 300 bytes (over 255).
+	const MULTIBYTE_NAME = "あ".repeat(100)
+	const MULTIBYTE_PATH = `/${MULTIBYTE_NAME}.txt`
+
+	it("AC11: linux skips a remote name that exceeds 255 BYTES (nameLength) instead of failing forever", async () => {
+		const result = await withPlatform("linux", () =>
+			runScenario({
+				name: "AC11",
+				mode: "cloudToLocal",
+				initialRemote: {
+					[MULTIBYTE_PATH]: "too many bytes for linux",
+					"/short.txt": "fine"
+				},
+				steps: [runCycle(), runCycle()]
+			})
+		)
+
+		// The over-long name is skipped (not materialized locally), the valid sibling syncs, and the remote
+		// copy is untouched — a graceful skip, not a per-cycle ENAMETOOLONG retry loop.
+		expect(result.finalLocal[MULTIBYTE_PATH]).toBeUndefined()
+		expect(result.finalLocal["/short.txt"]).toMatchObject({ type: "file" })
+		expect(result.finalRemote[MULTIBYTE_PATH]).toMatchObject({ type: "file" })
+		expect(ignoredReasons(result.messages)).toContain("nameLength")
+	})
+
+	it("AC12: darwin SYNCS the same name down — it is 100 UTF-16 units, under the 255-unit macOS limit", async () => {
+		const result = await withPlatform("darwin", () =>
+			runScenario({
+				name: "AC12",
+				mode: "cloudToLocal",
+				initialRemote: {
+					[MULTIBYTE_PATH]: "fine on macOS",
+					"/short.txt": "fine"
+				},
+				steps: [runCycle(), runCycle()]
+			})
+		)
+
+		expect(result.finalLocal[MULTIBYTE_PATH]).toMatchObject({ type: "file" })
+		expect(result.finalLocal["/short.txt"]).toMatchObject({ type: "file" })
+		expect(ignoredReasons(result.messages)).not.toContain("nameLength")
+	})
 })

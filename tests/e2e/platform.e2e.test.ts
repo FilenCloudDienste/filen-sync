@@ -108,6 +108,39 @@ describe.skipIf(!E2E_ENABLED)("E2E — cross-platform path rules", () => {
 		})
 	})
 
+	it("a name over 255 BYTES but under 255 UTF-16 units syncs down everywhere except linux (byte NAME_MAX)", async () => {
+		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
+			// "あ" is 1 UTF-16 code unit but 3 UTF-8 bytes (and has no NFC/NFD ambiguity). 100 of them is
+			// 100 units — under the 255-unit macOS/NTFS NAME limit — yet 300 bytes, over linux's 255-BYTE
+			// NAME_MAX. A foreign macOS/Windows peer legitimately created it.
+			const multibyteName = `${"あ".repeat(100)}.txt`
+
+			await uploadRemote(world, multibyteName, "three hundred bytes of name")
+			await uploadRemote(world, "plain.txt", "fine everywhere")
+			await settle(world)
+
+			const [local, remote] = await Promise.all([snapshotLocalReal(world), snapshotRemoteReal(world)])
+
+			// The remote always keeps it; the valid sibling always lands locally.
+			expect(remote[`/${multibyteName}`]).toMatchObject({ type: "file" })
+			expect(local["/plain.txt"]).toMatchObject({ type: "file" })
+
+			// Lands locally on darwin + win32 (they count UTF-16 units: 100 < 255). Skipped on linux, whose
+			// NAME_MAX is 255 BYTES (300 > 255) — a graceful skip, NOT a per-cycle ENAMETOOLONG retry loop.
+			if (process.platform === "linux") {
+				expect(local[`/${multibyteName}`]).toBeUndefined()
+			} else {
+				expect(local[`/${multibyteName}`]).toMatchObject({ type: "file" })
+			}
+
+			// With the world settled, a confirming cycle does zero transfers — on linux the perpetually
+			// byte-over-long name never re-churns.
+			const confirming = await cycle(world)
+
+			expect(transferOps(confirming)).toEqual([])
+		})
+	})
+
 	it("a LOCAL file legal here but illegal elsewhere uploads normally (the foreign client will skip it)", async () => {
 		// The mirror direction: whatever this OS lets us create locally, the engine uploads. A peer on a
 		// stricter OS is the one that will skip it on the way down — proven by the inbound cases above.

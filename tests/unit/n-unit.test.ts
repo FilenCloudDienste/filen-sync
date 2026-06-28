@@ -210,6 +210,46 @@ describe("Category N — utils.isPathOverMaxLength / isNameOverMaxLength", () =>
 			})
 		}
 	})
+
+	// Multibyte semantics. "あ" is 1 UTF-16 code unit but 3 UTF-8 bytes. Linux NAME_MAX/PATH_MAX are BYTE
+	// limits, so the guard must count UTF-8 bytes there; macOS/Windows count UTF-16 code units for NAMES
+	// (verified empirically on darwin: 255 units / 765 bytes is accepted, 256 units rejected) but macOS
+	// PATH_MAX is a BYTE limit (a 473-unit / 1273-byte path is ENAMETOOLONG). String.length undercounting a
+	// multibyte name on linux is the bug: it would pass the guard and then fail at the filesystem forever.
+	const NAME_100_CJK = "あ".repeat(100) // 100 UTF-16 units, 300 UTF-8 bytes
+
+	it("counts NAME length in UTF-8 BYTES on linux (a 300-byte / 100-unit name is over the 255 limit)", () => {
+		withPlatform("linux", () => {
+			expect(isNameOverMaxLength(NAME_100_CJK)).toBe(true)
+			// A name comfortably under 255 BYTES is fine (80 CJK = 240 bytes).
+			expect(isNameOverMaxLength("あ".repeat(80))).toBe(false)
+		})
+	})
+
+	it("counts NAME length in UTF-16 CODE UNITS on darwin and win32 (a 300-byte / 100-unit name is fine)", () => {
+		for (const platform of ["darwin", "win32"] as const) {
+			withPlatform(platform, () => {
+				expect(isNameOverMaxLength(NAME_100_CJK)).toBe(false)
+				// 256 UTF-16 units is over regardless of byte length.
+				expect(isNameOverMaxLength("あ".repeat(256))).toBe(true)
+			})
+		}
+	})
+
+	it("counts PATH length in UTF-8 BYTES on linux and darwin, UTF-16 units on win32", () => {
+		// 400 CJK = 400 UTF-16 units, 1200 UTF-8 bytes.
+		const PATH_400_CJK = "あ".repeat(400)
+
+		// darwin: 1200 bytes > 1024 byte limit → over; the 400-unit count would be UNDER and wrongly allow it.
+		withPlatform("darwin", () => expect(isPathOverMaxLength(PATH_400_CJK)).toBe(true))
+		// linux: 1200 bytes < 4096 → fine; but 1400 CJK = 4200 bytes > 4096 → over (4096 is a BYTE limit).
+		withPlatform("linux", () => {
+			expect(isPathOverMaxLength(PATH_400_CJK)).toBe(false)
+			expect(isPathOverMaxLength("あ".repeat(1400))).toBe(true)
+		})
+		// win32: paths are UTF-16 code units — 400 units < 512 → fine even though it is 1200 bytes.
+		withPlatform("win32", () => expect(isPathOverMaxLength(PATH_400_CJK)).toBe(false))
+	})
 })
 
 describe("Category N — utils.convertTimestampToMs", () => {

@@ -370,21 +370,42 @@ export class State {
 						reject(err)
 					})
 
+					// Accumulate serialized lines into ~64KB batches and write them in one go, instead of one
+					// stream.write() (and drain check) per entry. The emitted bytes are byte-for-byte identical
+					// (same `{prop,data}\n` lines in the same order) — this only collapses N tiny writes into a
+					// handful of large ones, which on a huge tree removes the per-entry write/await overhead that
+					// dominated the per-cycle state save. (perf)
+					const FLUSH_THRESHOLD = 1 << 16
+					let batch = ""
+
+					const flush = async (): Promise<void> => {
+						if (batch.length === 0) {
+							return
+						}
+
+						const chunk = batch
+
+						batch = ""
+
+						if (!stream.write(chunk)) {
+							await new Promise<void>(resolve => stream.once("drain", resolve))
+						}
+					}
+
 					for (const prop in record) {
 						if (didError) {
 							break
 						}
 
-						if (
-							!stream.write(
-								JSON.stringify({
-									prop,
-									data: record[prop]
-								}) + "\n"
-							)
-						) {
-							await new Promise<void>(resolve => stream.once("drain", resolve))
+						batch += JSON.stringify({ prop, data: record[prop] }) + "\n"
+
+						if (batch.length >= FLUSH_THRESHOLD) {
+							await flush()
 						}
+					}
+
+					if (!didError) {
+						await flush()
 					}
 
 					await new Promise<void>(resolve => stream.end(resolve))
@@ -529,9 +550,38 @@ export class State {
 
 		this.sync.isPreviousSavedTreeStateEmpty = false
 		this.sync.previousLocalTree.tree = previousLocalTree
-		this.sync.previousLocalTree.inodes = await this.readLargeRecordFromLineStream<LocalItem>(this.previousLocalINodesPath)
 		this.sync.previousRemoteTree.tree = previousRemoteTree
-		this.sync.previousRemoteTree.uuids = await this.readLargeRecordFromLineStream<RemoteItem>(this.previousRemoteUUIDsPath)
+
+		// Rebuild the inode/uuid indexes from the loaded trees instead of parsing the two sibling index
+		// files. Every item carries its own inode/uuid, so tree -> index is an exact reconstruction of what
+		// the scan built (and what those files held) — last-writer-wins on a shared inode/uuid matches the
+		// build order, which the trees preserve — while skipping a full parse of two N-entry files on every
+		// restart. The index files are still required to EXIST (the gate above) and are written as compact
+		// path-refs by savePreviousTrees. Back-compat: an OLD on-disk state whose index files hold full items
+		// is simply not read here and rebuilt identically, so the first post-upgrade cycle stays a no-op.
+		const inodes: LocalTree["inodes"] = {}
+
+		for (const path in previousLocalTree) {
+			const item = previousLocalTree[path]
+
+			if (item) {
+				inodes[item.inode] = item
+			}
+		}
+
+		this.sync.previousLocalTree.inodes = inodes
+
+		const uuids: RemoteTree["uuids"] = {}
+
+		for (const path in previousRemoteTree) {
+			const item = previousRemoteTree[path]
+
+			if (item) {
+				uuids[item.uuid] = item
+			}
+		}
+
+		this.sync.previousRemoteTree.uuids = uuids
 		this.sync.previousLocalTree.size = Object.keys(previousLocalTree).length
 		this.sync.previousRemoteTree.size = Object.keys(previousRemoteTree).length
 	}
@@ -539,10 +589,36 @@ export class State {
 	public async savePreviousTrees(): Promise<void> {
 		await this.sync.environment.fs.ensureDir(this.statePath)
 
+		// The inode/uuid index files used to persist every FULL item — a byte-for-byte duplicate of what the
+		// two tree files already hold (each item is keyed once by path, once by inode/uuid). We now persist
+		// them as compact path-REFS (inode -> path, uuid -> path): the index files exist only so the load-time
+		// completeness gate + partial-write recovery still see four files, and loadPreviousTrees rebuilds the
+		// in-memory indexes from the tree files (every item carries its own inode/uuid). This halves the
+		// serialized bytes + CPU for two of the four files every cycle. The tree files are unchanged. (perf)
+		const localINodeRefs: Record<string, string> = {}
+
+		for (const inode in this.sync.previousLocalTree.inodes) {
+			const item = this.sync.previousLocalTree.inodes[inode]
+
+			if (item) {
+				localINodeRefs[inode] = item.path
+			}
+		}
+
+		const remoteUUIDRefs: Record<string, string> = {}
+
+		for (const uuid in this.sync.previousRemoteTree.uuids) {
+			const item = this.sync.previousRemoteTree.uuids[uuid]
+
+			if (item) {
+				remoteUUIDRefs[uuid] = item.path
+			}
+		}
+
 		await this.writeLargeRecordSerializedAndAtomically(this.previousLocalTreePath, this.sync.previousLocalTree.tree)
-		await this.writeLargeRecordSerializedAndAtomically(this.previousLocalINodesPath, this.sync.previousLocalTree.inodes)
+		await this.writeLargeRecordSerializedAndAtomically(this.previousLocalINodesPath, localINodeRefs)
 		await this.writeLargeRecordSerializedAndAtomically(this.previousRemoteTreePath, this.sync.previousRemoteTree.tree)
-		await this.writeLargeRecordSerializedAndAtomically(this.previousRemoteUUIDsPath, this.sync.previousRemoteTree.uuids)
+		await this.writeLargeRecordSerializedAndAtomically(this.previousRemoteUUIDsPath, remoteUUIDRefs)
 
 		this.sync.isPreviousSavedTreeStateEmpty = false
 	}

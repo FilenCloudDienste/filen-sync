@@ -10,6 +10,9 @@ export class Ignorer {
 	public instance = ignore()
 	public name: string = "ignorer"
 	private readonly mutex = new Semaphore(1)
+	// The exact ignore-rule content the current `instance` + the filesystem ignoredCaches reflect. Used to
+	// skip a needless cache wipe + matcher rebuild when a per-cycle re-init finds the rules unchanged.
+	private lastAppliedContent: string | null = null
 
 	public constructor(sync: Sync, name: string = "ignorer") {
 		this.sync = sync
@@ -92,24 +95,45 @@ export class Ignorer {
 	}
 
 	public async initialize(passedContent?: string): Promise<void> {
+		if (typeof passedContent === "string") {
+			// Explicit content update: persist it, then always (re)build from it.
+			await this.write(passedContent)
+
+			this.applyContent(passedContent)
+
+			return
+		}
+
+		// Per-cycle re-init: the engine calls this EVERY cycle to pick up `.filenignore` edits. When the
+		// rules are byte-for-byte unchanged, the per-path ignore decisions are still valid — skip wiping the
+		// filesystem ignoredCaches. Clearing them forced every subsequent tree scan to recompute the
+		// expensive per-file ignore checks (micromatch + the gitignore matcher) for the WHOLE tree on every
+		// cycle, which dominated the incremental-change scan (the cache existed but was defeated each cycle).
+		// Only rebuild when the content actually changed. excludeDotFiles/mode changes invalidate the caches
+		// through their own update paths (index.ts), so this never serves a stale decision.
+		const rawContent = await this.fetch()
+
+		if (this.lastAppliedContent !== null && rawContent === this.lastAppliedContent) {
+			return
+		}
+
+		this.applyContent(rawContent)
+	}
+
+	/**
+	 * Rebuild the matcher from `rawContent` and reset the filesystem ignoredCaches so the next scan
+	 * re-evaluates against the new rules. Records the content as the baseline for the unchanged-skip above.
+	 */
+	private applyContent(rawContent: string): void {
+		this.lastAppliedContent = rawContent
+
 		this.sync.localFileSystem.ignoredCache.clear()
 		this.sync.remoteFileSystem.ignoredCache.clear()
 
-		let content: string[]
-
-		if (typeof passedContent === "string") {
-			await this.write(passedContent)
-
-			content = passedContent
-				.split("\n")
-				.map(line => line.trim())
-				.filter(line => line.length > 0)
-		} else {
-			content = (await this.fetch())
-				.split("\n")
-				.map(line => line.trim())
-				.filter(line => line.length > 0)
-		}
+		const content = rawContent
+			.split("\n")
+			.map(line => line.trim())
+			.filter(line => line.length > 0)
 
 		this.instance = ignore()
 
@@ -124,6 +148,10 @@ export class Ignorer {
 
 	public clear(): void {
 		this.instance = ignore()
+
+		// Invalidate the change-tracking baseline so the next initialize() rebuilds rather than skipping
+		// (otherwise a clear() followed by a same-content initialize() would leave the empty matcher in place).
+		this.lastAppliedContent = null
 	}
 
 	public ignores(path: string): boolean {

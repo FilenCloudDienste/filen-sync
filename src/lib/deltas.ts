@@ -1256,10 +1256,10 @@ export class Deltas {
 			}
 		}
 
-		// Work on deltas from "left to right" (ascending order, path length).
+		// Filter out ignored paths. Ordering is deferred to the single sort on the collapsed result below:
+		// sorting here would order the larger PRE-collapse set, and collapseDeltas never depends on its input
+		// order (it indexes the renamed/deleted directories up front), so one sort on the final set suffices.
 		deltas = deltas
-			.sort((a, b) => a.path.split("/").length - b.path.split("/").length)
-			// Filter by ignored paths
 			.filter(delta => {
 				const trailingSlash =
 					delta.type === "renameLocalDirectory" ||
@@ -1312,9 +1312,17 @@ export class Deltas {
 			deletedRemoteDirectories
 		})
 
-		// Work on deltas from "left to right" (ascending order, path length).
+		// Order the collapsed deltas "left to right" (ascending path depth) so the executor creates/renames
+		// parents before children. Each delta's depth is computed ONCE here — a path.split inside the comparator
+		// is otherwise recomputed on every comparison (O(n log n) splits) — and only the already-collapsed
+		// (smallest) set is sorted.
+		const sortedDeltas = collapsedDeltas
+			.map(delta => [delta.path.split("/").length, delta] as const)
+			.sort((a, b) => a[0] - b[0])
+			.map(entry => entry[1])
+
 		return {
-			deltas: collapsedDeltas.sort((a, b) => a.path.split("/").length - b.path.split("/").length),
+			deltas: sortedDeltas,
 			deleteLocalDirectoryCountRaw,
 			deleteLocalFileCountRaw,
 			deleteRemoteDirectoryCountRaw,

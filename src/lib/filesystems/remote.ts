@@ -526,7 +526,8 @@ export class RemoteFileSystem {
 			let builtPath = "/"
 
 			for (const part of pathEx) {
-				if (pathEx.length <= 0) {
+				// Skip the empty segments produced by leading/duplicate slashes (e.g. "" from "/x/y").
+				if (part.length <= 0) {
 					continue
 				}
 
@@ -535,14 +536,18 @@ export class RemoteFileSystem {
 				if (!this.getDirectoryTreeCache.tree[builtPath]) {
 					const partBasename = pathModule.posix.basename(builtPath)
 					const partParentPath = pathModule.posix.dirname(builtPath)
+					const parentIsBase = partParentPath === "/" || partParentPath === "." || partParentPath === ""
 					const parentItem = this.getDirectoryTreeCache.tree[partParentPath]
 
-					if (!parentItem) {
+					// The sync root is never a cache key, so when this level's parent IS the root we must fall
+					// back to remoteParentUUID. Only bail when the parent is a non-root directory we cannot find
+					// (a level we failed to build earlier) — checking parentIsBase BEFORE this guard is what lets
+					// a directory whose parent is the root get created at all.
+					if (!parentIsBase && !parentItem) {
 						continue
 					}
 
-					const parentIsBase = partParentPath === "/" || partParentPath === "." || partParentPath === ""
-					const parentUUID = parentIsBase ? this.sync.syncPair.remoteParentUUID : parentItem.uuid
+					const parentUUID = parentIsBase ? this.sync.syncPair.remoteParentUUID : parentItem!.uuid
 					const uuid = await this.sync.sdk.cloud().createDirectory({
 						name: partBasename,
 						parent: parentUUID,
@@ -551,12 +556,14 @@ export class RemoteFileSystem {
 
 					await this.itemsMutex.acquire()
 
-					this.getDirectoryTreeCache.tree[relativePath] = {
+					// Store each intermediate directory under its OWN built path (not the final relativePath), so
+					// the next iteration's parent lookup (tree[partParentPath]) resolves and the chain keeps building.
+					this.getDirectoryTreeCache.tree[builtPath] = {
 						type: "directory",
 						uuid,
 						name: partBasename,
 						size: 0,
-						path: relativePath
+						path: builtPath
 					}
 
 					this.getDirectoryTreeCache.uuids[uuid] = {
@@ -564,7 +571,7 @@ export class RemoteFileSystem {
 						uuid,
 						name: partBasename,
 						size: 0,
-						path: relativePath
+						path: builtPath
 					}
 
 					this.itemsMutex.release()
@@ -1071,15 +1078,25 @@ export class RemoteFileSystem {
 	public async fileExists(relativePath: string): Promise<boolean> {
 		try {
 			const item = this.getDirectoryTreeCache.tree[relativePath]
-			const parent = this.getDirectoryTreeCache.tree[pathModule.posix.dirname(relativePath)]
 
-			if (!item || !parent) {
+			if (!item) {
+				return false
+			}
+
+			const parentPath = pathModule.posix.dirname(relativePath)
+			// The sync root is never a cache key, so a top-level file's parent must resolve to remoteParentUUID.
+			// Looking up tree["/"] used to yield undefined and make this return false for EVERY top-level file —
+			// which silently swallowed a failed top-level rename/delete task (caller reads false as "vanished").
+			const parentIsBase = parentPath === "/" || parentPath === "." || parentPath === ""
+			const parent = parentIsBase ? undefined : this.getDirectoryTreeCache.tree[parentPath]
+
+			if (!parentIsBase && !parent) {
 				return false
 			}
 
 			const { exists, uuid: existsUUID } = await this.sync.sdk.cloud().fileExists({
 				name: item.name,
-				parent: parent.uuid
+				parent: parentIsBase ? this.sync.syncPair.remoteParentUUID : parent!.uuid
 			})
 
 			if (!exists || existsUUID !== item.uuid) {

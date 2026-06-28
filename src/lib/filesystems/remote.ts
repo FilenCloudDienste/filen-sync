@@ -1015,6 +1015,14 @@ export class RemoteFileSystem {
 
 			return stats
 		} catch (e) {
+			// Best-effort: discard the staged temp file so a download that failed AFTER staging — a partial
+			// write, or a failure committing it into place — does not orphan it in the local trash directory.
+			// (force ignores an already-moved/never-created temp; the periodic trash sweep is only a delayed
+			// backstop, so reclaim the space immediately.)
+			await this.sync.environment.fs
+				.rm(tmpLocalPath, { force: true, maxRetries: 3, recursive: true, retryDelay: 100 })
+				.catch(() => {})
+
 			this.sync.worker.logger.log("error", e, "filesystems.remote.download")
 			this.sync.worker.logger.log("error", e)
 

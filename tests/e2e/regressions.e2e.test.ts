@@ -51,6 +51,11 @@ import { writeLocal, renameLocal, readLocal, existsLocal, uploadRemote, setLocal
  *     fs.lstat. The batched scan's CORRECTNESS is exercised by every live scenario here (it sits in the sync
  *     hot path); the bound itself is asserted with an lstat-counting wrapper in
  *     tests/scenarios/zm-scan-concurrency.test.ts.
+ *   - L1: a download that fails AFTER staging its temp file must discard the temp instead of orphaning it in
+ *     the local trash dir. The leak is a LOCAL artifact, and the trigger is a failure of the local commit
+ *     move (or a partial transfer) — neither of which the real backend can be made to produce on demand (a
+ *     backend-side abort takes the size-mismatch path, which already cleaned up). Driven deterministically by
+ *     failing the commit move in tests/scenarios/zo-download-temp-cleanup.test.ts.
  */
 describe.skipIf(!E2E_ENABLED)("E2E — audit regression fixes against live backend", () => {
 	let sdk: FilenSDK

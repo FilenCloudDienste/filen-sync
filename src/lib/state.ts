@@ -400,7 +400,7 @@ export class State {
 						// Build the line by concatenating the two stringified fields instead of allocating a
 						// `{ prop, data }` wrapper object to stringify — byte-for-byte identical output
 						// (`{"prop":<prop>,"data":<data>}`), just without the per-entry wrapper allocation. (perf)
-						batch += '{"prop":' + JSON.stringify(prop) + ',"data":' + JSON.stringify(record[prop]) + "}\n"
+						batch += `{"prop":${JSON.stringify(prop)},"data":${JSON.stringify(record[prop])}}\n`
 
 						if (batch.length >= FLUSH_THRESHOLD) {
 							await flush()

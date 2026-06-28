@@ -17,6 +17,10 @@ import { writeLocal, renameLocal, readLocal, existsLocal, uploadRemote, setLocal
  *   - H3: a file edited DURING the local scan (a read-during-scan race) — reproducing it needs deterministic
  *     control of the scan window, which a real filesystem can't provide without flakiness. Deterministic
  *     mocked regression with a mid-scan lstat hook: tests/scenarios/zg-edit-during-scan.test.ts.
+ *   - H6: the deletion-confirmation wait must bail (releasing the lock) when the pair is paused/removed.
+ *     This is client-side control flow — the backend plays no part — driven deterministically with fake
+ *     timers in tests/scenarios/g-large-deletion.test.ts (G6/G7); the gate itself is covered live in
+ *     tests/e2e/confirm.e2e.test.ts.
  */
 describe.skipIf(!E2E_ENABLED)("E2E — audit regression fixes against live backend", () => {
 	let sdk: FilenSDK

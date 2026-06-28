@@ -558,7 +558,11 @@ export class Sync {
 
 						await new Promise<void>(resolve => {
 							const interval = setInterval(() => {
-								if (this.deletionConfirmationResult !== "waiting") {
+								// Also bail when the pair is paused or removed while we wait — otherwise the cycle
+								// spins here indefinitely (the user may never answer) while HOLDING the lock, which
+								// starves every other device on the account. A bail-out leaves the decision as
+								// "waiting", so the skip-and-restart path below releases the lock and exits cleanly.
+								if (this.deletionConfirmationResult !== "waiting" || this.paused || this.removed) {
 									clearInterval(interval)
 
 									resolve()

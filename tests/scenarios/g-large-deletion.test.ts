@@ -188,4 +188,90 @@ describe("Category G — large-deletion confirmation", () => {
 			}
 		)
 	})
+
+	// Drive a cycle that opens the confirmation prompt, then STOP the pair (pause/remove) mid-wait instead
+	// of answering. Returns whether the cycle settled — with the bail-out fix it does (the cycle skips and
+	// the finally releases the lock); without it the wait spins forever holding the lock. The tick loop is
+	// capped so a regression fails fast (settled === false) instead of hanging the suite.
+	async function runCycleThenStopMidConfirmation(world: World, stop: (world: World) => void): Promise<boolean> {
+		await vi.advanceTimersByTimeAsync(SYNC_INTERVAL + 1)
+
+		let settled = false
+		const cyclePromise = world.sync.runCycle().finally(() => {
+			settled = true
+		})
+
+		// Let the prompt open, then stop the pair while the wait loop is still polling.
+		await vi.advanceTimersByTimeAsync(1000)
+
+		stop(world)
+
+		for (let tick = 0; tick < 5 && !settled; tick++) {
+			await vi.advanceTimersByTimeAsync(1000)
+		}
+
+		if (settled) {
+			await cyclePromise
+		}
+
+		return settled
+	}
+
+	it("G6: pausing the pair while awaiting confirmation bails out — no wedge, lock released, no deletion", async () => {
+		await withWorld(
+			{
+				mode: "twoWay",
+				requireConfirmationOnLargeDeletion: true,
+				initialLocal: { "/local/a.txt": "a", "/local/b.txt": "b" }
+			},
+			async world => {
+				await plainCycle(world)
+
+				rmLocal(world, "a.txt")
+				rmLocal(world, "b.txt")
+				world.triggerWatcher()
+
+				const settled = await runCycleThenStopMidConfirmation(world, w => {
+					w.sync.paused = true
+				})
+
+				// The cycle stopped waiting (it did not hold the lock forever) and applied NO deletion.
+				expect(settled, "the cycle must stop waiting once the pair is paused").toBe(true)
+				expect(confirmDeletionCount(world)).toBeGreaterThan(0)
+				expect(snapshotRemote(world)["/a.txt"]).toMatchObject({ type: "file" })
+				expect(snapshotRemote(world)["/b.txt"]).toMatchObject({ type: "file" })
+
+				// The lock was released (the finally ran), so once un-paused a normal cycle proceeds to
+				// completion — it would block forever on lock.acquire() if the previous cycle still held it.
+				world.sync.paused = false
+
+				await cycleWithDecision(world, "restart")
+			}
+		)
+	})
+
+	it("G7: removing the pair while awaiting confirmation bails out — no wedge", async () => {
+		await withWorld(
+			{
+				mode: "twoWay",
+				requireConfirmationOnLargeDeletion: true,
+				initialLocal: { "/local/a.txt": "a", "/local/b.txt": "b" }
+			},
+			async world => {
+				await plainCycle(world)
+
+				rmLocal(world, "a.txt")
+				rmLocal(world, "b.txt")
+				world.triggerWatcher()
+
+				const settled = await runCycleThenStopMidConfirmation(world, w => {
+					w.sync.removed = true
+				})
+
+				expect(settled, "the cycle must stop waiting once the pair is removed").toBe(true)
+				// No deletion was applied — the wait was abandoned, not confirmed.
+				expect(snapshotRemote(world)["/a.txt"]).toMatchObject({ type: "file" })
+			}
+		)
+	})
 })

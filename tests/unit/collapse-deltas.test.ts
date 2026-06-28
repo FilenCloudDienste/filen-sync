@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { collapseDeltas, type Delta } from "../../src/lib/deltas"
+import { collapseDeltas, directoriesWithSurvivingChildren, type Delta } from "../../src/lib/deltas"
 
 /**
  * Direct unit coverage for the delta-collapse pass (deltas.ts). The full-cycle scenario net
@@ -168,5 +168,70 @@ describe("collapseDeltas", () => {
 		const out = collapseDeltas({ ...empty, deltas, renamedLocalDirectories })
 
 		expect(out).toEqual(deltas)
+	})
+})
+
+/**
+ * Direct coverage for the dir-delete-vs-live-child guard (H5). A directory slated for deletion must be
+ * KEPT (its delete dropped) when this side still holds a child that is neither deleted nor renamed away.
+ */
+describe("directoriesWithSurvivingChildren", () => {
+	const tree = (paths: string[]): Record<string, unknown> => Object.fromEntries(paths.map(path => [path, {}]))
+
+	const keepFor = (deltas: Delta[], paths: string[]): Set<string> =>
+		directoriesWithSurvivingChildren(deltas, "deleteRemoteDirectory", "deleteRemoteFile", "renameRemoteDirectory", "renameRemoteFile", tree(paths))
+
+	it("keeps a deleted directory that still holds a brand-new (non-deleted) child", () => {
+		const deltas: Delta[] = [{ type: "deleteRemoteDirectory", path: "/dir" }]
+		// /dir/new.txt exists in the tree and is NOT being deleted → it keeps /dir alive.
+		expect([...keepFor(deltas, ["/dir", "/dir/new.txt", "/other.txt"])]).toEqual(["/dir"])
+	})
+
+	it("does NOT keep a directory whose only child is being renamed out", () => {
+		const deltas: Delta[] = [
+			{ type: "deleteRemoteDirectory", path: "/dir" },
+			{ type: "renameRemoteFile", path: "/dir2/c.txt", from: "/dir/c.txt", to: "/dir2/c.txt" }
+		]
+		// /dir/c.txt is leaving via a rename, so /dir has nothing live → it is deleted (empty set).
+		expect([...keepFor(deltas, ["/dir", "/dir/c.txt"])]).toEqual([])
+	})
+
+	it("does NOT keep a directory whose children are all being deleted", () => {
+		const deltas: Delta[] = [
+			{ type: "deleteRemoteDirectory", path: "/dir" },
+			{ type: "deleteRemoteFile", path: "/dir/a.txt" }
+		]
+		expect([...keepFor(deltas, ["/dir", "/dir/a.txt"])]).toEqual([])
+	})
+
+	it("keeps an ancestor when a deep descendant survives, but not when an ancestor is renamed away", () => {
+		const survivingDeep: Delta[] = [{ type: "deleteRemoteDirectory", path: "/dir" }]
+		// A surviving grandchild keeps the top directory.
+		expect([...keepFor(survivingDeep, ["/dir", "/dir/sub/leaf.txt"])]).toEqual(["/dir"])
+
+		// But if the intermediate dir is renamed away, the whole subtree leaves and keeps nothing.
+		const renamedAway: Delta[] = [
+			{ type: "deleteRemoteDirectory", path: "/dir" },
+			{ type: "renameRemoteDirectory", path: "/moved", from: "/dir/sub", to: "/moved" }
+		]
+		expect([...keepFor(renamedAway, ["/dir", "/dir/sub/leaf.txt"])]).toEqual([])
+	})
+
+	it("returns an empty set when nothing is being deleted", () => {
+		expect(keepFor([{ type: "renameRemoteFile", path: "/b", from: "/a", to: "/b" }], ["/a"]).size).toBe(0)
+	})
+
+	it("scopes to the requested direction (a remote delete is invisible to the local-typed query)", () => {
+		const deltas: Delta[] = [{ type: "deleteRemoteDirectory", path: "/dir" }]
+		const localKeep = directoriesWithSurvivingChildren(
+			deltas,
+			"deleteLocalDirectory",
+			"deleteLocalFile",
+			"renameLocalDirectory",
+			"renameLocalFile",
+			tree(["/dir", "/dir/new.txt"])
+		)
+
+		expect(localKeep.size).toBe(0)
 	})
 })

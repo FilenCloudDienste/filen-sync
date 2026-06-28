@@ -4,7 +4,7 @@ import { E2E_ENABLED, loginTestSDK, teardownTestSDK } from "./harness/account"
 import { withE2EWorld } from "./harness/world"
 import { settle, expectConverged } from "./harness/drive"
 import { snapshotRemoteReal } from "./harness/assert"
-import { writeLocal, renameLocal, readLocal, existsLocal, uploadRemote, setLocalMtime } from "./harness/mutations"
+import { writeLocal, renameLocal, readLocal, existsLocal, uploadRemote, setLocalMtime, rmLocal, deleteRemote } from "./harness/mutations"
 
 /**
  * Live-backend counterparts for the audit-round bug fixes, so each fix is proven against the real Filen
@@ -88,6 +88,51 @@ describe.skipIf(!E2E_ENABLED)("E2E — audit regression fixes against live backe
 			await settle(world)
 
 			expect(await readLocal(world, "a.txt")).toBe("v2-remote-edit")
+			await expectConverged(world)
+		})
+	})
+
+	// ---- H5: a directory deletion must not cascade over a live child the other side did not delete -----
+
+	it("H5: a remote directory delete does not wipe a child added locally in the same window", async () => {
+		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
+			await writeLocal(world, "dir/keep.txt", "keep")
+			await writeLocal(world, "other.txt", "o")
+			await settle(world)
+
+			// A peer deletes the whole directory while we add a brand-new file into it.
+			await deleteRemote(world, "dir")
+			await writeLocal(world, "dir/new.txt", "new-child")
+			await settle(world)
+
+			// The new child survives (uploaded), the directory is re-asserted, the unmodified base child the
+			// peer deleted is gone, and both sides converge — the delete did not cascade over the new file.
+			expect(await existsLocal(world, "dir/new.txt")).toBe(true)
+			expect(await readLocal(world, "dir/new.txt")).toBe("new-child")
+			const remote = await snapshotRemoteReal(world)
+
+			expect(remote["/dir/new.txt"]).toMatchObject({ type: "file" })
+			expect(remote["/dir/keep.txt"]).toBeUndefined()
+			await expectConverged(world)
+		})
+	})
+
+	it("H5 (symmetric): a local directory delete does not wipe a child the remote added in the same window", async () => {
+		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
+			await writeLocal(world, "dir/keep.txt", "keep")
+			await writeLocal(world, "other.txt", "o")
+			await settle(world)
+
+			// We delete the directory locally while a peer adds a new file into it remotely.
+			await rmLocal(world, "dir")
+			await uploadRemote(world, "dir/new.txt", "remote-new")
+			await settle(world)
+
+			expect(await existsLocal(world, "dir/new.txt")).toBe(true)
+			const remote = await snapshotRemoteReal(world)
+
+			expect(remote["/dir/new.txt"]).toMatchObject({ type: "file" })
+			expect(remote["/dir/keep.txt"]).toBeUndefined()
 			await expectConverged(world)
 		})
 	})

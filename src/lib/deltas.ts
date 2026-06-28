@@ -158,6 +158,93 @@ export function collapseDeltas({
 }
 
 /**
+ * Find directories slated for deletion that STILL hold live content on the deleting-resistant side — a
+ * freshly-added child, or a base child kept alive by newer-modify-wins — and must therefore survive.
+ *
+ * When one side deletes a directory and the other adds/keeps something inside it in the same cycle, the
+ * raw delta set contains both `deleteXDirectory <dir>` and the child's own add. Left alone, collapseDeltas
+ * subsumes the child's sibling DELETES under the dir-delete and the dir-delete then cascades over the
+ * surviving child at execution time — wiping a brand-new file before it is ever propagated (data loss).
+ * Newer content beats a delete (the same rule the per-file passes already apply), so the directory must
+ * stay: drop its delete and let the surviving child's own add re-assert it.
+ *
+ * A child "survives under <dir>" iff it is present in the current tree (`tree`), is NOT itself slated for
+ * deletion (same-direction `delete{File,Directory}`), and is NOT leaving via a rename — neither the child
+ * itself nor any ancestor is the `from` of a same-direction `rename{File,Directory}` (a renamed directory
+ * carries all its descendants out with it). Without the rename exclusion, a directory rename — which is
+ * emitted as "rename the children to the new path + delete the now-empty old directory" — would look like
+ * the old directory still has live children and never get deleted (its children are still at their old
+ * paths in this pre-rebase tree). Returns the set of dir paths to KEEP. Pure: the caller applies the
+ * pruning. Linear in tree size times depth; short-circuits when nothing is being deleted.
+ */
+export function directoriesWithSurvivingChildren(
+	deltas: Delta[],
+	dirDeleteType: "deleteLocalDirectory" | "deleteRemoteDirectory",
+	fileDeleteType: "deleteLocalFile" | "deleteRemoteFile",
+	renameDirType: "renameLocalDirectory" | "renameRemoteDirectory",
+	renameFileType: "renameLocalFile" | "renameRemoteFile",
+	tree: Record<string, unknown>
+): Set<string> {
+	const deletedDirPaths = new Set<string>()
+	const deletedPaths = new Set<string>()
+	const renamedFromPaths = new Set<string>()
+
+	for (const delta of deltas) {
+		if (delta.type === dirDeleteType) {
+			deletedDirPaths.add(delta.path)
+			deletedPaths.add(delta.path)
+		} else if (delta.type === fileDeleteType) {
+			deletedPaths.add(delta.path)
+		} else if (delta.type === renameDirType || delta.type === renameFileType) {
+			renamedFromPaths.add(delta.from)
+		}
+	}
+
+	const keep = new Set<string>()
+
+	if (deletedDirPaths.size === 0) {
+		return keep
+	}
+
+	for (const path in tree) {
+		if (deletedPaths.has(path) || renamedFromPaths.has(path)) {
+			continue
+		}
+
+		// Walk the ancestor chain once, collecting any deleted-directory ancestors. If ANY ancestor is the
+		// source of a rename, this whole subtree is moving away, so it keeps nothing alive — discard them.
+		const deletedDirAncestors: string[] = []
+		let leaving = false
+		let parent = path
+		let slash = parent.lastIndexOf("/")
+
+		while (slash > 0) {
+			parent = parent.slice(0, slash)
+
+			if (renamedFromPaths.has(parent)) {
+				leaving = true
+
+				break
+			}
+
+			if (deletedDirPaths.has(parent)) {
+				deletedDirAncestors.push(parent)
+			}
+
+			slash = parent.lastIndexOf("/")
+		}
+
+		if (!leaving) {
+			for (const ancestor of deletedDirAncestors) {
+				keep.add(ancestor)
+			}
+		}
+	}
+
+	return keep
+}
+
+/**
  * Remaps `path` across a set of propagated directory renames, returning its post-rename path (unchanged if
  * none applies). The most-specific (longest `from`) ancestor wins, and each rename's `to` already encodes
  * any outer renames (the rename pass records every directory's FINAL position), so one pass handles
@@ -703,6 +790,63 @@ export class Deltas {
 
 						pathsAdded[path] = true
 					}
+				}
+			}
+		}
+
+		// Don't cascade a directory deletion over live content the OTHER side did not delete. When one side
+		// removes a directory while this side adds (or keeps a modified) child inside it, drop the directory
+		// delete so the surviving child's own add re-creates the directory — the genuinely-deleted siblings
+		// still delete individually. Without this the dir-delete subsumes the child at execution and the
+		// brand-new file is lost (newer content must beat a delete, symmetric to the per-file passes). (H5)
+		const localDirsToKeep = directoriesWithSurvivingChildren(
+			deltas,
+			"deleteLocalDirectory",
+			"deleteLocalFile",
+			"renameLocalDirectory",
+			"renameLocalFile",
+			currentLocalTree.tree
+		)
+		const remoteDirsToKeep = directoriesWithSurvivingChildren(
+			deltas,
+			"deleteRemoteDirectory",
+			"deleteRemoteFile",
+			"renameRemoteDirectory",
+			"renameRemoteFile",
+			currentRemoteTree.tree
+		)
+
+		if (localDirsToKeep.size > 0 || remoteDirsToKeep.size > 0) {
+			deltas = deltas.filter(delta => {
+				if (delta.type === "deleteLocalDirectory" && localDirsToKeep.has(delta.path)) {
+					deleteLocalDirectoryCountRaw -= 1
+					// Un-mark so the additions pass re-creates the surviving directory on the deleting side.
+					delete pathsAdded[delta.path]
+
+					return false
+				}
+
+				if (delta.type === "deleteRemoteDirectory" && remoteDirsToKeep.has(delta.path)) {
+					deleteRemoteDirectoryCountRaw -= 1
+					delete pathsAdded[delta.path]
+
+					return false
+				}
+
+				return true
+			})
+
+			// Keep the bookkeeping arrays consistent — collapseDeltas uses them to subsume descendant
+			// deletes, and a kept directory must no longer subsume its (legitimately deleted) children.
+			for (let i = deletedLocalDirectories.length - 1; i >= 0; i--) {
+				if (localDirsToKeep.has(deletedLocalDirectories[i]!.path)) {
+					deletedLocalDirectories.splice(i, 1)
+				}
+			}
+
+			for (let i = deletedRemoteDirectories.length - 1; i >= 0; i--) {
+				if (remoteDirsToKeep.has(deletedRemoteDirectories[i]!.path)) {
+					deletedRemoteDirectories.splice(i, 1)
 				}
 			}
 		}

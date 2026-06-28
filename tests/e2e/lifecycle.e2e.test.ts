@@ -3,7 +3,7 @@ import FilenSDK, { PauseSignal } from "@filen/sdk"
 import fs from "fs-extra"
 import { E2E_ENABLED, loginTestSDK, teardownTestSDK } from "./harness/account"
 import { withE2EWorld } from "./harness/world"
-import { cycle, settle, expectConverged, messagesOfType, transferOps } from "./harness/drive"
+import { cycle, settle, expectConverged, messagesOfType, allOps } from "./harness/drive"
 import { snapshotRemoteReal } from "./harness/assert"
 import { writeLocal, rmLocal, uploadRemote, readLocal, existsLocal } from "./harness/mutations"
 
@@ -43,7 +43,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — lifecycle & control surface", () => {
 			// The cycle short-circuits before doing any work: cyclePaused is emitted, nothing starts/transfers.
 			expect(messagesOfType(pausedMessages, "cyclePaused").length).toBeGreaterThan(0)
 			expect(messagesOfType(pausedMessages, "cycleStarted").length).toBe(0)
-			expect(transferOps(pausedMessages)).toEqual([])
+			expect(allOps(pausedMessages)).toEqual([])
 			expect((await snapshotRemoteReal(world))["/a.txt"], "nothing uploaded while paused").toBeUndefined()
 
 			// Resume → the pending change now syncs to the real backend and the worlds converge.

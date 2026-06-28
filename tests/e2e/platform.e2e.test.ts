@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest"
 import type FilenSDK from "@filen/sdk"
 import { E2E_ENABLED, loginTestSDK, teardownTestSDK } from "./harness/account"
 import { withE2EWorld } from "./harness/world"
-import { cycle, settle, transferOps } from "./harness/drive"
+import { cycle, settle, allOps } from "./harness/drive"
 import { snapshotLocalReal, snapshotRemoteReal } from "./harness/assert"
 import { uploadRemote, writeLocal } from "./harness/mutations"
 
@@ -61,11 +61,11 @@ describe.skipIf(!E2E_ENABLED)("E2E — cross-platform path rules", () => {
 				expect(local["/report:v2.txt"]).toBeUndefined()
 			}
 
-			// Long-lived stability: with the world already settled, a fresh confirming cycle does zero
-			// transfers — the perpetually-skipped file never re-churns.
+			// Long-lived stability: with the world already settled, a fresh confirming cycle does zero work
+			// (no transfer, rename, delete, or mkdir) — the perpetually-skipped file never re-churns.
 			const confirming = await cycle(world)
 
-			expect(transferOps(confirming)).toEqual([])
+			expect(allOps(confirming)).toEqual([])
 		})
 	})
 
@@ -133,11 +133,11 @@ describe.skipIf(!E2E_ENABLED)("E2E — cross-platform path rules", () => {
 				expect(local[`/${multibyteName}`]).toMatchObject({ type: "file" })
 			}
 
-			// With the world settled, a confirming cycle does zero transfers — on linux the perpetually
+			// With the world settled, a confirming cycle does zero work — on linux the perpetually
 			// byte-over-long name never re-churns.
 			const confirming = await cycle(world)
 
-			expect(transferOps(confirming)).toEqual([])
+			expect(allOps(confirming)).toEqual([])
 		})
 	})
 

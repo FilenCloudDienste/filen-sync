@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { runScenario, runCycle, localMutate, remoteMutate, type Step } from "../harness/runner"
 import { BASE_TIME } from "../harness/world"
-import { transferOps } from "../harness/snapshot"
+import { allOps } from "../harness/snapshot"
 import { writeLocalAt, rmLocal } from "../harness/mutations"
 
 /**
@@ -168,7 +168,7 @@ describe("Category AB — directional mirror property tests", () => {
 			// Idempotence: the final settled cycle did no transfers.
 			const lastCycle = result.cycles[result.cycles.length - 1]!
 
-			expect(transferOps(lastCycle.messages), `seed=${seed} not idempotent`).toEqual([])
+			expect(allOps(lastCycle.messages), `seed=${seed} not idempotent`).toEqual([])
 		})
 	}
 
@@ -183,7 +183,7 @@ describe("Category AB — directional mirror property tests", () => {
 
 			const lastCycle = result.cycles[result.cycles.length - 1]!
 
-			expect(transferOps(lastCycle.messages), `seed=${seed} not idempotent`).toEqual([])
+			expect(allOps(lastCycle.messages), `seed=${seed} not idempotent`).toEqual([])
 		})
 	}
 })

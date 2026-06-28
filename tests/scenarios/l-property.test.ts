@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { runScenario, runCycle, localMutate, remoteMutate, type Step } from "../harness/runner"
 import { BASE_TIME } from "../harness/world"
-import { transferOps } from "../harness/snapshot"
+import { allOps } from "../harness/snapshot"
 import { writeLocalAt, rmLocal } from "../harness/mutations"
 
 /**
@@ -136,7 +136,7 @@ describe("Category L — property tests (twoWay meta-invariants)", () => {
 			// Idempotence (§2.2) — the final settled cycle performed no file transfers.
 			const lastCycle = result.cycles[result.cycles.length - 1]!
 
-			expect(transferOps(lastCycle.messages), `seed=${seed} was not idempotent`).toEqual([])
+			expect(allOps(lastCycle.messages), `seed=${seed} was not idempotent`).toEqual([])
 
 			// Sanity: the history actually exercised the engine.
 			expect(mutationCount).toBeGreaterThan(0)

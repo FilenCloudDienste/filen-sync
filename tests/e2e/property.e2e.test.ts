@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest"
 import type FilenSDK from "@filen/sdk"
 import { E2E_ENABLED, loginTestSDK, teardownTestSDK } from "./harness/account"
 import { withE2EWorld } from "./harness/world"
-import { cycle, settle, expectConverged, transferOps } from "./harness/drive"
+import { cycle, settle, expectConverged, allOps } from "./harness/drive"
 import { writeLocal, rmLocal, uploadRemote, deleteRemote } from "./harness/mutations"
 
 /**
@@ -124,10 +124,11 @@ async function runFuzz(sdk: FilenSDK, mode: FuzzMode, seed: number, mutate: "bot
 		await settle(world)
 		await expectConverged(world)
 
-		// Idempotence (§2.2): a further settled cycle performs no file transfers.
+		// Idempotence (§2.2): a further settled cycle performs no operations at all — not just no transfers,
+		// but no spurious rename/delete/mkdir either (allOps, so an idempotence violation can't hide).
 		const messages = await cycle(world)
 
-		expect(transferOps(messages), `seed=${seed} mode=${mode} was not idempotent`).toEqual([])
+		expect(allOps(messages), `seed=${seed} mode=${mode} was not idempotent`).toEqual([])
 		// Sanity: the history actually exercised the engine.
 		expect(mutationCount).toBeGreaterThan(0)
 	})

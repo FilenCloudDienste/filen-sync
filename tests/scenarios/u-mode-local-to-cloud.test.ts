@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { runScenario, runCycle, localMutate, remoteMutate, restart } from "../harness/runner"
 import { BASE_TIME } from "../harness/world"
-import { transferKinds, transferOps } from "../harness/snapshot"
+import { transferKinds, allOps } from "../harness/snapshot"
 import { writeLocal, writeLocalAt, rmLocal, renameLocal, readLocal } from "../harness/mutations"
 
 /**
@@ -276,8 +276,8 @@ describe("Category U — localToCloud (strict mirror local→remote)", () => {
 		})
 
 		// The two post-restart cycles do no file transfers.
-		expect(transferOps(result.cycles[2]!.messages)).toEqual([])
-		expect(transferOps(result.cycles[3]!.messages)).toEqual([])
+		expect(allOps(result.cycles[2]!.messages)).toEqual([])
+		expect(allOps(result.cycles[3]!.messages)).toEqual([])
 		expect(result.finalLocal).toEqual(result.finalRemote)
 	})
 
@@ -342,6 +342,6 @@ describe("Category U — localToCloud (strict mirror local→remote)", () => {
 		expect(result.finalRemote["/d/b2.txt"]).toMatchObject({ type: "file" })
 		expect(result.finalRemote["/d/c.txt"]).toMatchObject({ type: "file" })
 		expect(result.finalLocal).toEqual(result.finalRemote)
-		expect(transferOps(result.cycles[result.cycles.length - 1]!.messages)).toEqual([])
+		expect(allOps(result.cycles[result.cycles.length - 1]!.messages)).toEqual([])
 	})
 })

@@ -6,7 +6,7 @@ import fs from "fs-extra"
 import { v4 as uuidv4 } from "uuid"
 import { E2E_ENABLED, loginTestSDK, teardownTestSDK } from "./harness/account"
 import { withE2EWorld, restartE2EWorld } from "./harness/world"
-import { cycle, settle, expectConverged, transferOps, messagesOfType } from "./harness/drive"
+import { cycle, settle, expectConverged, allOps, messagesOfType } from "./harness/drive"
 import { snapshotRemoteReal } from "./harness/assert"
 import { writeLocal, modifyLocal, rmLocal, renameLocal, uploadRemote, chmodLocal, existsLocal } from "./harness/mutations"
 
@@ -216,7 +216,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — resilience & long-lived stability", () =>
 			// After all that churn, a settled cycle must be a COMPLETE no-op — the long-lived sync is quiet.
 			const messages = await cycle(world)
 
-			expect(transferOps(messages)).toEqual([])
+			expect(allOps(messages)).toEqual([])
 
 			// Final-state sanity across the whole history.
 			const remote = await snapshotRemoteReal(world)

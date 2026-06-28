@@ -58,6 +58,19 @@ export function transferOps(messages: SyncMessage[]): string[] {
 	return transferKinds(messages).filter(kind => (FILE_TRANSFER_OPS as readonly string[]).includes(kind))
 }
 
+/**
+ * Every operation kind in the stream — file transfers AND directory creates, deletes, and renames (the
+ * full set of `transfer.of` discriminators), deduplicated and sorted for readable failure output.
+ *
+ * `expect(allOps(messages)).toEqual([])` is the assertion for a COMPLETE no-op. transferOps() sees only
+ * file up/downloads, so a cycle that spuriously renamed, deleted, or mkdir'd a path — exactly what a wrong
+ * post-restart base re-derivation would emit — slips past it. A genuine no-op cycle starts no tasks and so
+ * emits no transfer messages of any kind, making this empty.
+ */
+export function allOps(messages: SyncMessage[]): string[] {
+	return [...new Set(transferKinds(messages))].sort()
+}
+
 /** All messages of a given `type`. */
 export function messagesOfType<T extends SyncMessage["type"]>(messages: SyncMessage[], type: T): Extract<SyncMessage, { type: T }>[] {
 	return messages.filter((message): message is Extract<SyncMessage, { type: T }> => message.type === type)

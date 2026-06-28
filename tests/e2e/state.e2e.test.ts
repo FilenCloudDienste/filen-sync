@@ -4,7 +4,7 @@ import pathModule from "path"
 import fs from "fs-extra"
 import { E2E_ENABLED, loginTestSDK, teardownTestSDK } from "./harness/account"
 import { withE2EWorld, restartE2EWorld } from "./harness/world"
-import { cycle, settle, expectConverged, transferOps, messagesOfType } from "./harness/drive"
+import { cycle, settle, expectConverged, allOps, messagesOfType } from "./harness/drive"
 import { snapshotRemoteReal } from "./harness/assert"
 import { writeLocal, rmLocal, renameLocal, existsLocal, uploadRemote } from "./harness/mutations"
 import { DEVICE_ID_VERSION } from "../../src/lib/filesystems/remote"
@@ -35,7 +35,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — state persistence across restarts", () =>
 
 			const messages = await cycle(world, { resetCache: false })
 
-			expect(transferOps(messages)).toEqual([])
+			expect(allOps(messages)).toEqual([])
 			await expectConverged(world)
 		})
 	})
@@ -51,7 +51,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — state persistence across restarts", () =>
 
 			const messages = await cycle(world, { resetCache: false })
 
-			expect(transferOps(messages)).toEqual([])
+			expect(allOps(messages)).toEqual([])
 			expect((await snapshotRemoteReal(world))["/dir2/file.txt"]).toMatchObject({ type: "file" })
 			await expectConverged(world)
 		})
@@ -69,7 +69,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — state persistence across restarts", () =>
 
 			const messages = await cycle(world, { resetCache: false })
 
-			expect(transferOps(messages)).toEqual([])
+			expect(allOps(messages)).toEqual([])
 			// The deleted file must NOT come back from stale state.
 			expect((await snapshotRemoteReal(world))["/gone.txt"]).toBeUndefined()
 			expect(await existsLocal(world, "gone.txt")).toBe(false)
@@ -101,10 +101,10 @@ describe.skipIf(!E2E_ENABLED)("E2E — state persistence across restarts", () =>
 			await settle(world)
 
 			await restartE2EWorld(world)
-			expect(transferOps(await cycle(world, { resetCache: false }))).toEqual([])
+			expect(allOps(await cycle(world, { resetCache: false }))).toEqual([])
 
 			await restartE2EWorld(world)
-			expect(transferOps(await cycle(world, { resetCache: false }))).toEqual([])
+			expect(allOps(await cycle(world, { resetCache: false }))).toEqual([])
 
 			await expectConverged(world)
 		})
@@ -127,7 +127,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — state persistence across restarts", () =>
 			const after = await fs.readFile(deviceIdPath, { encoding: "utf-8" })
 
 			expect(after).toBe(before)
-			expect(transferOps(await cycle(world, { resetCache: false }))).toEqual([])
+			expect(allOps(await cycle(world, { resetCache: false }))).toEqual([])
 		})
 	})
 
@@ -145,7 +145,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — state persistence across restarts", () =>
 			const messages = await cycle(world, { resetCache: false })
 
 			expect(messagesOfType(messages, "confirmDeletion")).toEqual([])
-			expect(transferOps(messages)).toEqual([])
+			expect(allOps(messages)).toEqual([])
 			await expectConverged(world)
 		})
 	})

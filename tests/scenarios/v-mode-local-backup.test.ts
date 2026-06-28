@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { runScenario, runCycle, localMutate, remoteMutate, restart } from "../harness/runner"
 import { BASE_TIME } from "../harness/world"
-import { transferKinds, transferOps } from "../harness/snapshot"
+import { transferKinds, allOps } from "../harness/snapshot"
 import { writeLocal, writeLocalAt, rmLocal, renameLocal, readLocal } from "../harness/mutations"
 
 /**
@@ -56,7 +56,7 @@ describe("Category V — localBackup (additive push local→remote)", () => {
 		expect(result.finalRemote["/a.txt"]).toMatchObject({ type: "file", size: "data".length })
 		expect(result.finalLocal["/a.txt"]).toBeUndefined()
 		// And it is idempotent: the last cycle does no work despite the local/remote difference.
-		expect(transferOps(result.cycles[result.cycles.length - 1]!.messages)).toEqual([])
+		expect(allOps(result.cycles[result.cycles.length - 1]!.messages)).toEqual([])
 	})
 
 	it("V4: deleting a whole local directory does NOT propagate — the remote keeps the tree", async () => {
@@ -193,8 +193,8 @@ describe("Category V — localBackup (additive push local→remote)", () => {
 			steps: [runCycle(), runCycle(), restart(), runCycle(), runCycle()]
 		})
 
-		expect(transferOps(result.cycles[2]!.messages)).toEqual([])
-		expect(transferOps(result.cycles[3]!.messages)).toEqual([])
+		expect(allOps(result.cycles[2]!.messages)).toEqual([])
+		expect(allOps(result.cycles[3]!.messages)).toEqual([])
 		expect(result.finalRemote["/a.txt"]).toMatchObject({ type: "file" })
 		expect(result.finalRemote["/dir/b.txt"]).toMatchObject({ type: "file" })
 	})

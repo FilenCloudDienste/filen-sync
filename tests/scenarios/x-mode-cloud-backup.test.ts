@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { runScenario, runCycle, localMutate, remoteMutate, restart } from "../harness/runner"
 import { BASE_TIME } from "../harness/world"
-import { transferKinds, transferOps } from "../harness/snapshot"
+import { transferKinds, allOps } from "../harness/snapshot"
 import { writeLocalAt, readLocal, existsLocal } from "../harness/mutations"
 
 /**
@@ -58,7 +58,7 @@ describe("Category X — cloudBackup (additive pull remote→local)", () => {
 		expect(transferKinds(result.messages)).not.toContain("deleteLocalFile")
 		expect(existsLocal(result.world, "a.txt")).toBe(true)
 		expect(result.finalRemote["/a.txt"]).toBeUndefined()
-		expect(transferOps(result.cycles[result.cycles.length - 1]!.messages)).toEqual([])
+		expect(allOps(result.cycles[result.cycles.length - 1]!.messages)).toEqual([])
 	})
 
 	it("X4: deleting a whole remote directory does NOT propagate — the local tree is kept", async () => {
@@ -193,8 +193,8 @@ describe("Category X — cloudBackup (additive pull remote→local)", () => {
 			steps: [runCycle(), runCycle(), restart(), runCycle(), runCycle()]
 		})
 
-		expect(transferOps(result.cycles[2]!.messages)).toEqual([])
-		expect(transferOps(result.cycles[3]!.messages)).toEqual([])
+		expect(allOps(result.cycles[2]!.messages)).toEqual([])
+		expect(allOps(result.cycles[3]!.messages)).toEqual([])
 		expect(existsLocal(result.world, "a.txt")).toBe(true)
 		expect(existsLocal(result.world, "dir/b.txt")).toBe(true)
 	})

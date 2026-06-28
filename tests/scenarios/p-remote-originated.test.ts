@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { runScenario, runCycle, remoteMutate, localMutate, control } from "../harness/runner"
 import { BASE_TIME } from "../harness/world"
-import { transferKinds, transferOps } from "../harness/snapshot"
+import { transferKinds, allOps } from "../harness/snapshot"
 import { renameLocal, readLocal, existsLocal } from "../harness/mutations"
 
 /**
@@ -38,7 +38,7 @@ describe("Category P — remote-originated & cross-directory moves", () => {
 		// The content actually landed on disk, not just a tree entry.
 		expect(readLocal(result.world, "a.txt")).toBe("hello-remote")
 		// Idempotence: no further transfers once converged.
-		expect(transferOps(result.cycles[2]!.messages)).toEqual([])
+		expect(allOps(result.cycles[2]!.messages)).toEqual([])
 		expect(result.finalLocal).toEqual(result.finalRemote)
 	})
 
@@ -65,7 +65,7 @@ describe("Category P — remote-originated & cross-directory moves", () => {
 		expect(result.finalLocal["/sub/a.txt"]).toMatchObject({ type: "file", size: 1 })
 		expect(result.finalLocal["/sub/deep/b.txt"]).toMatchObject({ type: "file", size: 1 })
 		expect(readLocal(result.world, "sub/deep/b.txt")).toBe("B")
-		expect(transferOps(result.cycles[2]!.messages)).toEqual([])
+		expect(allOps(result.cycles[2]!.messages)).toEqual([])
 		expect(result.finalLocal).toEqual(result.finalRemote)
 	})
 
@@ -89,7 +89,7 @@ describe("Category P — remote-originated & cross-directory moves", () => {
 		expect(result.finalRemote["/a.txt"]).toBeUndefined()
 		// …but moved to the local trash (no data loss), not hard-deleted.
 		expect(existsLocal(result.world, ".filen.trash.local/a.txt")).toBe(true)
-		expect(transferOps(result.cycles[3]!.messages)).toEqual([])
+		expect(allOps(result.cycles[3]!.messages)).toEqual([])
 		expect(result.finalLocal).toEqual(result.finalRemote)
 	})
 
@@ -120,7 +120,7 @@ describe("Category P — remote-originated & cross-directory moves", () => {
 		expect(result.finalLocal["/d"]).toBeUndefined()
 		expect(result.finalLocal["/d/a.txt"]).toBeUndefined()
 		expect(result.finalLocal["/d/deep/b.txt"]).toBeUndefined()
-		expect(transferOps(result.cycles[3]!.messages)).toEqual([])
+		expect(allOps(result.cycles[3]!.messages)).toEqual([])
 		expect(result.finalLocal).toEqual(result.finalRemote)
 	})
 
@@ -162,7 +162,7 @@ describe("Category P — remote-originated & cross-directory moves", () => {
 		expect(originalInode).not.toBeNull()
 		expect(result.world.vfs.controls.getInode("/local/b.txt")).toBe(originalInode)
 
-		expect(transferOps(result.cycles[3]!.messages)).toEqual([])
+		expect(allOps(result.cycles[3]!.messages)).toEqual([])
 		expect(result.finalLocal).toEqual(result.finalRemote)
 	})
 
@@ -198,7 +198,7 @@ describe("Category P — remote-originated & cross-directory moves", () => {
 		expect(result.finalLocal["/e/deep/b.txt"]).toMatchObject({ type: "file", size: 1 })
 		// The children were carried, not re-fetched — content intact.
 		expect(readLocal(result.world, "e/deep/b.txt")).toBe("b")
-		expect(transferOps(result.cycles[3]!.messages)).toEqual([])
+		expect(allOps(result.cycles[3]!.messages)).toEqual([])
 		expect(result.finalLocal).toEqual(result.finalRemote)
 	})
 
@@ -233,7 +233,7 @@ describe("Category P — remote-originated & cross-directory moves", () => {
 
 		expect(originalUUID).toBeDefined()
 		expect(result.world.cloud.controls.getByPath("/dir2/a.txt")?.uuid).toBe(originalUUID)
-		expect(transferOps(result.cycles[2]!.messages)).toEqual([])
+		expect(allOps(result.cycles[2]!.messages)).toEqual([])
 		expect(result.finalLocal).toEqual(result.finalRemote)
 	})
 
@@ -266,7 +266,7 @@ describe("Category P — remote-originated & cross-directory moves", () => {
 
 		expect(originalUUID).toBeDefined()
 		expect(result.world.cloud.controls.getByPath("/a.txt")?.uuid).toBe(originalUUID)
-		expect(transferOps(result.cycles[2]!.messages)).toEqual([])
+		expect(allOps(result.cycles[2]!.messages)).toEqual([])
 		expect(result.finalLocal).toEqual(result.finalRemote)
 	})
 
@@ -300,7 +300,7 @@ describe("Category P — remote-originated & cross-directory moves", () => {
 
 		expect(originalUUID).toBeDefined()
 		expect(result.world.cloud.controls.getByPath("/dir2/b.txt")?.uuid).toBe(originalUUID)
-		expect(transferOps(result.cycles[2]!.messages)).toEqual([])
+		expect(allOps(result.cycles[2]!.messages)).toEqual([])
 		expect(result.finalLocal).toEqual(result.finalRemote)
 	})
 })

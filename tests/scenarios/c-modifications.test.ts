@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { runScenario, runCycle, localMutate, remoteMutate } from "../harness/runner"
 import { BASE_TIME } from "../harness/world"
-import { transferKinds, transferOps } from "../harness/snapshot"
+import { transferKinds, allOps } from "../harness/snapshot"
 import { writeLocal, writeLocalAt } from "../harness/mutations"
 
 /**
@@ -53,8 +53,8 @@ describe("Category C — modifications", () => {
 
 		// A touch does not upload; content stays identical on both sides, but the local mtime is now
 		// newer than the (un-reuploaded) remote — so only content, not the whole snapshot, converges.
-		expect(transferOps(result.cycles[1]!.messages)).toEqual([])
-		expect(transferOps(result.cycles[2]!.messages)).toEqual([])
+		expect(allOps(result.cycles[1]!.messages)).toEqual([])
+		expect(allOps(result.cycles[2]!.messages)).toEqual([])
 		expect(result.finalLocal["/a.txt"]!.contentHash).toBe(result.finalRemote["/a.txt"]!.contentHash)
 		expect(result.finalLocal["/a.txt"]!.size).toBe(result.finalRemote["/a.txt"]!.size)
 	})
@@ -125,8 +125,8 @@ describe("Category C — modifications", () => {
 			steps: [runCycle(), remoteMutate(world => world.cloud.controls.touchRemote("/a.txt", BASE_TIME + 5 * SECOND)), runCycle(), runCycle()]
 		})
 
-		expect(transferOps(result.cycles[1]!.messages)).toEqual([])
-		expect(transferOps(result.cycles[2]!.messages)).toEqual([])
+		expect(allOps(result.cycles[1]!.messages)).toEqual([])
+		expect(allOps(result.cycles[2]!.messages)).toEqual([])
 		expect(result.finalLocal["/a.txt"]).toMatchObject({ type: "file", size: "original".length })
 	})
 
@@ -188,7 +188,7 @@ describe("Category C — modifications", () => {
 			]
 		})
 
-		expect(transferOps(result.cycles[1]!.messages)).toEqual([])
+		expect(allOps(result.cycles[1]!.messages)).toEqual([])
 		expect(result.finalLocal["/a.txt"]!.contentHash).not.toBe(result.finalRemote["/a.txt"]!.contentHash)
 	})
 })

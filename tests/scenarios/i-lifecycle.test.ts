@@ -7,7 +7,7 @@ import { type SyncMessage } from "../../src/types"
 import { type SyncEnvironment } from "../../src/lib/environment"
 import { DEVICE_ID_VERSION } from "../../src/lib/filesystems/remote"
 import { createWorld, BASE_TIME, DB_ROOT, type CreateWorldOptions, type World } from "../harness/world"
-import { snapshotLocal, snapshotRemote, messagesOfType, countMessages, transferKinds, transferOps } from "../harness/snapshot"
+import { snapshotLocal, snapshotRemote, messagesOfType, countMessages, transferKinds, allOps } from "../harness/snapshot"
 import { writeLocal, rmLocal } from "../harness/mutations"
 
 /**
@@ -128,7 +128,7 @@ describe("Category I — lifecycle / control / transfers", () => {
 				// The cycle short-circuits before doing any work: cyclePaused is emitted, nothing starts.
 				expect(messagesOfType(pausedCycle, "cyclePaused").length).toBeGreaterThan(0)
 				expect(countMessages(pausedCycle, "cycleStarted")).toBe(0)
-				expect(transferOps(pausedCycle)).toEqual([])
+				expect(allOps(pausedCycle)).toEqual([])
 				// No op happened: the pending addition was NOT uploaded.
 				expect(snapshotRemote(world)).toEqual({})
 
@@ -272,7 +272,7 @@ describe("Category I — lifecycle / control / transfers", () => {
 
 				const settledCycle = await capture(world, () => plainCycle(world))
 
-				expect(transferOps(settledCycle)).toEqual([])
+				expect(allOps(settledCycle)).toEqual([])
 			}
 		)
 	})

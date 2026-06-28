@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { runScenario, runCycle, localMutate, remoteMutate } from "../harness/runner"
-import { transferKinds, transferOps, hadTransfers } from "../harness/snapshot"
+import { transferKinds, allOps, hadTransfers } from "../harness/snapshot"
 import { writeLocal } from "../harness/mutations"
 
 /**
@@ -17,7 +17,7 @@ describe("Category B — additions", () => {
 
 		expect(transferKinds(result.cycles[1]!.messages)).toContain("upload")
 		expect(result.cycles[1]!.remote["/a.txt"]).toMatchObject({ type: "file", size: 5 })
-		expect(transferOps(result.cycles[2]!.messages)).toEqual([])
+		expect(allOps(result.cycles[2]!.messages)).toEqual([])
 		expect(result.finalLocal).toEqual(result.finalRemote)
 	})
 
@@ -51,7 +51,7 @@ describe("Category B — additions", () => {
 
 		expect(transferKinds(result.cycles[1]!.messages)).toContain("download")
 		expect(result.cycles[1]!.local["/r.txt"]).toMatchObject({ type: "file", size: 6 })
-		expect(transferOps(result.cycles[2]!.messages)).toEqual([])
+		expect(allOps(result.cycles[2]!.messages)).toEqual([])
 		expect(result.finalLocal).toEqual(result.finalRemote)
 	})
 

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { runScenario, runCycle, localMutate } from "../harness/runner"
 import { BASE_TIME } from "../harness/world"
-import { transferOps } from "../harness/snapshot"
+import { allOps } from "../harness/snapshot"
 import { writeLocal, writeLocalAt, mkdirLocal, rmLocal, renameLocal, readLocal } from "../harness/mutations"
 
 /**
@@ -247,7 +247,7 @@ describe("Category Z — multi-op compositions in one cycle (twoWay)", () => {
 		expect(readLocal(result.world, "parent-renamed/data.txt")).toBe("EDITED-IN-PLACE")
 		expect(result.finalLocal).toEqual(result.finalRemote)
 		// Settled.
-		expect(transferOps(result.cycles[result.cycles.length - 1]!.messages)).toEqual([])
+		expect(allOps(result.cycles[result.cycles.length - 1]!.messages)).toEqual([])
 	})
 
 	it("Z11: a deep mixed batch (adds, a delete, a move, a modify) converges and is idempotent", async () => {
@@ -280,6 +280,6 @@ describe("Category Z — multi-op compositions in one cycle (twoWay)", () => {
 		expect(result.finalRemote["/keep/move-me.txt"]).toMatchObject({ type: "file" })
 		expect(result.finalRemote["/move-me.txt"]).toBeUndefined()
 		expect(result.finalLocal).toEqual(result.finalRemote)
-		expect(transferOps(result.cycles[result.cycles.length - 1]!.messages)).toEqual([])
+		expect(allOps(result.cycles[result.cycles.length - 1]!.messages)).toEqual([])
 	})
 })

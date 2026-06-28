@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest"
 import type FilenSDK from "@filen/sdk"
 import { E2E_ENABLED, loginTestSDK, teardownTestSDK } from "./harness/account"
 import { withE2EWorld, restartE2EWorld } from "./harness/world"
-import { cycle, settle, expectConverged, transferOps } from "./harness/drive"
+import { cycle, settle, expectConverged, allOps } from "./harness/drive"
 import { snapshotLocalReal, snapshotRemoteReal } from "./harness/assert"
 import { writeLocal, modifyLocal, mkdirLocal, rmLocal, renameLocal, readLocal, uploadRemote, mkdirRemote, existsLocal } from "./harness/mutations"
 
@@ -181,7 +181,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — core sync against live backend", () => {
 			// Warm-cache path (no resetCache): the reloaded state must see nothing to do.
 			const messages = await cycle(world, { resetCache: false })
 
-			expect(transferOps(messages)).toEqual([])
+			expect(allOps(messages)).toEqual([])
 			await expectConverged(world)
 		})
 	})

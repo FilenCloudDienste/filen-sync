@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { runScenario, runCycle, localMutate, type Step } from "../harness/runner"
 import { BASE_TIME } from "../harness/world"
-import { transferOps, transferKinds } from "../harness/snapshot"
+import { allOps, transferKinds } from "../harness/snapshot"
 import { renameLocal, writeLocalAt } from "../harness/mutations"
 
 /**
@@ -22,7 +22,7 @@ function expectConverged(result: { finalLocal: Record<string, unknown>; finalRem
 
 	const lastCycle = result.cycles[result.cycles.length - 1]!
 
-	expect(transferOps(lastCycle.messages as never)).toEqual([])
+	expect(allOps(lastCycle.messages as never)).toEqual([])
 }
 
 describe("Category R — rename/move stress (BUG-004 net)", () => {

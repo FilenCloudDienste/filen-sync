@@ -95,6 +95,18 @@ export function transferOps(messages: SyncMessage[]): string[] {
 	return transferKinds(messages).filter(kind => (FILE_TRANSFER_OPS as readonly string[]).includes(kind))
 }
 
+/**
+ * Every operation kind in the stream — file transfers AND directory creates, deletes, and renames (the
+ * full set of `transfer.of` discriminators), deduplicated and sorted for readable failure output.
+ *
+ * `expect(allOps(messages)).toEqual([])` is the assertion for a COMPLETE no-op. transferOps() sees only
+ * file up/downloads, so a cycle that spuriously renamed, deleted, or mkdir'd a path slips past it; allOps
+ * catches it. Mirror of the e2e harness helper of the same name.
+ */
+export function allOps(messages: SyncMessage[]): string[] {
+	return [...new Set(transferKinds(messages))].sort()
+}
+
 /** Whether any actual file transfer (upload/download) occurred in the message stream. */
 export function hadTransfers(messages: SyncMessage[]): boolean {
 	return transferOps(messages).length > 0

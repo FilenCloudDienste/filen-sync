@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { runScenario, runCycle, restart } from "../harness/runner"
-import { countMessages, transferKinds, transferOps, hadTransfers } from "../harness/snapshot"
+import { countMessages, transferKinds, allOps, hadTransfers } from "../harness/snapshot"
 
 /**
  * Category A — baseline & convergence (behavioral spec §A).
@@ -34,8 +34,8 @@ describe("Category A — baseline & convergence", () => {
 
 		expect(result.cycles[0]!.remote["/a.txt"]).toMatchObject({ type: "file", size: 10 })
 		expect(transferKinds(result.cycles[0]!.messages)).toContain("upload")
-		expect(transferOps(result.cycles[1]!.messages)).toEqual([])
-		expect(transferOps(result.cycles[2]!.messages)).toEqual([])
+		expect(allOps(result.cycles[1]!.messages)).toEqual([])
+		expect(allOps(result.cycles[2]!.messages)).toEqual([])
 		expect(countMessages(result.messages, "cycleNoChanges")).toBeGreaterThanOrEqual(1)
 		expect(result.finalLocal["/a.txt"]).toMatchObject({ type: "file", size: 10 })
 		expect(result.finalLocal).toEqual(result.finalRemote)
@@ -51,8 +51,8 @@ describe("Category A — baseline & convergence", () => {
 
 		expect(result.cycles[0]!.local["/a.txt"]).toMatchObject({ type: "file", size: 5 })
 		expect(transferKinds(result.cycles[0]!.messages)).toContain("download")
-		expect(transferOps(result.cycles[1]!.messages)).toEqual([])
-		expect(transferOps(result.cycles[2]!.messages)).toEqual([])
+		expect(allOps(result.cycles[1]!.messages)).toEqual([])
+		expect(allOps(result.cycles[2]!.messages)).toEqual([])
 		expect(result.finalLocal["/a.txt"]).toMatchObject({ type: "file", size: 5 })
 		expect(result.finalLocal).toEqual(result.finalRemote)
 	})
@@ -80,8 +80,8 @@ describe("Category A — baseline & convergence", () => {
 		})
 
 		// The two cycles after the restart (indices 3 and 4) perform no transfers.
-		expect(transferOps(result.cycles[3]!.messages)).toEqual([])
-		expect(transferOps(result.cycles[4]!.messages)).toEqual([])
+		expect(allOps(result.cycles[3]!.messages)).toEqual([])
+		expect(allOps(result.cycles[4]!.messages)).toEqual([])
 		expect(countMessages(result.messages, "cycleError")).toBe(0)
 		expect(result.finalLocal["/a.txt"]).toMatchObject({ type: "file", size: 9 })
 		expect(result.finalLocal).toEqual(result.finalRemote)

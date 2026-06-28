@@ -364,6 +364,35 @@ describe("State — loadPreviousTrees branches", () => {
 		expect(stub.previousLocalTree.tree).toEqual({})
 	})
 
+	it("treats a saved state with a MISSING local-inodes file as no saved state, not a throw", async () => {
+		const vfs = createVirtualFS()
+		const source = makeSyncStub(vfs, "missing-inodes-uuid")
+
+		const fileA = localFile("/a.txt", 101)
+		const rfileA = remoteFile("/a.txt", "u-a", "a.txt")
+
+		source.previousLocalTree = { tree: { "/a.txt": fileA }, inodes: { 101: fileA }, size: 1 }
+		source.previousRemoteTree = { tree: { "/a.txt": rfileA }, uuids: { "u-a": rfileA }, size: 1 }
+
+		const sourceState = makeState(source)
+
+		await sourceState.save()
+
+		// The local-inodes file is the ONE file the completeness guard used to skip while still reading it
+		// unconditionally. Remove it to simulate a partial / interrupted-write on-disk state: the loader must
+		// degrade to "no saved state" (and re-derive next cycle), NOT throw ENOENT and brick the load.
+		vfs.ifs.rmSync(toPosixPath(sourceState.previousLocalINodesPath))
+
+		const reloaded = makeSyncStub(vfs, "missing-inodes-uuid")
+
+		await makeState(reloaded).initialize()
+
+		expect(reloaded.isPreviousSavedTreeStateEmpty).toBe(true)
+		expect(reloaded.previousLocalTree.tree).toEqual({})
+		expect(reloaded.previousLocalTree.inodes).toEqual({})
+		expect(reloaded.previousRemoteTree.tree).toEqual({})
+	})
+
 	it("distinguishes a persisted-but-empty state (files present, empty) from no saved state", async () => {
 		const vfs = createVirtualFS()
 

@@ -475,7 +475,12 @@ export class State {
 		if (
 			!(await this.sync.environment.fs.exists(this.previousLocalTreePath)) ||
 			!(await this.sync.environment.fs.exists(this.previousRemoteTreePath)) ||
-			!(await this.sync.environment.fs.exists(this.previousRemoteTreePath)) ||
+			// Previously this duplicated the remote-tree check and never looked at the local INODES file,
+			// even though it is read unconditionally below — a missing/partially-written inodes file then
+			// passed the completeness gate and threw ENOENT mid-load, bricking the whole state load. All four
+			// persisted files must exist for the base to be usable; otherwise treat the state as empty and
+			// re-derive.
+			!(await this.sync.environment.fs.exists(this.previousLocalINodesPath)) ||
 			!(await this.sync.environment.fs.exists(this.previousRemoteUUIDsPath))
 		) {
 			this.sync.isPreviousSavedTreeStateEmpty = true

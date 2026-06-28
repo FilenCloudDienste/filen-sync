@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest"
 import type FilenSDK from "@filen/sdk"
+import fs from "fs-extra"
 import { E2E_ENABLED, loginTestSDK, teardownTestSDK } from "./harness/account"
-import { withE2EWorld } from "./harness/world"
+import { withE2EWorld, restartE2EWorld } from "./harness/world"
 import { settle, expectConverged } from "./harness/drive"
 import { snapshotRemoteReal } from "./harness/assert"
 import { writeLocal, renameLocal, readLocal, existsLocal, uploadRemote, setLocalMtime, rmLocal, deleteRemote } from "./harness/mutations"
@@ -140,6 +141,40 @@ describe.skipIf(!E2E_ENABLED)("E2E — audit regression fixes against live backe
 
 			expect(remote["/dir/new.txt"]).toMatchObject({ type: "file" })
 			expect(remote["/dir/keep.txt"]).toBeUndefined()
+			await expectConverged(world)
+		})
+	})
+
+	// ---- M1: a saved state with a MISSING local-inodes file must reload as "no saved state", not crash --
+
+	it("M1: a missing local-inodes state file recovers (re-derives) on restart instead of crashing", async () => {
+		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
+			await writeLocal(world, "a.txt", "alpha")
+			await writeLocal(world, "dir/b.txt", "bravo")
+			await settle(world)
+			await expectConverged(world)
+
+			// The loader reads the local-INODES file unconditionally, but its existence guard checked the
+			// remote-tree file twice and never this one. Drop it to mimic a partial / interrupted state write
+			// (a present tree file with a missing inodes sibling).
+			const inodesPath = world.sync.state.previousLocalINodesPath
+
+			await fs.rm(inodesPath, { force: true })
+
+			expect(await fs.pathExists(inodesPath)).toBe(false)
+
+			// A restart reloads persisted state from disk. With the bug this throws ENOENT and bricks startup;
+			// with the fix it degrades to "no saved state", re-derives the base from disk, and stays converged.
+			await restartE2EWorld(world)
+			await settle(world)
+
+			expect(await readLocal(world, "a.txt")).toBe("alpha")
+			expect(await readLocal(world, "dir/b.txt")).toBe("bravo")
+
+			const remote = await snapshotRemoteReal(world)
+
+			expect(remote["/a.txt"]).toMatchObject({ type: "file" })
+			expect(remote["/dir/b.txt"]).toMatchObject({ type: "file" })
 			await expectConverged(world)
 		})
 	})

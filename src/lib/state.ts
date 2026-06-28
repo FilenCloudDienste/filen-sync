@@ -83,37 +83,42 @@ export class State {
 
 					delete currentLocalTree.tree[task.from]
 
-					for (const oldPath in currentLocalTree.tree) {
-						if (oldPath.startsWith(task.from + "/") && oldPath !== task.from) {
-							const newPath = replacePathStartWithFromAndTo(oldPath, task.from, task.to)
-							const oldItem = currentLocalTree.tree[oldPath]
+					// Only a DIRECTORY carries descendants to relocate. A file rename has none, so scanning the
+					// whole tree (and every cached hash) for children of a file was pure waste — O(tree) per file
+					// rename, i.e. O(renames * tree) across a cycle that renames many scattered files. (P2)
+					if (task.type === "renameLocalDirectory") {
+						for (const oldPath in currentLocalTree.tree) {
+							if (oldPath.startsWith(task.from + "/") && oldPath !== task.from) {
+								const newPath = replacePathStartWithFromAndTo(oldPath, task.from, task.to)
+								const oldItem = currentLocalTree.tree[oldPath]
 
-							if (oldItem) {
-								const item: LocalItem = {
-									...oldItem,
-									path: newPath
-								}
-
-								currentLocalTree.tree[newPath] = item
-
-								delete currentLocalTree.tree[oldPath]
-
-								const oldItemINode = currentLocalTree.inodes[oldItem.inode]
-
-								if (oldItemINode) {
-									currentLocalTree.inodes[oldItem.inode] = {
-										...oldItemINode,
+								if (oldItem) {
+									const item: LocalItem = {
+										...oldItem,
 										path: newPath
 									}
+
+									currentLocalTree.tree[newPath] = item
+
+									delete currentLocalTree.tree[oldPath]
+
+									const oldItemINode = currentLocalTree.inodes[oldItem.inode]
+
+									if (oldItemINode) {
+										currentLocalTree.inodes[oldItem.inode] = {
+											...oldItemINode,
+											path: newPath
+										}
+									}
 								}
-							}
 
-							const oldItemHash = this.sync.localFileHashes[oldPath]
+								const oldItemHash = this.sync.localFileHashes[oldPath]
 
-							if (oldItemHash) {
-								this.sync.localFileHashes[newPath] = oldItemHash
+								if (oldItemHash) {
+									this.sync.localFileHashes[newPath] = oldItemHash
 
-								delete this.sync.localFileHashes[oldPath]
+									delete this.sync.localFileHashes[oldPath]
+								}
 							}
 						}
 					}
@@ -138,29 +143,33 @@ export class State {
 
 					delete currentRemoteTree.tree[task.from]
 
-					for (const oldPath in currentRemoteTree.tree) {
-						if (oldPath.startsWith(task.from + "/") && oldPath !== task.from) {
-							const newPath = replacePathStartWithFromAndTo(oldPath, task.from, task.to)
-							const oldItem = currentRemoteTree.tree[oldPath]
+					// As with the local side: only a directory has descendants to relocate; skip the whole-tree
+					// scan for a file rename. (P2)
+					if (task.type === "renameRemoteDirectory") {
+						for (const oldPath in currentRemoteTree.tree) {
+							if (oldPath.startsWith(task.from + "/") && oldPath !== task.from) {
+								const newPath = replacePathStartWithFromAndTo(oldPath, task.from, task.to)
+								const oldItem = currentRemoteTree.tree[oldPath]
 
-							if (oldItem) {
-								const newItem: RemoteItem = {
-									...oldItem,
-									path: newPath,
-									name: pathModule.posix.basename(newPath)
-								}
-
-								currentRemoteTree.tree[newPath] = newItem
-
-								delete currentRemoteTree.tree[oldPath]
-
-								const oldItemUUID = currentRemoteTree.uuids[oldItem.uuid]
-
-								if (oldItemUUID) {
-									currentRemoteTree.uuids[oldItemUUID.uuid] = {
-										...oldItemUUID,
+								if (oldItem) {
+									const newItem: RemoteItem = {
+										...oldItem,
 										path: newPath,
 										name: pathModule.posix.basename(newPath)
+									}
+
+									currentRemoteTree.tree[newPath] = newItem
+
+									delete currentRemoteTree.tree[oldPath]
+
+									const oldItemUUID = currentRemoteTree.uuids[oldItem.uuid]
+
+									if (oldItemUUID) {
+										currentRemoteTree.uuids[oldItemUUID.uuid] = {
+											...oldItemUUID,
+											path: newPath,
+											name: pathModule.posix.basename(newPath)
+										}
 									}
 								}
 							}
@@ -170,8 +179,22 @@ export class State {
 					break
 				}
 
-				case "deleteLocalDirectory":
 				case "deleteLocalFile": {
+					// A file has no descendants: remove it directly instead of scanning the whole tree, every
+					// cached hash, and every inode for children that cannot exist. (P2)
+					const item = currentLocalTree.tree[task.path]
+
+					delete this.sync.localFileHashes[task.path]
+					delete currentLocalTree.tree[task.path]
+
+					if (item) {
+						delete currentLocalTree.inodes[item.inode]
+					}
+
+					break
+				}
+
+				case "deleteLocalDirectory": {
 					delete this.sync.localFileHashes[task.path]
 					delete currentLocalTree.tree[task.path]
 
@@ -204,8 +227,21 @@ export class State {
 					break
 				}
 
-				case "deleteRemoteDirectory":
 				case "deleteRemoteFile": {
+					// A file has no descendants: remove it directly instead of scanning the whole tree and every
+					// uuid for children that cannot exist. (P2)
+					const item = currentRemoteTree.tree[task.path]
+
+					delete currentRemoteTree.tree[task.path]
+
+					if (item) {
+						delete currentRemoteTree.uuids[item.uuid]
+					}
+
+					break
+				}
+
+				case "deleteRemoteDirectory": {
 					delete currentRemoteTree.tree[task.path]
 
 					for (const path in currentRemoteTree.tree) {

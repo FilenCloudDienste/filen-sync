@@ -743,6 +743,47 @@ describe("State — applyDoneTasksToState", () => {
 		expect(remoteTree.uuids["u-rf"]).toBeUndefined()
 	})
 
+	it("relocates a single local and remote file rename, leaving a prefix-sibling untouched (no descendant scan)", () => {
+		const vfs = createVirtualFS()
+		const stub = makeSyncStub(vfs, "rf2-uuid")
+
+		stub.localFileHashes = { "/a.txt": "hA", "/a.txt.bak": "hBak" }
+
+		const lf = localFile("/a.txt", 601)
+		// Shares the "/a.txt" PREFIX but is NOT a descendant ("/a.txt/..."), so a file rename must leave it be.
+		const sibling = localFile("/a.txt.bak", 602)
+		const rf = remoteFile("/ra.txt", "u-ra", "ra.txt")
+		const rsibling = remoteFile("/ra.txt.bak", "u-rab", "ra.txt.bak")
+		const localTree: LocalTree = { tree: { "/a.txt": lf, "/a.txt.bak": sibling }, inodes: { 601: lf, 602: sibling }, size: 2 }
+		const remoteTree: RemoteTree = { tree: { "/ra.txt": rf, "/ra.txt.bak": rsibling }, uuids: { "u-ra": rf, "u-rab": rsibling }, size: 2 }
+
+		makeState(stub).applyDoneTasksToState({
+			doneTasks: [
+				{ path: "/b.txt", type: "renameLocalFile", from: "/a.txt", to: "/b.txt", stats: makeStats({ mtimeMs: 1, birthtimeMs: 1, size: 0, ino: 601 }) },
+				{ path: "/rb.txt", type: "renameRemoteFile", from: "/ra.txt", to: "/rb.txt" }
+			],
+			currentLocalTree: localTree,
+			currentRemoteTree: remoteTree
+		})
+
+		// The file moved (tree + inode + its own hash)...
+		expect(localTree.tree["/b.txt"]).toMatchObject({ path: "/b.txt", inode: 601 })
+		expect(localTree.tree["/a.txt"]).toBeUndefined()
+		expect(localTree.inodes[601]!.path).toBe("/b.txt")
+		expect(stub.localFileHashes["/b.txt"]).toBe("hA")
+		expect(stub.localFileHashes["/a.txt"]).toBeUndefined()
+		// ...and the prefix-sibling is completely untouched.
+		expect(localTree.tree["/a.txt.bak"]).toBe(sibling)
+		expect(localTree.inodes[602]).toBe(sibling)
+		expect(stub.localFileHashes["/a.txt.bak"]).toBe("hBak")
+
+		expect(remoteTree.tree["/rb.txt"]).toMatchObject({ path: "/rb.txt", name: "rb.txt", uuid: "u-ra" })
+		expect(remoteTree.tree["/ra.txt"]).toBeUndefined()
+		expect(remoteTree.uuids["u-ra"]!.path).toBe("/rb.txt")
+		expect(remoteTree.tree["/ra.txt.bak"]).toBe(rsibling)
+		expect(remoteTree.uuids["u-rab"]).toBe(rsibling)
+	})
+
 	it("is a safe no-op when a rename targets a path absent from the current trees", () => {
 		const vfs = createVirtualFS()
 		const stub = makeSyncStub(vfs, "rfm-uuid")

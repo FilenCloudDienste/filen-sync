@@ -52,6 +52,38 @@ async function cycleWithDecision(world: World, decision: "delete" | "restart"): 
 	await cyclePromise
 }
 
+/**
+ * Drive one cycle that begins while another device holds the remote lock. With maxTries:Infinity the
+ * acquire BLOCKS (retrying every second) instead of failing, so the cycle does no work and reports no
+ * cycleError until the lock frees. Mirrors cycleWithDecision's timer pump so the blocked acquire and the
+ * rest of the (now unblocked) cycle both drain deterministically. `assertWhileBlocked` runs at the point
+ * the cycle is provably still waiting on the lock, before it is released.
+ */
+async function cycleBlockedByContendedLock(world: World, assertWhileBlocked: () => void): Promise<void> {
+	await vi.advanceTimersByTimeAsync(SYNC_INTERVAL + 1)
+
+	let settled = false
+	const cyclePromise = world.sync.runCycle().finally(() => {
+		settled = true
+	})
+
+	// Spin several retry windows (past the 3s "acquiring lock" notice); the cycle stays blocked.
+	await vi.advanceTimersByTimeAsync(5000)
+
+	expect(settled, "the cycle must block on the contended lock, not fail").toBe(false)
+
+	assertWhileBlocked()
+
+	// Another device releases the lock; the acquire succeeds on its next retry and the cycle finishes.
+	world.cloud.controls.releaseLockContention(lockResource(world))
+
+	for (let tick = 0; tick < 30 && !settled; tick++) {
+		await vi.advanceTimersByTimeAsync(1000)
+	}
+
+	await cyclePromise
+}
+
 function lockResource(world: World): string {
 	return `sync-remoteParentUUID-${world.cloud.controls.rootUUID}`
 }
@@ -61,20 +93,19 @@ function confirmDeletionCount(world: World): number {
 }
 
 describe("Category AA — races & cross-mode deletion confirmation", () => {
-	it("AA1: a contended remote lock fails the cycle cleanly, then recovers when released", async () => {
+	it("AA1: a contended remote lock makes the cycle wait, then it recovers when released", async () => {
 		await withWorld({ mode: "twoWay", initialLocal: { "/local/a.txt": "data" } }, async world => {
 			world.cloud.controls.contendLock(lockResource(world))
 
-			await plainCycle(world)
+			await cycleBlockedByContendedLock(world, () => {
+				// Blocked on the lock (the engine acquires with maxTries:Infinity): it announced it is waiting,
+				// reported NO error, and did NO work (no corruption) — the previous fake threw here instead.
+				expect(messagesOfType(world.messages, "cycleAcquiringLockStarted").length).toBeGreaterThan(0)
+				expect(messagesOfType(world.messages, "cycleError").length).toBe(0)
+				expect(snapshotRemote(world)["/a.txt"]).toBeUndefined()
+			})
 
-			// The lock could not be acquired: the cycle reported an error and did NO work (no corruption).
-			expect(messagesOfType(world.messages, "cycleError").length).toBeGreaterThan(0)
-			expect(snapshotRemote(world)["/a.txt"]).toBeUndefined()
-
-			// Another device releases the lock; the next cycles acquire it and sync to convergence.
-			world.cloud.controls.releaseLockContention(lockResource(world))
-
-			await plainCycle(world)
+			// The now-unblocked cycle (plus a follow-up to settle both sides) syncs to convergence.
 			await plainCycle(world)
 
 			expect(snapshotRemote(world)["/a.txt"]).toMatchObject({ type: "file" })
@@ -93,16 +124,13 @@ describe("Category AA — races & cross-mode deletion confirmation", () => {
 			world.triggerWatcher()
 			world.cloud.controls.contendLock(lockResource(world))
 
-			await plainCycle(world)
+			await cycleBlockedByContendedLock(world, () => {
+				// Nothing applied while the cycle is blocked on the lock.
+				expect(snapshotRemote(world)["/added.txt"]).toBeUndefined()
+				expect(snapshotRemote(world)["/remove.txt"]).toMatchObject({ type: "file" })
+			})
 
-			// Nothing applied while contended.
-			expect(snapshotRemote(world)["/added.txt"]).toBeUndefined()
-			expect(snapshotRemote(world)["/remove.txt"]).toMatchObject({ type: "file" })
-
-			// Release; the queued work all lands and the worlds converge.
-			world.cloud.controls.releaseLockContention(lockResource(world))
-
-			await plainCycle(world)
+			// After release the queued work all lands and the worlds converge.
 			await plainCycle(world)
 
 			expect(snapshotRemote(world)["/added.txt"]).toMatchObject({ type: "file" })

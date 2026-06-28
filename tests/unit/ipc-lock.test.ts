@@ -292,18 +292,20 @@ describe("lock.ts — Lock", () => {
 		})
 	})
 
-	it("propagates an acquire-contention failure, rolls back, then recovers reusing the same uuid", async () => {
-		await withLock(async ({ lock, controls, resource, acquireResourceLock, refreshResourceLock }) => {
-			controls.contendLock(resource)
+	it("propagates a hard acquire failure, rolls back, then recovers reusing the same uuid", async () => {
+		await withLock(async ({ lock, controls, acquireResourceLock, refreshResourceLock }) => {
+			// A hard (non-contention) acquire error is the only acquire failure the engine can actually hit:
+			// it always passes maxTries:Infinity, so CONTENTION blocks rather than throws (covered below).
+			controls.setError("acquireResourceLock", new Error("acquire boom"))
 
-			await expect(lock.acquire()).rejects.toThrow(/Could not acquire lock/)
+			await expect(lock.acquire()).rejects.toThrow(/acquire boom/)
 
 			// The failed acquire rolled the counter back but kept the minted uuid for reuse, and never
 			// armed the refresh interval.
 			expect(acquireResourceLock).toHaveBeenCalledTimes(1)
 			expect(refreshResourceLock).not.toHaveBeenCalled()
 
-			controls.releaseLockContention(resource)
+			controls.clearError("acquireResourceLock")
 
 			await lock.acquire()
 
@@ -313,6 +315,80 @@ describe("lock.ts — Lock", () => {
 
 			await lock.release()
 		})
+	})
+
+	it("blocks on a contended lock and acquires once the contention clears (maxTries: Infinity)", async () => {
+		await withLock(async ({ lock, resource, controls, acquireResourceLock, refreshResourceLock }) => {
+			// The engine acquires with maxTries:Infinity, so a lock held elsewhere must make acquire WAIT
+			// (retrying every tryTimeout) rather than fail — the real SDK's behavior. The previous fake threw
+			// immediately on contention, which the engine could never actually observe.
+			controls.contendLock(resource)
+
+			let settled: "acquired" | "rejected" | "pending" = "pending"
+			const acquiring = lock
+				.acquire()
+				.then(() => {
+					settled = "acquired"
+				})
+				.catch(() => {
+					settled = "rejected"
+				})
+
+			// Many retry windows pass while contended: the acquire neither resolves nor rejects, and it has
+			// not armed the refresh interval (which only starts once the lock is actually held).
+			await vi.advanceTimersByTimeAsync(10000)
+
+			expect(settled, "acquire must keep blocking while the lock is contended").toBe("pending")
+			expect(acquireResourceLock).toHaveBeenCalledTimes(1)
+			expect(refreshResourceLock).not.toHaveBeenCalled()
+
+			// Once the contention clears, the next retry tick acquires.
+			controls.releaseLockContention(resource)
+
+			await vi.advanceTimersByTimeAsync(1000)
+			await acquiring
+
+			expect(settled).toBe("acquired")
+
+			await lock.release()
+		})
+	})
+
+	it("honors a finite maxTries: a permanently contended acquire throws after that many attempts", async () => {
+		vi.useFakeTimers({ toFake: [...FAKE_TIMERS] })
+		vi.setSystemTime(FIXED_TIME)
+
+		try {
+			const vfs = createVirtualFS()
+			const cloud = createFakeCloud({}, { localFs: vfs.fs })
+			const resource = "sync-remoteParentUUID-finite"
+
+			// An external client holds the lock and never releases it.
+			cloud.controls.contendLock(resource)
+
+			let settled: "resolved" | "rejected" | "pending" = "pending"
+			const acquiring = cloud.sdk
+				.user()
+				.acquireResourceLock({ resource, lockUUID: "me", maxTries: 3, tryTimeout: 1000 })
+				.then(() => {
+					settled = "resolved"
+				})
+				.catch(() => {
+					settled = "rejected"
+				})
+
+			// After only one retry window it must STILL be retrying — the old fake ignored maxTries and threw
+			// on the very first attempt, so it would already be "rejected" here.
+			await vi.advanceTimersByTimeAsync(1000)
+			expect(settled, "a finite-maxTries acquire must retry, not fail on the first attempt").toBe("pending")
+
+			// Once the bounded retries are exhausted it rejects.
+			await vi.advanceTimersByTimeAsync(2000)
+			await acquiring
+			expect(settled).toBe("rejected")
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 
 	it("is a no-op when releasing while nothing is held", async () => {

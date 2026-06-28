@@ -27,7 +27,9 @@ import { type SyncFS } from "../../src/lib/environment"
  *   `moveFile` no-op when the target is the same uuid, and gone uuids raise
  *   `APIError{file_not_found|folder_not_found}`.
  * - Encryption is identity: metadata is `JSON.stringify(...)`, `decrypt()` is `JSON.parse(...)`.
- * - Resource locks are an in-memory map; uncontended acquire resolves immediately.
+ * - Resource locks are an in-memory map; uncontended acquire resolves immediately, while a contended one
+ *   retries up to `maxTries` times with `tryTimeout` between tries (blocking until released for
+ *   maxTries:Infinity, which the engine always uses) before throwing — the real SDK's acquire-with-retry.
  */
 
 const FILE_ENCRYPTION_VERSION: FileEncryptionVersion = 2
@@ -896,17 +898,41 @@ export function createFakeCloud(initial: CloudSpec = {}, deps: { localFs: SyncFS
 			})
 		}),
 		user: () => ({
-			acquireResourceLock: async ({ resource, lockUUID }: { resource: string; lockUUID: string; maxTries?: number; tryTimeout?: number }): Promise<void> => {
+			acquireResourceLock: async ({
+				resource,
+				lockUUID,
+				maxTries = 1,
+				tryTimeout = 1000
+			}: {
+				resource: string
+				lockUUID: string
+				maxTries?: number
+				tryTimeout?: number
+			}): Promise<void> => {
 				guard("acquireResourceLock")
 
-				const holder = locks.get(resource)
+				// Faithfully model the real SDK's retry-on-contention: a lock held by ANOTHER holder (or a
+				// test-forced contention) is polled up to `maxTries` times with `tryTimeout` between tries
+				// instead of failing on the first attempt. The engine acquires with maxTries:Infinity, so a
+				// contended lock makes acquire BLOCK until the holder releases — exactly the production
+				// behavior. A finite maxTries throws once exhausted. (An injected error via guard() above is a
+				// hard, non-retryable failure and still throws immediately.)
+				const isContended = (): boolean => {
+					const holder = locks.get(resource)
 
-				if (contendedLocks.has(resource) && holder !== lockUUID) {
-					throw new Error(`Could not acquire lock for resource ${resource}.`)
+					return (contendedLocks.has(resource) && holder !== lockUUID) || (holder !== undefined && holder !== lockUUID)
 				}
 
-				if (holder && holder !== lockUUID) {
-					throw new Error(`Could not acquire lock for resource ${resource}.`)
+				let tries = 0
+
+				while (isContended()) {
+					tries++
+
+					if (tries >= maxTries) {
+						throw new Error(`Could not acquire lock for resource ${resource}.`)
+					}
+
+					await new Promise<void>(resolve => setTimeout(resolve, tryTimeout))
 				}
 
 				locks.set(resource, lockUUID)

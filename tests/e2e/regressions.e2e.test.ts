@@ -25,6 +25,10 @@ import { writeLocal, renameLocal, readLocal, existsLocal, uploadRemote, setLocal
  *   - H7: the local smoke test must run BEFORE the lock so a local outage never holds the account lock.
  *     Lock ORDERING during a LOCAL filesystem outage — no backend semantics — driven deterministically
  *     with an injected fs error + fake timers in tests/scenarios/zi-smoke-test-outage.test.ts.
+ *   - M2/M3: the local-trash eviction sweep must age out trashed DIRECTORIES (not just files), and its
+ *     setInterval must be torn down with the pair. Both are purely LOCAL — a folder on the local disk and
+ *     a client-side timer — with no backend involvement. Deterministic mocked regressions (memfs trash +
+ *     atime backdating + fake timers): tests/scenarios/zj-trash-cleanup.test.ts.
  */
 describe.skipIf(!E2E_ENABLED)("E2E — audit regression fixes against live backend", () => {
 	let sdk: FilenSDK

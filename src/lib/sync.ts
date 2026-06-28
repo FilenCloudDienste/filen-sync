@@ -58,6 +58,7 @@ export class Sync {
 	public localTrashDisabled: boolean
 	public localTreeErrors: LocalTreeError[] = []
 	public cleaningLocalTrash: boolean = false
+	public cleanupLocalTrashInterval: ReturnType<typeof setInterval> | undefined = undefined
 	public isPreviousSavedTreeStateEmpty: boolean = true
 	public requireConfirmationOnLargeDeletion: boolean
 	public deletionConfirmationResult: "delete" | "restart" | "waiting" = "waiting"
@@ -152,55 +153,67 @@ export class Sync {
 	}
 
 	public cleanupLocalTrash(): void {
-		setInterval(async () => {
-			if (this.cleaningLocalTrash) {
-				return
-			}
+		// Keep the timer handle so cleanup() can clear it. Previously the handle was discarded, so a removed
+		// pair's interval kept firing every 5 minutes forever — pinning the whole Sync (and its trees) in
+		// memory and burning a periodic glob/stat on a dead pair.
+		this.cleanupLocalTrashInterval = setInterval(() => {
+			void this.cleanupLocalTrashOnce()
+		}, 300000)
+	}
 
-			this.cleaningLocalTrash = true
+	public async cleanupLocalTrashOnce(): Promise<void> {
+		if (this.cleaningLocalTrash) {
+			return
+		}
 
-			try {
-				const localTrashPath = pathModule.join(this.syncPair.localPath, LOCAL_TRASH_NAME)
+		this.cleaningLocalTrash = true
 
-				if (await this.environment.fs.exists(localTrashPath)) {
-					const now = Date.now()
-					const dir = await FastGlob.async("**/*", {
-						dot: true,
-						onlyDirectories: false,
-						onlyFiles: true,
-						throwErrorOnBrokenSymbolicLink: false,
-						cwd: localTrashPath,
-						followSymbolicLinks: false,
-						deep: 0,
-						fs: this.environment.globFs,
-						suppressErrors: true,
-						stats: true,
-						unique: true,
-						objectMode: true
-					})
+		try {
+			const localTrashPath = pathModule.join(this.syncPair.localPath, LOCAL_TRASH_NAME)
 
-					for (const entry of dir) {
-						if (!entry) {
-							return
-						}
+			if (await this.environment.fs.exists(localTrashPath)) {
+				const now = Date.now()
+				const dir = await FastGlob.async("**/*", {
+					dot: true,
+					onlyDirectories: false,
+					// Deletes move whole DIRECTORIES into the trash (by basename), so the eviction sweep must
+					// age out directories too. With onlyFiles:true the glob skipped every trashed directory and
+					// (because deep:0 also stops it descending) their contents — so trashed directories leaked
+					// and accumulated forever. The rm below already recurses, so an old top-level dir is removed
+					// wholesale.
+					onlyFiles: false,
+					throwErrorOnBrokenSymbolicLink: false,
+					cwd: localTrashPath,
+					followSymbolicLinks: false,
+					deep: 0,
+					fs: this.environment.globFs,
+					suppressErrors: true,
+					stats: true,
+					unique: true,
+					objectMode: true
+				})
 
-						if (entry.stats && entry.stats.atimeMs + 86400000 * 30 < now) {
-							await this.environment.fs.rm(pathModule.join(localTrashPath, entry.path), {
-								force: true,
-								maxRetries: 60 * 10,
-								recursive: true,
-								retryDelay: 100
-							})
-						}
+				for (const entry of dir) {
+					if (!entry) {
+						continue
+					}
+
+					if (entry.stats && entry.stats.atimeMs + 86400000 * 30 < now) {
+						await this.environment.fs.rm(pathModule.join(localTrashPath, entry.path), {
+							force: true,
+							maxRetries: 60 * 10,
+							recursive: true,
+							retryDelay: 100
+						})
 					}
 				}
-			} catch (e) {
-				this.worker.logger.log("error", e, "sync.cleanupLocalTrash")
-				this.worker.logger.log("error", e)
-			} finally {
-				this.cleaningLocalTrash = false
 			}
-		}, 300000)
+		} catch (e) {
+			this.worker.logger.log("error", e, "sync.cleanupLocalTrash")
+			this.worker.logger.log("error", e)
+		} finally {
+			this.cleaningLocalTrash = false
+		}
 	}
 
 	public async initialize(): Promise<void> {
@@ -229,6 +242,12 @@ export class Sync {
 	}
 
 	public async cleanup({ deleteLocalDbFiles = false }: { deleteLocalDbFiles?: boolean }): Promise<void> {
+		if (this.cleanupLocalTrashInterval) {
+			clearInterval(this.cleanupLocalTrashInterval)
+
+			this.cleanupLocalTrashInterval = undefined
+		}
+
 		try {
 			await Promise.all([
 				this.localFileSystem.stopDirectoryWatcher(),

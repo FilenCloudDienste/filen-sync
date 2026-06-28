@@ -344,7 +344,11 @@ export class Tasks {
 							of: delta.type,
 							type: "success",
 							relativePath: delta.path,
-							localPath: pathModule.join(this.sync.syncPair.localPath, delta.path)
+							localPath: pathModule.join(this.sync.syncPair.localPath, delta.path),
+							// Both endpoints so the consumer can tell a same-directory rename from a move
+							// (different parent) for the sync log — the engine treats both as a path change.
+							from: delta.from,
+							to: delta.to
 						}
 					})
 
@@ -392,7 +396,11 @@ export class Tasks {
 							of: delta.type,
 							type: "success",
 							relativePath: delta.path,
-							localPath: pathModule.join(this.sync.syncPair.localPath, delta.path)
+							localPath: pathModule.join(this.sync.syncPair.localPath, delta.path),
+							// Both endpoints so the consumer can tell a same-directory rename from a move
+							// (different parent) for the sync log — the engine treats both as a path change.
+							from: delta.from,
+							to: delta.to
 						}
 					})
 

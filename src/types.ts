@@ -194,6 +194,8 @@ export type TransferData =
 			type: "success"
 			relativePath: string
 			localPath: string
+			from: string
+			to: string
 	  }
 	| {
 			of: "renameLocalDirectory"
@@ -208,6 +210,8 @@ export type TransferData =
 			type: "success"
 			relativePath: string
 			localPath: string
+			from: string
+			to: string
 	  }
 	| {
 			of: "renameRemoteDirectory"
@@ -222,6 +226,8 @@ export type TransferData =
 			type: "success"
 			relativePath: string
 			localPath: string
+			from: string
+			to: string
 	  }
 	| {
 			of: "renameRemoteFile"
@@ -236,6 +242,8 @@ export type TransferData =
 			type: "success"
 			relativePath: string
 			localPath: string
+			from: string
+			to: string
 	  }
 	| {
 			of: "downloadFile"

@@ -2,8 +2,7 @@ name: E2E (live SDK)
 
 # Real end-to-end tests against a live Filen test account. Runs on every push to main for live-backend
 # coverage; the deterministic suite (test.yml) still gates every push/PR. Can also be dispatched manually,
-# optionally targeting a single platform. A newer push supersedes the in-flight run for the same ref, and
-# a cleanup job purges any artifacts a cancelled run left behind.
+# optionally targeting a single platform. A newer push supersedes the in-flight run for the same ref.
 on:
     push:
         branches: ["main"]
@@ -73,36 +72,6 @@ jobs:
                   # Preferred: a base64(JSON) authenticated SDK config — the harness reuses the session
                   # instead of logging in, so parallel matrix runs don't trip the account's login rate
                   # limit. Email/password remain as a fallback when the config secret isn't set.
-                  FILEN_SYNC_LEGACY_E2E_SDK_CONFIG: ${{ secrets.FILEN_SYNC_LEGACY_E2E_SDK_CONFIG }}
-                  FILEN_SYNC_LEGACY_E2E_EMAIL: ${{ secrets.FILEN_SYNC_LEGACY_E2E_EMAIL }}
-                  FILEN_SYNC_LEGACY_E2E_PASSWORD: ${{ secrets.FILEN_SYNC_LEGACY_E2E_PASSWORD }}
-
-    # Housekeeping: purge artifacts a CANCELLED run left behind (its afterAll never ran). Runs after the
-    # matrix regardless of pass/fail; age-based so it can never touch a run still in flight (see cleanup.ts).
-    # A cancelled run cancels this job too, but the next run's cleanup catches its now-aged orphans.
-    cleanup:
-        name: Cleanup orphaned artifacts
-        needs: e2e
-        if: always()
-        runs-on: ubuntu-latest
-        # emptyTrash can be slow when a backlog has accumulated, so allow generous headroom.
-        timeout-minutes: 30
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v4
-
-            - name: Set up Node
-              uses: actions/setup-node@v4
-              with:
-                  node-version: 24
-                  cache: "npm"
-
-            - name: Install dependencies
-              run: npm ci
-
-            - name: Purge aged test artifacts and empty trash
-              run: npm run test:e2e:cleanup
-              env:
                   FILEN_SYNC_LEGACY_E2E_SDK_CONFIG: ${{ secrets.FILEN_SYNC_LEGACY_E2E_SDK_CONFIG }}
                   FILEN_SYNC_LEGACY_E2E_EMAIL: ${{ secrets.FILEN_SYNC_LEGACY_E2E_EMAIL }}
                   FILEN_SYNC_LEGACY_E2E_PASSWORD: ${{ secrets.FILEN_SYNC_LEGACY_E2E_PASSWORD }}

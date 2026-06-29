@@ -82,6 +82,14 @@ export async function symlinkLocal(world: E2EWorld, linkRelativePath: string, ta
 	await fs.symlink(target, full)
 }
 
+/** Create a HARD link at `linkRelativePath` pointing at the same inode as the existing `targetRelativePath`. */
+export async function linkLocal(world: E2EWorld, targetRelativePath: string, linkRelativePath: string): Promise<void> {
+	const link = abs(world, linkRelativePath)
+
+	await fs.ensureDir(pathModule.dirname(link))
+	await fs.link(abs(world, targetRelativePath), link)
+}
+
 // ---- Remote mutations (real SDK calls under the /<runId> root) ---------------------------------------
 
 const segments = (relativePath: string): string[] => relativePath.split("/").map(segment => segment.trim()).filter(Boolean)

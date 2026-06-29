@@ -723,6 +723,14 @@ export function createFakeCloud(initial: CloudSpec = {}, deps: { localFs: SyncFS
 				const existing = findLiveByName(node.parent, name)
 
 				if (existing && existing.uuid !== uuid) {
+					if (existing.type !== "file") {
+						// The backend cannot overwrite a DIRECTORY with a file via rename (even with
+						// overwriteIfExists) — it rejects rather than replacing across types. Modeling this is what
+						// lets the mocked suite catch a cross-type rename the engine should never emit (file↔dir
+						// name swap); the engine resolves such cases via delete+recreate instead.
+						throw new Error("Cannot rename a file onto an existing directory.")
+					}
+
 					if (overwriteIfExists) {
 						trashFileInternal(existing.uuid)
 					} else {
@@ -754,6 +762,12 @@ export function createFakeCloud(initial: CloudSpec = {}, deps: { localFs: SyncFS
 				const existing = findLiveByName(node.parent, name)
 
 				if (existing && existing.uuid !== uuid) {
+					if (existing.type !== "directory") {
+						// Symmetric to renameFile: the backend will not overwrite a FILE with a directory via
+						// rename. The engine must delete+recreate across types rather than rename.
+						throw new Error("Cannot rename a directory onto an existing file.")
+					}
+
 					if (overwriteIfExists) {
 						trashDirectoryInternal(existing.uuid)
 					} else {
@@ -791,6 +805,11 @@ export function createFakeCloud(initial: CloudSpec = {}, deps: { localFs: SyncFS
 						return
 					}
 
+					if (existing.type !== "file") {
+						// Cross-type: cannot move a file onto an existing directory (matches the backend).
+						throw new Error("Cannot move a file onto an existing directory.")
+					}
+
 					if (overwriteIfExists) {
 						trashFileInternal(existing.uuid)
 					}
@@ -824,6 +843,11 @@ export function createFakeCloud(initial: CloudSpec = {}, deps: { localFs: SyncFS
 				if (existing) {
 					if (existing.uuid === uuid) {
 						return
+					}
+
+					if (existing.type !== "directory") {
+						// Cross-type: cannot move a directory onto an existing file (matches the backend).
+						throw new Error("Cannot move a directory onto an existing file.")
 					}
 
 					if (overwriteIfExists) {

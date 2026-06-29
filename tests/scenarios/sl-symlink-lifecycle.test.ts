@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { runScenario, runCycle, control, localMutate } from "../harness/runner"
+import { runScenario, runCycle, control, localMutate, remoteMutate } from "../harness/runner"
 import { messagesOfType, transferKinds } from "../harness/snapshot"
 import { rmLocal, writeLocal } from "../harness/mutations"
 import { type SyncMessage } from "../../src/types"
@@ -177,6 +177,33 @@ describe("Category SL — symlink lifecycle", () => {
 
 		// The remote subtree is left intact and the engine never wedges trying to write under the local symlink.
 		expect(result.finalRemote["/projects/a.txt"]).toMatchObject({ type: "file", size: "A".length })
+		expect(result.finalRemote["/projects/b.txt"]).toMatchObject({ type: "file", size: "B".length })
+		expect(taskErrorCount(result.messages)).toBe(0)
+		expect(transferKinds(result.cycles[result.cycles.length - 1]!.messages)).toEqual([])
+	})
+
+	it("SL7: a remote child deleted under a locally-symlinked folder is not propagated as a local delete (no error)", async () => {
+		const result = await runScenario({
+			name: "SL7",
+			mode: "twoWay",
+			initialLocal: { "/local/projects/a.txt": "A", "/local/projects/b.txt": "B", "/local/target.txt": "T" },
+			steps: [
+				runCycle(),
+				// Replace the synced folder with a symlink, THEN another device deletes one child remotely.
+				control(world => {
+					rmLocal(world, "projects")
+					world.vfs.ifs.symlinkSync("/local/target.txt", "/local/projects")
+					world.triggerWatcher()
+				}),
+				remoteMutate(world => world.cloud.controls.trashPath("/projects/a.txt")),
+				runCycle(),
+				runCycle(),
+				runCycle()
+			]
+		})
+
+		// The remote deletion of a hidden descendant must not error or wedge; the surviving child stays.
+		expect(result.finalRemote["/projects/a.txt"]).toBeUndefined()
 		expect(result.finalRemote["/projects/b.txt"]).toMatchObject({ type: "file", size: "B".length })
 		expect(taskErrorCount(result.messages)).toBe(0)
 		expect(transferKinds(result.cycles[result.cycles.length - 1]!.messages)).toEqual([])

@@ -10,6 +10,7 @@
 		"test:watch": "vitest",
 		"test:coverage": "vitest run --coverage",
 		"test:e2e": "vitest run --config vitest.e2e.config.ts",
+		"test:e2e:cleanup": "tsx tests/e2e/cleanup.ts",
 		"lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
 		"typecheck": "tsc --noEmit -p tsconfig.test.json",
 		"emitTypes": "tsc --emitDeclarationOnly",

@@ -1,16 +1,51 @@
 name: E2E (live SDK)
 
-# Real end-to-end tests against a live Filen test account. Not part of per-push CI (uses the account +
-# bandwidth) — runs on demand and nightly. The deterministic suite (test.yml) still gates every push/PR.
+# Real end-to-end tests against a live Filen test account. Runs on every push to main for live-backend
+# coverage; the deterministic suite (test.yml) still gates every push/PR. Can also be dispatched manually,
+# optionally targeting a single platform. A newer push supersedes the in-flight run for the same ref, and
+# a cleanup job purges any artifacts a cancelled run left behind.
 on:
+    push:
+        branches: ["main"]
     workflow_dispatch:
-    schedule:
-        # Nightly at 03:00 UTC.
-        - cron: "0 3 * * *"
+        inputs:
+            platform:
+                description: "Platform(s) to run"
+                type: choice
+                default: all
+                options:
+                    - all
+                    - ubuntu-latest
+                    - macos-latest
+                    - windows-latest
+
+# A newer commit on a ref cancels that ref's in-flight E2E run, so the slow (~40 min/platform) runs never
+# pile up on the shared test account. Keyed per-ref so a main push and a manual branch run don't cancel
+# each other.
+concurrency:
+    group: e2e-${{ github.ref }}
+    cancel-in-progress: true
 
 jobs:
+    # Resolve the OS matrix: all three platforms by default, or a single one when a manual dispatch picks it.
+    select:
+        name: Select platforms
+        runs-on: ubuntu-latest
+        outputs:
+            matrix: ${{ steps.pick.outputs.matrix }}
+        steps:
+            - id: pick
+              shell: bash
+              run: |
+                  if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.platform }}" != "all" ]; then
+                      echo "matrix={\"os\":[\"${{ inputs.platform }}\"]}" >> "$GITHUB_OUTPUT"
+                  else
+                      echo 'matrix={"os":["ubuntu-latest","macos-latest","windows-latest"]}' >> "$GITHUB_OUTPUT"
+                  fi
+
     e2e:
         name: E2E (${{ matrix.os }})
+        needs: select
         runs-on: ${{ matrix.os }}
         timeout-minutes: 90
         strategy:
@@ -18,8 +53,7 @@ jobs:
             # The runners share ONE account but each world uses a truly-random remote /<uuid> + local tmp
             # dir, and account-wide emptyTrash only ever purges trashed test artifacts (never live items
             # under any /<uuid>), so parallel runs are safe.
-            matrix:
-                os: [ubuntu-latest, macos-latest, windows-latest]
+            matrix: ${{ fromJSON(needs.select.outputs.matrix) }}
         steps:
             - name: Checkout
               uses: actions/checkout@v4
@@ -39,6 +73,36 @@ jobs:
                   # Preferred: a base64(JSON) authenticated SDK config — the harness reuses the session
                   # instead of logging in, so parallel matrix runs don't trip the account's login rate
                   # limit. Email/password remain as a fallback when the config secret isn't set.
+                  FILEN_SYNC_LEGACY_E2E_SDK_CONFIG: ${{ secrets.FILEN_SYNC_LEGACY_E2E_SDK_CONFIG }}
+                  FILEN_SYNC_LEGACY_E2E_EMAIL: ${{ secrets.FILEN_SYNC_LEGACY_E2E_EMAIL }}
+                  FILEN_SYNC_LEGACY_E2E_PASSWORD: ${{ secrets.FILEN_SYNC_LEGACY_E2E_PASSWORD }}
+
+    # Housekeeping: purge artifacts a CANCELLED run left behind (its afterAll never ran). Runs after the
+    # matrix regardless of pass/fail; age-based so it can never touch a run still in flight (see cleanup.ts).
+    # A cancelled run cancels this job too, but the next run's cleanup catches its now-aged orphans.
+    cleanup:
+        name: Cleanup orphaned artifacts
+        needs: e2e
+        if: always()
+        runs-on: ubuntu-latest
+        # emptyTrash can be slow when a backlog has accumulated, so allow generous headroom.
+        timeout-minutes: 30
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Set up Node
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 24
+                  cache: "npm"
+
+            - name: Install dependencies
+              run: npm ci
+
+            - name: Purge aged test artifacts and empty trash
+              run: npm run test:e2e:cleanup
+              env:
                   FILEN_SYNC_LEGACY_E2E_SDK_CONFIG: ${{ secrets.FILEN_SYNC_LEGACY_E2E_SDK_CONFIG }}
                   FILEN_SYNC_LEGACY_E2E_EMAIL: ${{ secrets.FILEN_SYNC_LEGACY_E2E_EMAIL }}
                   FILEN_SYNC_LEGACY_E2E_PASSWORD: ${{ secrets.FILEN_SYNC_LEGACY_E2E_PASSWORD }}

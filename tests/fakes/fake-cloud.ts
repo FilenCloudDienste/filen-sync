@@ -1103,9 +1103,31 @@ export function createFakeCloud(initial: CloudSpec = {}, deps: { localFs: SyncFS
 			}
 
 			const parentUUID = ensureDirByPath(pathModule.posix.dirname(toPath))
+			const newName = pathModule.posix.basename(toPath)
+
+			// Per-parent name uniqueness is REAL on the backend (case-insensitive, no two live siblings share a
+			// name). A peer-device move/rename onto an OCCUPIED name therefore cannot leave both — the backend
+			// trashes the occupant (overwrite), exactly as the SDK moveFile/moveDirectory above already do. The
+			// raw test control used to just reassign parent+name, spawning an impossible DUPLICATE sibling that
+			// the real backend never produces (a false-green: a cross-side chain/swap whose destination is taken
+			// resolved differently in the mock than live). Mirror the SDK's collision handling here so the fake
+			// stays faithful: a same-type occupant is trashed, a cross-type collision is rejected.
+			const existing = findLiveByName(parentUUID, newName)
+
+			if (existing && existing.uuid !== node.uuid) {
+				if (existing.type !== node.type) {
+					throw new Error(`movePath: cannot move a ${node.type} onto an existing ${existing.type} at ${toPath}`)
+				}
+
+				if (existing.type === "file") {
+					trashFileInternal(existing.uuid)
+				} else {
+					trashDirectoryInternal(existing.uuid)
+				}
+			}
 
 			node.parent = parentUUID
-			node.name = pathModule.posix.basename(toPath)
+			node.name = newName
 
 			bump()
 		}

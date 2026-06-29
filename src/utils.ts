@@ -72,13 +72,23 @@ export async function promiseAllSettledChunked<T>(
 }
 
 /**
- * Convert a timestamp from seconds to milliseconds.
+ * Convert a timestamp from seconds to milliseconds, tolerating a missing/invalid value.
+ *
+ * Some file metadata decrypts WITHOUT a `lastModified` (older files, or other clients) even though the SDK
+ * type declares it required. A non-finite input must not flow on: it would become NaN and poison every
+ * downstream comparison (`NaN !== NaN` makes a file look changed every cycle) and `new Date(NaN)` in the
+ * post-download `utimes` throws, so the file never finishes syncing. Treat an unknown time as the epoch —
+ * comparisons stay well-defined and the uuid-based change detection still drives correctness.
  *
  * @export
  * @param {number} timestamp
  * @returns {number}
  */
 export function convertTimestampToMs(timestamp: number): number {
+	if (!Number.isFinite(timestamp)) {
+		return 0
+	}
+
 	const now = Date.now()
 
 	if (Math.abs(now - timestamp) < Math.abs(now - timestamp * 1000)) {

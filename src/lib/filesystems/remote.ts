@@ -828,6 +828,15 @@ export class RemoteFileSystem {
 					throw new Error("Invalid paths.")
 				}
 
+				// A cross-parent move that also renames the basename is NOT atomic: it is a rename SDK call
+				// FOLLOWED BY a move SDK call. If the move fails after the rename committed, the item is left
+				// renamed-but-not-moved on the backend. That half-state is indistinguishable next cycle from an
+				// EXTERNAL remote rename and races the still-pending local move of the same identity, so the
+				// reconciler keeps both → a phantom duplicate the user never created. We therefore roll the
+				// rename back on move failure so the backend returns to its pre-task path and the retry sees a
+				// clean one-sided move. The rollback is best-effort and runs ONLY on the error path.
+				let renameHalfCommitted = false
+
 				if (oldBasename !== newBasename) {
 					if (item.type === "directory") {
 						await this.sync.sdk.cloud().renameDirectory({
@@ -843,48 +852,76 @@ export class RemoteFileSystem {
 							overwriteIfExists: true
 						})
 					}
+
+					renameHalfCommitted = true
 				}
 
-				if (newParentPath === "/" || newParentPath === "." || newParentPath === "") {
-					if (item.type === "directory") {
-						await this.sync.sdk.cloud().moveDirectory({
-							uuid,
-							to: this.sync.syncPair.remoteParentUUID,
-							metadata: itemMetadata as FolderMetadata,
-							overwriteIfExists: true
-						})
+				try {
+					if (newParentPath === "/" || newParentPath === "." || newParentPath === "") {
+						if (item.type === "directory") {
+							await this.sync.sdk.cloud().moveDirectory({
+								uuid,
+								to: this.sync.syncPair.remoteParentUUID,
+								metadata: itemMetadata as FolderMetadata,
+								overwriteIfExists: true
+							})
+						} else {
+							await this.sync.sdk.cloud().moveFile({
+								uuid,
+								to: this.sync.syncPair.remoteParentUUID,
+								metadata: itemMetadata as FileMetadata,
+								overwriteIfExists: true
+							})
+						}
 					} else {
-						await this.sync.sdk.cloud().moveFile({
-							uuid,
-							to: this.sync.syncPair.remoteParentUUID,
-							metadata: itemMetadata as FileMetadata,
-							overwriteIfExists: true
-						})
-					}
-				} else {
-					await this.mkdir({ relativePath: newParentPath })
+						await this.mkdir({ relativePath: newParentPath })
 
-					const newParentItem = this.getDirectoryTreeCache.tree[newParentPath]
+						const newParentItem = this.getDirectoryTreeCache.tree[newParentPath]
 
-					if (!newParentItem) {
-						throw new Error(`Could not find path ${newParentPath}.`)
+						if (!newParentItem) {
+							throw new Error(`Could not find path ${newParentPath}.`)
+						}
+
+						if (item.type === "directory") {
+							await this.sync.sdk.cloud().moveDirectory({
+								uuid,
+								to: newParentItem.uuid!,
+								metadata: itemMetadata as FolderMetadata,
+								overwriteIfExists: true
+							})
+						} else {
+							await this.sync.sdk.cloud().moveFile({
+								uuid,
+								to: newParentItem.uuid,
+								metadata: itemMetadata as FileMetadata,
+								overwriteIfExists: true
+							})
+						}
+					}
+				} catch (e) {
+					if (renameHalfCommitted) {
+						try {
+							if (item.type === "directory") {
+								await this.sync.sdk.cloud().renameDirectory({
+									uuid,
+									name: oldBasename,
+									overwriteIfExists: true
+								})
+							} else {
+								await this.sync.sdk.cloud().renameFile({
+									uuid,
+									metadata: { ...(itemMetadata as FileMetadata), name: oldBasename },
+									name: oldBasename,
+									overwriteIfExists: true
+								})
+							}
+						} catch {
+							// Swallow: the rollback is best-effort. If it also fails the item stays half-renamed
+							// (no worse than before this guard), and the original error below drives the retry.
+						}
 					}
 
-					if (item.type === "directory") {
-						await this.sync.sdk.cloud().moveDirectory({
-							uuid,
-							to: newParentItem.uuid!,
-							metadata: itemMetadata as FolderMetadata,
-							overwriteIfExists: true
-						})
-					} else {
-						await this.sync.sdk.cloud().moveFile({
-							uuid,
-							to: newParentItem.uuid,
-							metadata: itemMetadata as FileMetadata,
-							overwriteIfExists: true
-						})
-					}
+					throw e
 				}
 			}
 

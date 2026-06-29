@@ -2,7 +2,7 @@ import type Sync from "./sync"
 import { type SyncMode } from "../types"
 import { type LocalTree, type LocalTreeError, type LocalTreeIgnored } from "./filesystems/local"
 import { type RemoteTree } from "./filesystems/remote"
-import { replacePathStartWithFromAndTo, pathIncludesDotFile, normalizeLastModifiedMsForComparison } from "../utils"
+import { replacePathStartWithFromAndTo, pathIncludesDotFile, normalizeLastModifiedMsForComparison, isSyncedIgnoreFile } from "../utils"
 
 export type Delta = { path: string } & (
 	| {
@@ -1562,14 +1562,19 @@ export class Deltas {
 					delta.type === "renameRemoteFile"
 				) {
 					if (
-						(this.sync.excludeDotFiles && (pathIncludesDotFile(delta.from) || pathIncludesDotFile(delta.to))) ||
+						(this.sync.excludeDotFiles &&
+							((pathIncludesDotFile(delta.from) && !isSyncedIgnoreFile(delta.from)) ||
+								(pathIncludesDotFile(delta.to) && !isSyncedIgnoreFile(delta.to)))) ||
 						this.sync.ignorer.ignores(delta.from + trailingSlash) ||
 						this.sync.ignorer.ignores(delta.to + trailingSlash)
 					) {
 						keep = false
 					}
 				} else {
-					if ((this.sync.excludeDotFiles && pathIncludesDotFile(delta.path)) || this.sync.ignorer.ignores(delta.path + trailingSlash)) {
+					if (
+						(this.sync.excludeDotFiles && pathIncludesDotFile(delta.path) && !isSyncedIgnoreFile(delta.path)) ||
+						this.sync.ignorer.ignores(delta.path + trailingSlash)
+					) {
 						keep = false
 					}
 				}

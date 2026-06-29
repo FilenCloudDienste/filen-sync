@@ -329,6 +329,20 @@ export function pathIncludesDotFile(path: string): boolean {
 	return path.split("/").some(part => part.length > 0 && part.trimStart().startsWith("."))
 }
 
+/**
+ * Whether `relativePath` is the ROOT `.filenignore` — the synced ignore-config file. It is the ignore list
+ * the engine reads from `<localPath>/.filenignore` every cycle, so it should reach every machine that shares
+ * the pair: it is EXEMPT from the `excludeDotFiles` dotfile filter (otherwise users who exclude dotfiles —
+ * the ones who most want a curated ignore list — would never get it shared). It is NOT exempt from an
+ * explicit `.filenignore` rule, so a user can still opt the file out of syncing on purpose (maintainer
+ * decision 2026-06-29). Only the ROOT file qualifies (a nested `dir/.filenignore` is a normal file the engine
+ * never reads); the local scan emits it WITHOUT a leading slash, the remote scan + the delta paths WITH one,
+ * so both forms are accepted. Cheap (two string compares) — it runs in the per-entry scan hot path.
+ */
+export function isSyncedIgnoreFile(relativePath: string): boolean {
+	return relativePath === ".filenignore" || relativePath === "/.filenignore"
+}
+
 export function normalizeUTime(time: number): number {
 	if (Number.isInteger(time)) {
 		return time

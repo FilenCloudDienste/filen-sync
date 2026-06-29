@@ -8,7 +8,8 @@ import {
 	isAbsolutePathIgnoredByDefault,
 	isPathOverMaxLength,
 	isNameOverMaxLength,
-	isValidPath
+	isValidPath,
+	isSyncedIgnoreFile
 } from "../../utils"
 import pathModule from "path"
 import type Sync from "../sync"
@@ -189,7 +190,9 @@ export class LocalFileSystem {
 			}
 		}
 
-		if (this.sync.excludeDotFiles && pathIncludesDotFile(relativePath)) {
+		// The root .filenignore is exempt from the dotfile filter so the shared ignore-config syncs even when
+		// excludeDotFiles is on; an explicit .filenignore rule below can still exclude it. (see isSyncedIgnoreFile)
+		if (this.sync.excludeDotFiles && pathIncludesDotFile(relativePath) && !isSyncedIgnoreFile(relativePath)) {
 			this.ignoredCache.set(relativePath, {
 				ignored: true,
 				reason: "dotFile"

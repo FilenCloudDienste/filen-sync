@@ -14,7 +14,8 @@ import {
 	serializeError,
 	replacePathStartWithFromAndTo,
 	pathIncludesDotFile,
-	normalizeUTime
+	normalizeUTime,
+	isSyncedIgnoreFile
 } from "../../utils"
 import { v4 as uuidv4 } from "uuid"
 import { LOCAL_TRASH_NAME } from "../../constants"
@@ -207,7 +208,9 @@ export class RemoteFileSystem {
 			}
 		}
 
-		if (this.sync.excludeDotFiles && pathIncludesDotFile(relativePath)) {
+		// The root .filenignore is exempt from the dotfile filter so the shared ignore-config syncs even when
+		// excludeDotFiles is on; the explicit-rule check above can still exclude it. (see isSyncedIgnoreFile)
+		if (this.sync.excludeDotFiles && pathIncludesDotFile(relativePath) && !isSyncedIgnoreFile(relativePath)) {
 			this.ignoredCache.set(key, {
 				ignored: true,
 				reason: "dotFile"

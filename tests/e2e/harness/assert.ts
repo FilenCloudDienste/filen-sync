@@ -81,6 +81,13 @@ export async function snapshotRemoteReal(world: E2EWorld, options: { withContent
 		for (const item of items) {
 			const relativePath = `${prefix}/${item.name}`
 
+			// Skip the root `.filenignore` on BOTH sides (it now syncs, but it is a config file that must not
+			// affect tree-convergence comparisons — symmetric with the local snapshot). Tests that specifically
+			// assert it use resolveRemote / existsLocal directly.
+			if (relativePath.split("/").length === 2 && LOCAL_ONLY_ENTRIES.has(item.name)) {
+				continue
+			}
+
 			if (item.type === "directory") {
 				result[relativePath] = { type: "directory", size: 0 }
 

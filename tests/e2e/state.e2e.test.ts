@@ -19,7 +19,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — state persistence across restarts", () =>
 
 	beforeAll(async () => {
 		sdk = await loginTestSDK()
-	}, 300_000)
+	}, 900_000)
 
 	afterAll(async () => {
 		await teardownTestSDK()

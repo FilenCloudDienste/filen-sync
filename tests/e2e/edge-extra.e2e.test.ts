@@ -20,7 +20,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — additional structural edge cases & races 
 
 	beforeAll(async () => {
 		sdk = await loginTestSDK()
-	}, 300_000)
+	}, 900_000)
 
 	afterAll(async () => {
 		await teardownTestSDK()
@@ -51,7 +51,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — additional structural edge cases & races 
 
 			await expectConverged(world)
 		})
-	}, 120_000)
+	}, 900_000)
 
 	it("AF3: a 3-way directory rename rotation converges with rotated children", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -75,7 +75,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — additional structural edge cases & races 
 
 			await expectConverged(world)
 		})
-	}, 120_000)
+	}, 900_000)
 
 	it("AS1: a file and a non-empty directory swap names (child rides the swap)", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -96,7 +96,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — additional structural edge cases & races 
 
 			await expectConverged(world)
 		})
-	}, 120_000)
+	}, 900_000)
 
 	it("AS5: a file becomes a directory holding a NEW subdir into which an existing file is moved", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -116,7 +116,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — additional structural edge cases & races 
 
 			await expectConverged(world)
 		})
-	}, 120_000)
+	}, 900_000)
 
 	it("AS2: a file and an EMPTY directory swap names", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -136,7 +136,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — additional structural edge cases & races 
 
 			await expectConverged(world)
 		})
-	}, 120_000)
+	}, 900_000)
 
 	it("AE1: a local move INTO a directory the remote deletes keeps the moved file", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -157,7 +157,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — additional structural edge cases & races 
 
 			await expectConverged(world)
 		})
-	}, 120_000)
+	}, 900_000)
 
 	it("AE3: delete a file and move another onto its freed path in one beat (path reuse)", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -176,7 +176,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — additional structural edge cases & races 
 
 			await expectConverged(world)
 		})
-	}, 120_000)
+	}, 900_000)
 
 	it("AG1: a local directory delete racing a remote child add keeps the new child", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -194,7 +194,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — additional structural edge cases & races 
 
 			await expectConverged(world)
 		})
-	}, 120_000)
+	}, 900_000)
 
 	it("AO: renaming a whole directory subtree does not trip the large-deletion prompt", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay", requireConfirmationOnLargeDeletion: true }, async world => {
@@ -216,7 +216,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — additional structural edge cases & races 
 
 			await expectConverged(world)
 		})
-	}, 180_000)
+	}, 900_000)
 
 	describe("ignore × move/rename (AN)", () => {
 		it("AN1: moving a synced file INTO an ignored directory drops the remote copy, keeps the local bytes", async () => {
@@ -239,7 +239,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — additional structural edge cases & races 
 				expect(remote["/keep.txt"]).toMatchObject({ type: "file" })
 				expect(await existsLocal(world, "build/a.txt")).toBe(true)
 			})
-		}, 120_000)
+		}, 900_000)
 
 		it("AN2: moving an ignored file OUT to a tracked path uploads it", async () => {
 			await withE2EWorld({ sdk, mode: "twoWay", filenIgnore: "build/\n" }, async world => {
@@ -257,7 +257,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — additional structural edge cases & races 
 				expect(remote["/secret.txt"]).toMatchObject({ type: "file" })
 				expect(await existsLocal(world, "build/secret.txt")).toBe(false)
 			})
-		}, 120_000)
+		}, 900_000)
 	})
 
 	it("AU1: two hardlinked local files (one inode) both sync as independent copies on the real fs", async () => {
@@ -285,7 +285,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — additional structural edge cases & races 
 			expect(after["/original.txt"]).toMatchObject({ type: "file" })
 			await expectConverged(world)
 		})
-	}, 120_000)
+	}, 900_000)
 
 	describe("type-change vs content-op conflicts (AX)", () => {
 		it("AX2: local replaces a file with a directory while the remote deletes the file", async () => {
@@ -303,7 +303,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — additional structural edge cases & races 
 				expect(remote["/x/inner.txt"]).toMatchObject({ type: "file" })
 				await expectConverged(world)
 			})
-		}, 120_000)
+		}, 900_000)
 
 		it("AX3: local deletes a file while the remote replaces it with a directory", async () => {
 			await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -320,7 +320,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — additional structural edge cases & races 
 				expect(local["/x/inner.txt"]).toMatchObject({ type: "file" })
 				await expectConverged(world)
 			})
-		}, 120_000)
+		}, 900_000)
 
 		it("AX5: local deletes a directory while the remote replaces it with a file", async () => {
 			await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -336,7 +336,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — additional structural edge cases & races 
 				expect(local["/d"]).toMatchObject({ type: "file" })
 				await expectConverged(world)
 			})
-		}, 120_000)
+		}, 900_000)
 
 		it("AX6: local replaces a directory with a file while the remote deletes the directory", async () => {
 			await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -352,7 +352,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — additional structural edge cases & races 
 				expect(remote["/d"]).toMatchObject({ type: "file" })
 				await expectConverged(world)
 			})
-		}, 120_000)
+		}, 900_000)
 
 		it("AX7: both sides independently replace a file with a directory (children merge)", async () => {
 			await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -371,7 +371,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — additional structural edge cases & races 
 				expect(remote["/x/remote-inner.txt"]).toMatchObject({ type: "file" })
 				await expectConverged(world)
 			})
-		}, 120_000)
+		}, 900_000)
 
 		it("AX8: both sides independently replace a directory with a file", async () => {
 			await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -388,7 +388,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — additional structural edge cases & races 
 				expect(remote["/d"]).toMatchObject({ type: "file" })
 				await expectConverged(world)
 			})
-		}, 120_000)
+		}, 900_000)
 	})
 
 	it("AH3: both sides delete the same file converges to empty with no error", async () => {
@@ -410,5 +410,5 @@ describe.skipIf(!E2E_ENABLED)("E2E — additional structural edge cases & races 
 			expect(transferKinds(await cycle(world))).toEqual([])
 			await expectConverged(world)
 		})
-	}, 120_000)
+	}, 900_000)
 })

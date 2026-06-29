@@ -28,7 +28,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — hardening-round parity (ZW/RT/ZA/ATC/ZX/Z
 
 	beforeAll(async () => {
 		sdk = await loginTestSDK()
-	}, 900_000)
+	}, 1_800_000)
 
 	afterAll(async () => {
 		await teardownTestSDK()
@@ -54,7 +54,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — hardening-round parity (ZW/RT/ZA/ATC/ZX/Z
 			expect(remote["/outside.txt"]).toBeUndefined()
 			await expectConverged(world)
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("ZW-live: a local SUBDIRECTORY moved INTO a remotely-renamed directory converges with no duplicate", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -73,7 +73,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — hardening-round parity (ZW/RT/ZA/ATC/ZX/Z
 			expect(remote["/sub/child.txt"]).toBeUndefined()
 			await expectConverged(world)
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("ZW-live: a local dir rename + a remote same-dir child rename converges keeping the renamed child", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -92,7 +92,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — hardening-round parity (ZW/RT/ZA/ATC/ZX/Z
 			expect(remote["/dir2/a.txt"]).toBeUndefined()
 			await expectConverged(world)
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("ATC-live: localBackup TOLERATES a foreign remote file→directory (cloud folder kept, local file kept)", async () => {
 		await withE2EWorld({ sdk, mode: "localBackup" }, async world => {
@@ -113,7 +113,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — hardening-round parity (ZW/RT/ZA/ATC/ZX/Z
 			// …and the local file is left untouched (the sides diverge — that is the tolerance).
 			expect(local["/report.txt"]).toMatchObject({ type: "file", size: "AAA".length })
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("ATC-live: cloudBackup TOLERATES a foreign local file→directory (local folder kept, remote file kept)", async () => {
 		await withE2EWorld({ sdk, mode: "cloudBackup" }, async world => {
@@ -133,7 +133,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — hardening-round parity (ZW/RT/ZA/ATC/ZX/Z
 			expect(local["/report.txt/x.txt"]).toMatchObject({ type: "file" })
 			expect(remote["/report.txt"]).toMatchObject({ type: "file", size: "AAA".length })
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("ZA-live: cloudToLocal REVERTS a foreign local file→directory back to the remote file", async () => {
 		await withE2EWorld({ sdk, mode: "cloudToLocal" }, async world => {
@@ -152,7 +152,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — hardening-round parity (ZW/RT/ZA/ATC/ZX/Z
 			expect(local["/a.txt/child.txt"]).toBeUndefined()
 			await expectConverged(world)
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("RT-live: a local file rename racing a remote file→directory keeps BOTH", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -171,7 +171,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — hardening-round parity (ZW/RT/ZA/ATC/ZX/Z
 			expect(remote["/a.txt/child.txt"]).toMatchObject({ type: "file" })
 			await expectConverged(world)
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("ZX-live: switching twoWay→cloudToLocal reverts a still-pending local edit", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -189,7 +189,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — hardening-round parity (ZW/RT/ZA/ATC/ZX/Z
 			expect(remote["/a.txt"]).toMatchObject({ type: "file", size: "orig".length })
 			expect(local["/a.txt"]).toMatchObject({ type: "file", size: "orig".length })
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("ZY-live: no common base, both sides hold the path with divergent content → newer wins", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -206,7 +206,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — hardening-round parity (ZW/RT/ZA/ATC/ZX/Z
 			expect(remote["/a.txt"]).toMatchObject({ type: "file", size: "LOCAL-NEWER-CONTENT".length })
 			await expectConverged(world)
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("SL-live: replacing a synced FOLDER with a symlink keeps the cloud subtree and never wedges", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -235,7 +235,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — hardening-round parity (ZW/RT/ZA/ATC/ZX/Z
 			expect(remote["/projects/b.txt"]).toMatchObject({ type: "file", size: "B".length })
 			expect(taskErrorCount(cycleMessages)).toBe(0)
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("SL-live: a settled file→symlink→file round-trip keeps the cloud copy and re-converges", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -262,7 +262,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — hardening-round parity (ZW/RT/ZA/ATC/ZX/Z
 			const remote = await snapshotRemoteReal(world)
 			expect(remote["/doc.txt"]).toMatchObject({ type: "file", size: "v2-restored".length })
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("CC-live: local DELETES a directory while remote RENAMES it → the rename wins (data preserved)", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -281,7 +281,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — hardening-round parity (ZW/RT/ZA/ATC/ZX/Z
 			expect(remote["/D"]).toBeUndefined()
 			await expectConverged(world)
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("ZW-live: a local MOVE+MODIFY into a remotely-renamed dir keeps the MODIFIED content (real-fs inode preserved)", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -304,7 +304,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — hardening-round parity (ZW/RT/ZA/ATC/ZX/Z
 			expect(remote["/outside.txt"]).toBeUndefined()
 			await expectConverged(world)
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("HL-live: renaming one of two REAL hardlinks keeps both links and converges (no dropped file)", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -328,5 +328,5 @@ describe.skipIf(!E2E_ENABLED)("E2E — hardening-round parity (ZW/RT/ZA/ATC/ZX/Z
 			expect(remote["/a.txt"]).toBeUndefined()
 			await expectConverged(world)
 		})
-	}, 900_000)
+	}, 1_800_000)
 })

@@ -24,7 +24,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario round 3 (XD/RR/XC/DR/XS/MT
 
 	beforeAll(async () => {
 		sdk = await loginTestSDK()
-	}, 900_000)
+	}, 1_800_000)
 
 	afterAll(async () => {
 		await teardownTestSDK()
@@ -48,7 +48,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario round 3 (XD/RR/XC/DR/XS/MT
 			expect(remote["/top2/mid"]).toBeUndefined()
 			await expectConverged(world)
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("RR-live: local renames a→b AND creates a NEW a (same path, new content) → both converge", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -65,7 +65,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario round 3 (XD/RR/XC/DR/XS/MT
 			expect(remote["/a.txt"]).toMatchObject({ type: "file", size: "BRAND-NEW-A".length })
 			await expectConverged(world)
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("XC-live: local a→b (overwriting local b) while remote renames b→c → converges to b=oldA, c=oldB", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -84,7 +84,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario round 3 (XD/RR/XC/DR/XS/MT
 			expect(remote["/a.txt"]).toBeUndefined()
 			await expectConverged(world)
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("XS-live: cross-side SWAP (local a→b, remote b→a overwriting) → converges to swapped content (fake-faithfulness proof)", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -104,7 +104,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario round 3 (XD/RR/XC/DR/XS/MT
 			expect(remote["/b.txt"]).toMatchObject({ type: "file", size: "AAAA".length })
 			await expectConverged(world)
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("DR-live: local renames INNER dir while remote DELETES the OUTER dir → renamed subtree survives, sibling deleted", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -124,7 +124,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario round 3 (XD/RR/XC/DR/XS/MT
 			expect(remote["/a/other.txt"]).toBeUndefined()
 			await expectConverged(world)
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("MT-live: a FAR-FUTURE local mtime syncs, converges, and does NOT re-sync next cycle (no loop)", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -138,7 +138,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario round 3 (XD/RR/XC/DR/XS/MT
 			// Stability: a follow-up cycle must do no work (a far-future mtime must round-trip, not re-detect).
 			expect(allOps(await cycle(world))).toEqual([])
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("PC-live: local renames parent + child-a, remote renames child-b → both leaf renames land under the renamed parent", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -160,7 +160,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario round 3 (XD/RR/XC/DR/XS/MT
 			expect(remote["/p"]).toBeUndefined()
 			await expectConverged(world)
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("FD-live: local turns file /x into a dir AND moves a file into /x/sub/child.txt → converges, content intact", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -179,7 +179,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario round 3 (XD/RR/XC/DR/XS/MT
 			expect(remote["/other.txt"]).toBeUndefined()
 			await expectConverged(world)
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("DC-live: local DELETES /d while remote renames child /d/a.txt→/d/b.txt → /d survives with the renamed child", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -198,7 +198,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario round 3 (XD/RR/XC/DR/XS/MT
 			expect(remote["/keep.txt"]).toMatchObject({ type: "file" })
 			await expectConverged(world)
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("XN-live: local renames level-1 dir + remote renames level-3 dir (non-adjacent) → composes deep", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -217,7 +217,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario round 3 (XD/RR/XC/DR/XS/MT
 			expect(remote["/outer2/mid/inner"]).toBeUndefined()
 			await expectConverged(world)
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("RS-live: a restart in the middle of a cross-side dir rename → still converges (at-least-once recovery)", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -239,7 +239,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario round 3 (XD/RR/XC/DR/XS/MT
 			expect(remote["/dir2/a.txt"]).toBeUndefined()
 			await expectConverged(world)
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("XM-live: cloudToLocal — remote renames a dir, a foreign LOCAL child rename is reverted (remote wins)", async () => {
 		await withE2EWorld({ sdk, mode: "cloudToLocal" }, async world => {
@@ -259,7 +259,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario round 3 (XD/RR/XC/DR/XS/MT
 			expect(local["/dir2/foreignLocal.txt"]).toBeUndefined()
 			await expectConverged(world)
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("MOVE-live: a peer CROSS-DIRECTORY remote move is applied locally as a move (uuid preserved, no re-download)", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -279,7 +279,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario round 3 (XD/RR/XC/DR/XS/MT
 			expect(remote["/archive/doc.txt"]).toMatchObject({ type: "file", size: "DOCUMENT".length })
 			await expectConverged(world)
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("DC3-live: local DELETES /d while remote MOVES the child into a new subdir /d/sub/b.txt → /d and the subtree survive", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -297,7 +297,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario round 3 (XD/RR/XC/DR/XS/MT
 			expect(remote["/d/a.txt"]).toBeUndefined()
 			await expectConverged(world)
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("BS1-live: localBackup — local dir rename propagates; a foreign remote-only file is NOT deleted", async () => {
 		await withE2EWorld({ sdk, mode: "localBackup" }, async world => {
@@ -318,7 +318,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario round 3 (XD/RR/XC/DR/XS/MT
 			expect(remote["/remoteOnly.txt"]).toMatchObject({ type: "file", size: "FOREIGN".length })
 			expect(local["/remoteOnly.txt"]).toBeUndefined()
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("BS3-live: cloudBackup — remote dir rename propagates; a foreign local-only file is NOT deleted", async () => {
 		await withE2EWorld({ sdk, mode: "cloudBackup" }, async world => {
@@ -339,7 +339,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario round 3 (XD/RR/XC/DR/XS/MT
 			expect(local["/localOnly.txt"]).toMatchObject({ type: "file", size: "FOREIGN".length })
 			expect(remote["/localOnly.txt"]).toBeUndefined()
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("TI5-live: a bare local mtime TOUCH must NOT strand a real remote edit (the modify-vs-modify fix)", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -361,7 +361,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario round 3 (XD/RR/XC/DR/XS/MT
 			expect(local["/a.txt"]).toMatchObject({ type: "file", size: "REMOTE-REAL-EDIT".length })
 			await expectConverged(world)
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("TI8-live: local TOUCH of a DOWNLOADED file (no cached hash) + remote MODIFY → the real remote edit wins", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -381,7 +381,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario round 3 (XD/RR/XC/DR/XS/MT
 			expect(local["/a.txt"]).toMatchObject({ type: "file", size: "REMOTE-REAL-EDIT".length })
 			await expectConverged(world)
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("TI1-live: local TOUCH + remote RENAME → the rename wins, the touch is ignored", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -398,7 +398,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario round 3 (XD/RR/XC/DR/XS/MT
 			expect(remote["/a.txt"]).toBeUndefined()
 			await expectConverged(world)
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("TI3-live: local TOUCH + remote DELETE → the delete proceeds (a bare touch does not resurrect)", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -418,5 +418,5 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario round 3 (XD/RR/XC/DR/XS/MT
 			expect(remote["/keep.txt"]).toMatchObject({ type: "file" })
 			await expectConverged(world)
 		})
-	}, 900_000)
+	}, 1_800_000)
 })

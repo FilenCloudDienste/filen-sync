@@ -15,7 +15,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — ignore filtering", () => {
 
 	beforeAll(async () => {
 		sdk = await loginTestSDK()
-	}, 900_000)
+	}, 1_800_000)
 
 	afterAll(async () => {
 		await teardownTestSDK()

@@ -54,9 +54,9 @@ export default defineConfig({
 		include: ["tests/e2e/**/*.test.ts"],
 		// Very generous: CI runners can be slow and real transfers + tree fetches add up. Better to wait
 		// than to flake on a slow-but-healthy run.
-		testTimeout: 3600_000,
-		hookTimeout: 3600_000,
-		teardownTimeout: 3600_000,
+		testTimeout: 7200_000,
+		hookTimeout: 7200_000,
+		teardownTimeout: 7200_000,
 		// One retry absorbs a transient network blip without masking a persistent failure.
 		retry: 1,
 		// Never run e2e files concurrently — they share one account.

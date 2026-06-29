@@ -31,7 +31,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario parity (ZP/ZQ/ZR/ZS/ZV/ZU)
 
 	beforeAll(async () => {
 		sdk = await loginTestSDK()
-	}, 900_000)
+	}, 1_800_000)
 
 	afterAll(async () => {
 		await teardownTestSDK()
@@ -55,7 +55,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario parity (ZP/ZQ/ZR/ZS/ZV/ZU)
 
 			await expectConverged(world)
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("ZQ-live: a case-only FILE rename propagates and converges on the real backend", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -72,7 +72,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario parity (ZP/ZQ/ZR/ZS/ZV/ZU)
 
 			await expectConverged(world)
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("ZQ-live: a case-only DIRECTORY rename propagates with its child and converges", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -89,7 +89,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario parity (ZP/ZQ/ZR/ZS/ZV/ZU)
 
 			await expectConverged(world)
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("ZR-live: a same-size content edit with an OLDER mtime still uploads (real-FS !== guard)", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
@@ -116,7 +116,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario parity (ZP/ZQ/ZR/ZS/ZV/ZU)
 			// withContent compares sha512 on both sides, proving the remote actually holds the new bytes.
 			await expectConverged(world, { withContent: true })
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("ZS-live: a dir-only ignore prunes the directory but a SAME-NAMED file still syncs (real FastGlob)", async () => {
 		// Validates the traversal-prune safety on the real glob engine: the `cache/**/*` prune glob must NOT
@@ -135,7 +135,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario parity (ZP/ZQ/ZR/ZS/ZV/ZU)
 			expect(remote["/cache"]).toBeUndefined()
 			expect(remote["/cache/data.bin"]).toBeUndefined()
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("ZS-live: a prefix-similar sibling of an ignored directory still syncs", async () => {
 		await withE2EWorld({ sdk, mode: "twoWay", filenIgnore: "build\n" }, async world => {
@@ -151,7 +151,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario parity (ZP/ZQ/ZR/ZS/ZV/ZU)
 			expect(remote["/build"]).toBeUndefined()
 			expect(remote["/build/artifact.o"]).toBeUndefined()
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("ZV-live: a synced file made unreadable is KEPT on the remote, then reconciles when readable again", async ctx => {
 		// chmod 0o000 doesn't deny reads on Windows, and root bypasses it — probe first, skip if it won't deny.
@@ -203,7 +203,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario parity (ZP/ZQ/ZR/ZS/ZV/ZU)
 			expect((await snapshotRemoteReal(world))["/doc.txt"]).toMatchObject({ type: "file" })
 			await expectConverged(world)
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("ZU1-live: localToCloud — a local delete beats a concurrent foreign remote modify (mirror authority)", async () => {
 		await withE2EWorld({ sdk, mode: "localToCloud" }, async world => {
@@ -219,7 +219,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario parity (ZP/ZQ/ZR/ZS/ZV/ZU)
 			expect((await snapshotRemoteReal(world))["/a.txt"]).toBeUndefined()
 			expect(await existsLocal(world, "a.txt")).toBe(false)
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("ZU3-live: cloudToLocal — a remote delete beats a concurrent foreign local modify (mirror authority)", async () => {
 		await withE2EWorld({ sdk, mode: "cloudToLocal" }, async world => {
@@ -235,7 +235,7 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario parity (ZP/ZQ/ZR/ZS/ZV/ZU)
 			expect(await existsLocal(world, "a.txt")).toBe(false)
 			expect((await snapshotRemoteReal(world))["/a.txt"]).toBeUndefined()
 		})
-	}, 900_000)
+	}, 1_800_000)
 
 	it("ZU5-live: localBackup — a local delete does NOT propagate even when the remote was concurrently modified", async () => {
 		await withE2EWorld({ sdk, mode: "localBackup" }, async world => {
@@ -249,5 +249,5 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario parity (ZP/ZQ/ZR/ZS/ZV/ZU)
 			// Additive backup: a source-side delete never deletes the target — the remote copy survives.
 			expect((await snapshotRemoteReal(world))["/a.txt"]).toMatchObject({ type: "file" })
 		})
-	}, 900_000)
+	}, 1_800_000)
 })

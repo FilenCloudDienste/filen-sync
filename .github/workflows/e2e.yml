@@ -46,7 +46,10 @@ jobs:
         name: E2E (${{ matrix.os }})
         needs: select
         runs-on: ${{ matrix.os }}
-        timeout-minutes: 90
+        # Generous headroom: the live suite runs serially against one account and keeps growing (the
+        # scale-hardening round added more multi-item live cases). A high cap avoids flaking a slow-but-healthy
+        # run on a loaded runner; a genuine hang is still caught by the per-test timeouts below.
+        timeout-minutes: 180
         strategy:
             fail-fast: false
             # The runners share ONE account but each world uses a truly-random remote /<uuid> + local tmp

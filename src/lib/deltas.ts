@@ -289,6 +289,43 @@ export function directoriesWithSurvivingChildren(
 }
 
 /**
+ * Whether the NEAREST EXISTING ancestor of `path` in `tree` is a NON-directory (a file). Used to veto a
+ * rename whose destination cannot be reached because an ancestor is currently a file being type-changed
+ * into a directory in the same cycle — the file↔directory name-swap family, including the deep case where
+ * a moved child lands in a brand-new subdirectory of the type-changing file (e.g. `/a` (file) → `/a/sub/
+ * child.txt`, where `/a/sub` is absent but `/a` is still a file). The backend cannot create a directory
+ * under a file, so the move would silently fail and lose the child; suppressing it lets the addition pass
+ * rebuild the child under the freshly-created directory instead.
+ *
+ * Walks UP from the immediate parent to the first ancestor that EXISTS in `tree`: a file there blocks the
+ * rename; a directory (or reaching the root with only absent ancestors — they will be created) does not.
+ * An absent immediate parent therefore stays a cheap server-side rename (no re-upload) for the common
+ * "move into a brand-new directory" case. O(depth), evaluated only for an already-identified rename
+ * candidate (a path that actually changed), so it never touches the unchanged bulk of a large tree.
+ */
+function renameDestinationBlockedByFileAncestor(
+	tree: { tree: Record<string, { type: "file" | "directory" } | undefined> },
+	path: string
+): boolean {
+	let slash = path.lastIndexOf("/")
+
+	// Walk ancestors from the immediate parent upward; stop at the root ("/x" has slash === 0).
+	while (slash > 0) {
+		const ancestor = tree.tree[path.slice(0, slash)]
+
+		if (ancestor) {
+			// Nearest existing ancestor decides: a file blocks the rename, a directory permits it.
+			return ancestor.type !== "directory"
+		}
+
+		slash = path.lastIndexOf("/", slash - 1)
+	}
+
+	// No existing ancestor before the root: every intermediate will be created as a directory.
+	return false
+}
+
+/**
  * Remaps `path` across a set of propagated directory renames, returning its post-rename path (unchanged if
  * none applies). The most-specific (longest `from`) ancestor wins, and each rename's `to` already encodes
  * any outer renames (the rename pass records every directory's FINAL position), so one pass handles
@@ -515,8 +552,18 @@ export class Deltas {
 					// cannot report birthtime reads 0 on both sides — still equal — so this degrades safely to
 					// the old inode-only behavior rather than dropping genuine renames. (F8 — inode reuse)
 					currentItem.creation === previousItem.creation &&
-					// Does an item with the same path and type already exist in the current remote tree (probably moved by something else prior)?
-					!(currentRemoteTree.tree[currentItem.path] && currentRemoteTree.tree[currentItem.path]!.type === currentItem.type) &&
+					// Does ANY item already occupy the rename target in the current remote tree? If so, do not
+					// propagate the rename. A same-type occupant was probably moved there by something else; a
+					// DIFFERENT-type occupant (e.g. a file↔directory name swap) cannot be overwritten by a rename
+					// on the backend at all — renaming a file onto a directory's name (or vice versa) silently
+					// fails and the worlds diverge. In both cases the correct resolution is to leave the path
+					// unmarked so the type-change / addition / deletion passes rebuild it via delete+recreate.
+					!currentRemoteTree.tree[currentItem.path] &&
+					// Nor may the destination's PARENT currently be a file: a child moving into a directory that is
+					// itself being type-changed from a file in the same cycle (the non-empty file↔dir name swap)
+					// cannot be placed under that file on the backend. Suppress so the addition pass rebuilds the
+					// child under the freshly-created directory; an ABSENT parent stays a cheap rename (no re-upload).
+					!renameDestinationBlockedByFileAncestor(currentRemoteTree, currentItem.path) &&
 					// Because only comparing strings can be weird sometimes
 					Buffer.from(currentItem.path, "utf-8").toString("hex") !== Buffer.from(previousItem.path, "utf-8").toString("hex")
 				) {
@@ -587,8 +634,14 @@ export class Deltas {
 				if (
 					currentItem.path !== previousItem.path &&
 					currentItem.type === previousItem.type &&
-					// Does an item with the same path and type already exist in the current local tree (probably moved by something else prior)?
-					!(currentLocalTree.tree[currentItem.path] && currentLocalTree.tree[currentItem.path]!.type === currentItem.type) &&
+					// Does ANY item already occupy the rename target in the current local tree? Symmetric to the
+					// local-rename guard above: a same-type occupant was probably moved there independently, and a
+					// DIFFERENT-type occupant (file↔directory name swap) cannot be overwritten by a rename — leave
+					// the path unmarked so the type-change / addition / deletion passes rebuild it via delete+recreate.
+					!currentLocalTree.tree[currentItem.path] &&
+					// Symmetric to the local pass: the destination's parent must not currently be a file (a child
+					// moving into a directory mid-type-change). Suppress so the addition pass rebuilds it locally.
+					!renameDestinationBlockedByFileAncestor(currentLocalTree, currentItem.path) &&
 					// Because only comparing strings can be weird sometimes
 					Buffer.from(currentItem.path, "utf-8").toString("hex") !== Buffer.from(previousItem.path, "utf-8").toString("hex")
 				) {
@@ -698,6 +751,18 @@ export class Deltas {
 							) {
 								continue
 							}
+						}
+
+						// A type CHANGE on the other side is newer data, exactly like a modify: if the REMOTE replaced
+						// this path with a DIFFERENT type since the base (file↔directory), that new item must win over
+						// the local delete. Skip the delete and leave the path unmarked so the remote-additions pass
+						// creates the new-type item locally. Extends modify-beats-delete (F7) to type changes — without
+						// it, a type-change racing a delete loses the new item on the real backend, where deleting the
+						// OLD type executes against the NEW-type item now at that path. (F7 — type change beats delete)
+						const remoteTypeChangedItem = currentRemoteTree.tree[path]
+
+						if (remoteTypeChangedItem && remoteTypeChangedItem.type !== previousLocalItem.type) {
+							continue
 						}
 
 						const delta: Delta = {
@@ -817,6 +882,16 @@ export class Deltas {
 									continue
 								}
 							}
+						}
+
+						// Symmetric to the local-deletions guard: a type CHANGE on the LOCAL side is newer data. If the
+						// local side replaced this path with a DIFFERENT type since the base (file↔directory), that new
+						// item must win over the remote delete — skip it so the local-additions pass pushes the new-type
+						// item up. (F7 — type change beats delete)
+						const localTypeChangedItem = currentLocalTree.tree[path]
+
+						if (localTypeChangedItem && localTypeChangedItem.type !== previousRemoteItem.type) {
+							continue
 						}
 
 						const delta: Delta = {

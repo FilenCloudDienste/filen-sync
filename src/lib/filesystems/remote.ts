@@ -232,6 +232,10 @@ export class RemoteFileSystem {
 		result: RemoteTree
 		ignored: RemoteTreeIgnored[]
 		changed: boolean
+		// How many remote items had metadata that could not be decrypted this build (corrupted entries or a
+		// transient crypto fault). >0 means the read is INCOMPLETE: the skipped items are absent from the tree,
+		// which the caller must not mistake for deletions (sync.ts carries the last-known state forward).
+		decryptErrors: number
 	}> {
 		const deviceId = await this.getDeviceId()
 		const dir = await this.sync.environment.fetchDirTree(this.sync.sdk, {
@@ -251,7 +255,8 @@ export class RemoteFileSystem {
 			return {
 				result: this.getDirectoryTreeCache,
 				ignored: this.getDirectoryTreeCache.ignored,
-				changed: false
+				changed: false,
+				decryptErrors: 0
 			}
 		}
 
@@ -269,6 +274,9 @@ export class RemoteFileSystem {
 
 		const pathsAdded: Record<string, boolean> = {}
 		let size = 0
+		// Count of items whose metadata failed to decrypt (folders + files). Surfaced so the cycle can treat an
+		// incomplete read as non-destructive rather than letting skipped items look deleted. (decrypt resilience)
+		let decryptErrors = 0
 
 		this.getDirectoryTreeCache.ignored = []
 		this.getDirectoryTreeCache.tree = {}
@@ -285,6 +293,8 @@ export class RemoteFileSystem {
 
 						folderMeta.set(folder[0], { name: decrypted.name, parent: folder[2] })
 					} catch (e) {
+						decryptErrors++
+
 						this.sync.worker.logger.log("error", e, "filesystems.remote.getDirectoryTree")
 						this.sync.worker.logger.log("error", e)
 					}
@@ -480,6 +490,8 @@ export class RemoteFileSystem {
 
 						size += 1
 					} catch (e) {
+						decryptErrors++
+
 						this.sync.worker.logger.log("error", e, "filesystems.remote.getDirectoryTree")
 						this.sync.worker.logger.log("error", e)
 					}
@@ -497,7 +509,8 @@ export class RemoteFileSystem {
 				size: this.getDirectoryTreeCache.size
 			},
 			ignored: this.getDirectoryTreeCache.ignored,
-			changed: true
+			changed: true,
+			decryptErrors
 		}
 	}
 

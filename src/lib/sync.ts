@@ -448,6 +448,30 @@ export class Sync {
 					this.remoteFileSystem.getDirectoryTree()
 				])
 
+				// An INCOMPLETE remote read (one or more items whose metadata could not be decrypted — a corrupted
+				// entry, or a transient crypto fault) must never be mistaken for deletions. A skipped item is absent
+				// from the fresh tree, indistinguishable from a removal, so the remote-deletion pass would delete the
+				// synced LOCAL copy: silent data loss. The skipped item's PATH is unknown (its name lives in the
+				// un-decryptable metadata), so recover it from the persisted base by uuid and carry the last-known
+				// state forward — any base remote item missing from this read is re-asserted at its base path (unless
+				// that path was legitimately reused by a readable item). Genuine remote deletions simply wait for a
+				// clean read (self-healing); a permanently-corrupt item only ever blocks its own neighbourhood's
+				// deletions, never causes a wrong one. Mirrors the existing "malformed tree must not read as a
+				// mass-deletion" guard in remote.ts. Runs ONLY when a decrypt error occurred — zero cost otherwise.
+				if (currentRemoteTree.decryptErrors > 0) {
+					const current = currentRemoteTree.result
+
+					for (const uuid in this.previousRemoteTree.uuids) {
+						const baseItem = this.previousRemoteTree.uuids[uuid]
+
+						if (baseItem && !current.uuids[uuid] && !current.tree[baseItem.path]) {
+							current.tree[baseItem.path] = baseItem
+							current.uuids[uuid] = baseItem
+							current.size += 1
+						}
+					}
+				}
+
 				clearTimeout(gettingTreesMessageTimeout)
 
 				postMessageToMain({

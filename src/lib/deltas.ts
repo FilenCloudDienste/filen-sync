@@ -1355,11 +1355,31 @@ export class Deltas {
 							md5Hash = undefined
 						}
 
+						const cachedHashForConflict = this.sync.localFileHashes[currentLocalItem.path]
+						const localSizeChanged = !previousLocalItem || previousLocalItem.size !== currentLocalItem.size
+						// In a twoWay CONFLICT (the remote made a confirmed new-uuid change) a SAME-SIZE local change
+						// wins only when CONFIRMED a real edit — a cached hash that differs. A same-size change we
+						// cannot confirm (no stored hash, or a hash that MATCHES = a bare touch) must NOT clobber the
+						// remote's confirmed edit: defer to the remote so it downloads. Mirrors the resurrect pass,
+						// which refuses to let an unconfirmable same-size local change beat a remote delete. Directional
+						// / mirror pushes are authoritative (mirrorRevert / noBaseSizeDiverged); an UNREADABLE file
+						// (md5Hash === undefined, e.g. a rebased descendant mid dir-rename) is a known change and never
+						// defers. (TI5 + no-cache extension — maintainer decision.)
+						const deferToConfirmedRemote =
+							remoteChanged &&
+							!directionalPush &&
+							!mirrorRevert &&
+							!noBaseSizeDiverged &&
+							!localSizeChanged &&
+							md5Hash !== undefined &&
+							(cachedHashForConflict === undefined || md5Hash === cachedHashForConflict)
+
 						if (
-							mirrorRevert ||
-							noBaseSizeDiverged ||
-							md5Hash === undefined ||
-							md5Hash !== this.sync.localFileHashes[currentLocalItem.path]
+							!deferToConfirmedRemote &&
+							(mirrorRevert ||
+								noBaseSizeDiverged ||
+								md5Hash === undefined ||
+								md5Hash !== this.sync.localFileHashes[currentLocalItem.path])
 						) {
 							deltas.push({
 								type: "uploadFile",
@@ -1447,11 +1467,39 @@ export class Deltas {
 					// Mirrors the local pass, which already declines to claim an unchanged-local path. Without
 					// this, a genuine remote edit (new uuid) whose mtime was not strictly newer than the local
 					// mtime — equal whole-second, or an out-of-sync editing clock — was dropped and never pulled.
-					const localUnchanged =
+					let localUnchanged =
 						!!previousLocalItem &&
 						previousLocalItem.size === currentLocalItem.size &&
 						normalizeLastModifiedMsForComparison(previousLocalItem.lastModified) ===
 							normalizeLastModifiedMsForComparison(currentLocalItem.lastModified)
+
+					// A bare local mtime TOUCH (size unchanged from base, only the mtime moved) is NOT a content
+					// change, so it must not win the newer-mtime tiebreak below and STRAND a genuine remote edit:
+					// the remote's new bytes would otherwise never download and the two sides diverge PERMANENTLY
+					// (local keeps stale content under a newer touch-mtime while the real edit sits unreachable on
+					// the remote). When the remote actually changed and the local size still matches base, the cached
+					// upload hash decides; with NO cached hash (a downloaded file — the engine caches a hash only on
+					// upload) the same-size change is UNCONFIRMABLE and DEFERS to the confirmed remote edit (maintainer
+					// decision). Consistent with the resurrect pass, which already refuses to let a bare touch beat a
+					// delete. (TI5 + no-cache extension)
+					if (!localUnchanged && remoteChanged && previousLocalItem && previousLocalItem.size === currentLocalItem.size) {
+						const cachedHash = this.sync.localFileHashes[currentLocalItem.path]
+
+						if (cachedHash) {
+							try {
+								const currentHash = await this.sync.localFileSystem.createFileHash({
+									relativePath: path,
+									algorithm: "md5"
+								})
+
+								localUnchanged = currentHash === cachedHash
+							} catch {
+								// Unreadable (a pending rename has not moved the file to `path` yet) — keep the mtime result.
+							}
+						} else {
+							localUnchanged = true
+						}
+					}
 					// The newer-mtime tiebreak (last term) stays the CONFLICT resolver: it only decides the case
 					// where the local copy ALSO changed. The local pass ran first and claimed the path when local
 					// won that conflict, so reaching here with a changed local means the remote is the newer side.

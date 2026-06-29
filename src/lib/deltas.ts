@@ -1385,30 +1385,58 @@ export class Deltas {
 						? "/"
 						: ""
 
+				let keep = true
+
 				if (
 					delta.type === "renameLocalDirectory" ||
 					delta.type === "renameLocalFile" ||
 					delta.type === "renameRemoteDirectory" ||
 					delta.type === "renameRemoteFile"
 				) {
-					if (this.sync.excludeDotFiles && (pathIncludesDotFile(delta.from) || pathIncludesDotFile(delta.to))) {
-						return false
-					}
-
-					if (this.sync.ignorer.ignores(delta.from + trailingSlash) || this.sync.ignorer.ignores(delta.to + trailingSlash)) {
-						return false
+					if (
+						(this.sync.excludeDotFiles && (pathIncludesDotFile(delta.from) || pathIncludesDotFile(delta.to))) ||
+						this.sync.ignorer.ignores(delta.from + trailingSlash) ||
+						this.sync.ignorer.ignores(delta.to + trailingSlash)
+					) {
+						keep = false
 					}
 				} else {
-					if (this.sync.excludeDotFiles && pathIncludesDotFile(delta.path)) {
-						return false
-					}
-
-					if (this.sync.ignorer.ignores(delta.path + trailingSlash)) {
-						return false
+					if ((this.sync.excludeDotFiles && pathIncludesDotFile(delta.path)) || this.sync.ignorer.ignores(delta.path + trailingSlash)) {
+						keep = false
 					}
 				}
 
-				return true
+				// A DELETE delta dropped here is for an ignored path - not a real deletion - so it must not inflate
+				// the raw delete counts that feed the large-deletion confirmation gate (those are tallied in the
+				// deletion passes BEFORE this filter). Without this, ignoring a whole already-synced subtree (which
+				// the scan now PRUNES rather than carrying through `ignoredLocalPaths`) would be miscounted as
+				// emptying the side and could spuriously prompt "confirm deleting everything".
+				if (!keep) {
+					switch (delta.type) {
+						case "deleteRemoteDirectory": {
+							deleteRemoteDirectoryCountRaw = Math.max(0, deleteRemoteDirectoryCountRaw - 1)
+
+							break
+						}
+						case "deleteRemoteFile": {
+							deleteRemoteFileCountRaw = Math.max(0, deleteRemoteFileCountRaw - 1)
+
+							break
+						}
+						case "deleteLocalDirectory": {
+							deleteLocalDirectoryCountRaw = Math.max(0, deleteLocalDirectoryCountRaw - 1)
+
+							break
+						}
+						case "deleteLocalFile": {
+							deleteLocalFileCountRaw = Math.max(0, deleteLocalFileCountRaw - 1)
+
+							break
+						}
+					}
+				}
+
+				return keep
 			})
 
 		// Here we apply the "done" task to the delta state.

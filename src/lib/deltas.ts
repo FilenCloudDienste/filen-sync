@@ -326,6 +326,32 @@ function renameDestinationBlockedByFileAncestor(
 }
 
 /**
+ * Whether a directory rename `fromDir` → `toDir` is corroborated by a surviving child IDENTITY: some inode
+ * that lived under `fromDir` in the base now lives under `toDir` in the current tree. Used only as a
+ * fallback when the directory's birthtime does not match across the rename (a platform that rewrites a
+ * directory's creation time on rename — observed on Windows), to tell a genuine move from an inode-reuse
+ * coincidence: a reused directory inode belongs to a brand-new directory that shares NONE of the old
+ * children, so it finds no corroborating child and is still rejected. O(inodes), short-circuits on the
+ * first match, and only evaluated for a directory rename candidate whose birthtime already failed the
+ * cheap equality/zero checks — so it never runs on the normal path.
+ */
+export function directoryRenameCorroboratedByChild(fromDir: string, toDir: string, currentTree: LocalTree, previousTree: LocalTree): boolean {
+	const fromPrefix = `${fromDir}/`
+	const toPrefix = `${toDir}/`
+
+	for (const inode in currentTree.inodes) {
+		const current = currentTree.inodes[inode]
+		const previous = previousTree.inodes[inode]
+
+		if (current && previous && current.path.startsWith(toPrefix) && previous.path.startsWith(fromPrefix)) {
+			return true
+		}
+	}
+
+	return false
+}
+
+/**
  * Remaps `path` across a set of propagated directory renames, returning its post-rename path (unchanged if
  * none applies). The most-specific (longest `from`) ancestor wins, and each rename's `to` already encodes
  * any outer renames (the rename pass records every directory's FINAL position), so one pass handles
@@ -548,10 +574,23 @@ export class Deltas {
 					// loss in modes that keep deletions (localBackup), and invisible in twoWay only because the
 					// stale path was going to be deleted anyway. A genuine rename preserves the file's
 					// creation/birthtime (even a rename+modify only touches mtime/size); a reused inode belongs
-					// to a freshly-created file with a newer birthtime. Require both to match. A filesystem that
-					// cannot report birthtime reads 0 on both sides — still equal — so this degrades safely to
-					// the old inode-only behavior rather than dropping genuine renames. (F8 — inode reuse)
-					currentItem.creation === previousItem.creation &&
+					// to a freshly-created file with a newer birthtime. Require both to match. Two safe relaxations
+					// for platforms that report birthtime unreliably (without ever weakening the ext4 file
+					// inode-reuse protection, which always yields two DIFFERENT non-zero birthtimes):
+					//   (a) treat 0 on EITHER side as "unknown" and degrade to inode-only — a fs that cannot report
+					//       a birthtime reads 0;
+					//   (b) for a DIRECTORY whose birthtime changed, corroborate by IDENTITY — if a child inode that
+					//       lived under the old path now lives under the new path, this is the same directory moving,
+					//       not an inode-reuse coincidence (a reused inode belongs to a brand-new directory that has
+					//       NONE of the old children). Windows was observed to rewrite a directory's birthtime across
+					//       a rename, which silently broke cross-side dir-rename reconciliation; (b) restores it
+					//       while a reused dir inode (no surviving children) is still correctly rejected.
+					// (F8 — inode reuse; birthtime-unreliable hardening)
+					(currentItem.creation === previousItem.creation ||
+						currentItem.creation === 0 ||
+						previousItem.creation === 0 ||
+						(currentItem.type === "directory" &&
+							directoryRenameCorroboratedByChild(previousItem.path, currentItem.path, currentLocalTree, previousLocalTree))) &&
 					// Does ANY item already occupy the rename target in the current remote tree? If so, do not
 					// propagate the rename. A same-type occupant was probably moved there by something else; a
 					// DIFFERENT-type occupant (e.g. a file↔directory name swap) cannot be overwritten by a rename

@@ -8,7 +8,7 @@ import { E2E_ENABLED, loginTestSDK, teardownTestSDK } from "./harness/account"
 import { withE2EWorld } from "./harness/world"
 import { settle, expectConverged, transferKinds, cycle } from "./harness/drive"
 import { snapshotRemoteReal } from "./harness/assert"
-import { writeLocal, renameLocal, readLocal, setLocalMtime, chmodLocal } from "./harness/mutations"
+import { writeLocal, renameLocal, readLocal, setLocalMtime, chmodLocal, rmLocal, uploadRemote, deleteRemote, existsLocal } from "./harness/mutations"
 
 /**
  * Phase 4 e2e — live-backend parity for the latest weird-scenario round (ZP/ZQ/ZR).
@@ -198,6 +198,52 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario parity (ZP/ZQ/ZR)", () => 
 
 			expect((await snapshotRemoteReal(world))["/doc.txt"]).toMatchObject({ type: "file" })
 			await expectConverged(world)
+		})
+	}, 120_000)
+
+	it("ZU1-live: localToCloud — a local delete beats a concurrent foreign remote modify (mirror authority)", async () => {
+		await withE2EWorld({ sdk, mode: "localToCloud" }, async world => {
+			await writeLocal(world, "a.txt", "v1")
+			await writeLocal(world, "keep.txt", "keep") // keep the local side non-empty (no deletion gate)
+			await settle(world)
+
+			await rmLocal(world, "a.txt")
+			await uploadRemote(world, "a.txt", "foreign-remote-edit") // foreign change on the non-authoritative side
+			await settle(world)
+
+			// Local is authoritative and deleted it — the foreign remote edit must not resurrect it.
+			expect((await snapshotRemoteReal(world))["/a.txt"]).toBeUndefined()
+			expect(await existsLocal(world, "a.txt")).toBe(false)
+		})
+	}, 120_000)
+
+	it("ZU3-live: cloudToLocal — a remote delete beats a concurrent foreign local modify (mirror authority)", async () => {
+		await withE2EWorld({ sdk, mode: "cloudToLocal" }, async world => {
+			await writeLocal(world, "a.txt", "v1")
+			await writeLocal(world, "keep.txt", "keep")
+			await settle(world)
+
+			await deleteRemote(world, "a.txt") // remote authoritative delete
+			await writeLocal(world, "a.txt", "foreign-local-edit") // foreign change on the non-authoritative side
+			await settle(world)
+
+			// Remote is authoritative and deleted it — the foreign local edit must not keep it alive.
+			expect(await existsLocal(world, "a.txt")).toBe(false)
+			expect((await snapshotRemoteReal(world))["/a.txt"]).toBeUndefined()
+		})
+	}, 120_000)
+
+	it("ZU5-live: localBackup — a local delete does NOT propagate even when the remote was concurrently modified", async () => {
+		await withE2EWorld({ sdk, mode: "localBackup" }, async world => {
+			await writeLocal(world, "a.txt", "v1")
+			await settle(world)
+
+			await rmLocal(world, "a.txt")
+			await uploadRemote(world, "a.txt", "foreign-remote-edit")
+			await settle(world)
+
+			// Additive backup: a source-side delete never deletes the target — the remote copy survives.
+			expect((await snapshotRemoteReal(world))["/a.txt"]).toMatchObject({ type: "file" })
 		})
 	}, 120_000)
 })

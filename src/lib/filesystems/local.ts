@@ -273,6 +273,12 @@ export class LocalFileSystem {
 				const scanStartedAt = Date.now()
 				const pathsAdded: Record<string, boolean> = {}
 				let size = 0
+				// Prune provably-.filenignore'd subtrees from the walk ITSELF, so the scan never descends into,
+				// stats, or even enumerates an ignored directory (e.g. node_modules) — and mark directories so an
+				// entry's type is known from the glob WITHOUT an lstat. The prune globs are a strict subset of the
+				// ignore matcher's set (Ignorer.globIgnorePatternsForTraversal), so they can never drop a path the
+				// matcher keeps; anything they miss is still caught by the per-entry filter below.
+				const traversalIgnoreGlobs = this.sync.ignorer.globIgnorePatternsForTraversal()
 				const entries = await FastGlob.async("**/*", {
 					dot: true,
 					onlyDirectories: false,
@@ -285,14 +291,25 @@ export class LocalFileSystem {
 					suppressErrors: true,
 					stats: false,
 					unique: false,
-					objectMode: false
+					objectMode: false,
+					markDirectories: true,
+					...(traversalIgnoreGlobs.length > 0 ? { ignore: traversalIgnoreGlobs } : {})
 				})
 
 				for (let offset = 0; offset < entries.length; offset += LOCAL_SCAN_CONCURRENCY) {
-					await Promise.all(entries.slice(offset, offset + LOCAL_SCAN_CONCURRENCY).map(async entry => {
-						const entryItem = entry as unknown as string | null
+					await Promise.all(entries.slice(offset, offset + LOCAL_SCAN_CONCURRENCY).map(async rawEntry => {
+						const markedEntry = rawEntry as unknown as string | null
 
-						if (!entryItem) {
+						if (!markedEntry) {
+							return
+						}
+
+						// markDirectories appends a trailing "/" to a directory — this gives us the entry's type for
+						// the ignore check below WITHOUT an lstat. Strip it for the path/key (tree keys never carry it).
+						const isDirectoryEntry = markedEntry.endsWith("/")
+						const entryItem = isDirectoryEntry ? markedEntry.slice(0, -1) : markedEntry
+
+						if (entryItem.length === 0) {
 							return
 						}
 
@@ -317,6 +334,23 @@ export class LocalFileSystem {
 
 						pathsAdded[lowercasePath] = true
 
+						// Filter BEFORE the lstat: every isPathIgnored check is path/name-string based and needs only
+						// the entry type (which markDirectories already gave us), so an ignored entry costs no lstat or
+						// access syscall. Glob-level pruning above already removed most .filenignore'd paths; this still
+						// catches everything not safely prunable at the glob (nameLength/pathLength/invalidPath/
+						// defaultIgnore/dotFile + glob/negation .filenignore rules + case-duplicates).
+						const ignored = this.isPathIgnored(entryItem, absolutePath, isDirectoryEntry ? "directory" : "file")
+
+						if (ignored.ignored) {
+							this.getDirectoryTreeCache.ignored.push({
+								localPath: absolutePath,
+								relativePath: entryPath,
+								reason: ignored.reason
+							})
+
+							return
+						}
+
 						let stats: Stats
 
 						try {
@@ -329,18 +363,6 @@ export class LocalFileSystem {
 								localPath: absolutePath,
 								relativePath: entryPath,
 								reason: "permissions"
-							})
-
-							return
-						}
-
-						const ignored = this.isPathIgnored(entryItem, absolutePath, stats.isFile() ? "file" : "directory")
-
-						if (ignored.ignored) {
-							this.getDirectoryTreeCache.ignored.push({
-								localPath: absolutePath,
-								relativePath: entryPath,
-								reason: ignored.reason
 							})
 
 							return

@@ -109,4 +109,39 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario parity (ZP/ZQ/ZR)", () => 
 			await expectConverged(world, { withContent: true })
 		})
 	}, 120_000)
+
+	it("ZS-live: a dir-only ignore prunes the directory but a SAME-NAMED file still syncs (real FastGlob)", async () => {
+		// Validates the traversal-prune safety on the real glob engine: the `cache/**/*` prune glob must NOT
+		// swallow a FILE named "cache" (the micromatch zero-segment trap), while the cache/ directory's contents
+		// are correctly skipped.
+		await withE2EWorld({ sdk, mode: "twoWay", filenIgnore: "cache/\n" }, async world => {
+			await writeLocal(world, "cache/data.bin", "blob")
+			await writeLocal(world, "sibling/cache", "i-am-a-file")
+			await writeLocal(world, "keep.txt", "k")
+			await settle(world)
+
+			const remote = await snapshotRemoteReal(world)
+
+			expect(remote["/sibling/cache"]).toMatchObject({ type: "file" })
+			expect(remote["/keep.txt"]).toMatchObject({ type: "file" })
+			expect(remote["/cache"]).toBeUndefined()
+			expect(remote["/cache/data.bin"]).toBeUndefined()
+		})
+	}, 120_000)
+
+	it("ZS-live: a prefix-similar sibling of an ignored directory still syncs", async () => {
+		await withE2EWorld({ sdk, mode: "twoWay", filenIgnore: "build\n" }, async world => {
+			await writeLocal(world, "build/artifact.o", "obj")
+			await writeLocal(world, "buildscript.txt", "script")
+			await writeLocal(world, "build.txt", "note")
+			await settle(world)
+
+			const remote = await snapshotRemoteReal(world)
+
+			expect(remote["/buildscript.txt"]).toMatchObject({ type: "file" })
+			expect(remote["/build.txt"]).toMatchObject({ type: "file" })
+			expect(remote["/build"]).toBeUndefined()
+			expect(remote["/build/artifact.o"]).toBeUndefined()
+		})
+	}, 120_000)
 })

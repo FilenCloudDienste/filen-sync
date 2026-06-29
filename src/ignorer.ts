@@ -165,6 +165,88 @@ export class Ignorer {
 
 		return ig
 	}
+
+	/**
+	 * FastGlob `ignore` globs that PRUNE provably-ignored subtrees from the local directory scan, so the
+	 * walk never descends into / stats / even enumerates a `.filenignore`'d directory (e.g. `node_modules`).
+	 *
+	 * SAFETY — every returned glob matches ONLY paths this matcher actually ignores, so FastGlob can never
+	 * drop a path the matcher would keep:
+	 *  - Each candidate is PROBED against the live matcher ({@link ignores}), which already incorporates every
+	 *    `!negation`. A pattern re-included by a negation fails its probe and is never pruned — so we don't
+	 *    need to reason about negations structurally, only consult the matcher's actual verdict.
+	 *  - gitignore forbids re-including a file once its parent directory is excluded (verified against the
+	 *    `ignore` package), so an ignored DIRECTORY's whole subtree is ignored: pruning it cannot hide a
+	 *    re-included descendant.
+	 *  - Only plain (glob-free, non-negated) path patterns become candidates; glob/negation lines are left to
+	 *    the per-entry post-filter. The directory ENTRY itself is only pruned when BOTH its file and directory
+	 *    forms are ignored (so a dir-only `build/` rule never prunes a file named `build`).
+	 *
+	 * The returned set is therefore a strict SUBSET of `.filenignore`'s ignored set, which the delta-level
+	 * ignore filter (`deltas.ts`) independently drops deltas for — so a pruned path can never be mis-synced or
+	 * mis-deleted. Derives from `.filenignore` ONLY, never the nameLength/pathLength/invalidPath/defaultIgnore/
+	 * dotFile reasons (those have no delta-filter backstop and must keep flowing through `ignoredLocalPaths`).
+	 *
+	 * @public
+	 * @returns {string[]}
+	 */
+	public globIgnorePatternsForTraversal(): string[] {
+		const content = this.lastAppliedContent
+
+		if (!content || content.length === 0) {
+			return []
+		}
+
+		// gitignore/micromatch metacharacters — a pattern containing any of these is too rich to translate
+		// into a provably-subset glob, so it is left to the per-entry post-filter.
+		const globMetacharacters = /[*?[\]{}()!+@^$|\\]/
+		const globs = new Set<string>()
+
+		for (const rawLine of content.split("\n")) {
+			const line = rawLine.trim()
+
+			if (line.length === 0 || line.startsWith("#") || line.startsWith("!")) {
+				continue
+			}
+
+			const dirOnly = line.endsWith("/")
+			const body = dirOnly ? line.slice(0, -1) : line
+
+			if (body.length === 0 || globMetacharacters.test(body)) {
+				continue
+			}
+
+			// gitignore anchoring: a pattern with a non-trailing "/" (or a leading "/") is anchored to the sync
+			// root; a bare name matches at ANY depth. Mirror that in the FastGlob glob.
+			const anchored = body.startsWith("/") || body.includes("/")
+			const relative = body.replace(/^\/+/, "").replace(/\/+$/, "")
+
+			if (relative.length === 0) {
+				continue
+			}
+
+			const base = anchored ? relative : `**/${relative}`
+			const directoryIgnored = this.ignores(`${relative}/`)
+			const fileIgnored = this.ignores(relative)
+
+			if (directoryIgnored) {
+				// Whole subtree of an ignored directory is ignored (gitignore parent rule) — prune its contents.
+				// The glob requires at LEAST one segment after the name (`/**/*`, not `/**`): micromatch's `/**`
+				// matches zero segments, so `name/**` would also match a SAME-NAMED FILE elsewhere (e.g. a file
+				// `sibling/cache` under a `cache/` rule) — which the gitignore matcher does NOT ignore. `/**/*`
+				// matches only real descendants, keeping the prune set a strict subset of the matcher's set.
+				globs.add(`${base}/**/*`)
+			}
+
+			if (directoryIgnored && fileIgnored) {
+				// A file AND a directory of this name are both ignored, so the ENTRY itself is safe to prune — and
+				// matching the directory entry is what makes FastGlob skip DESCENDING into it.
+				globs.add(base)
+			}
+		}
+
+		return [...globs]
+	}
 }
 
 export default Ignorer

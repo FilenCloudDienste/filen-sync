@@ -1,10 +1,14 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest"
 import type FilenSDK from "@filen/sdk"
+import os from "os"
+import pathModule from "path"
+import fs from "fs-extra"
+import { v4 as uuidv4 } from "uuid"
 import { E2E_ENABLED, loginTestSDK, teardownTestSDK } from "./harness/account"
 import { withE2EWorld } from "./harness/world"
 import { settle, expectConverged, transferKinds, cycle } from "./harness/drive"
 import { snapshotRemoteReal } from "./harness/assert"
-import { writeLocal, renameLocal, readLocal, setLocalMtime } from "./harness/mutations"
+import { writeLocal, renameLocal, readLocal, setLocalMtime, chmodLocal } from "./harness/mutations"
 
 /**
  * Phase 4 e2e — live-backend parity for the latest weird-scenario round (ZP/ZQ/ZR).
@@ -142,6 +146,58 @@ describe.skipIf(!E2E_ENABLED)("E2E — weird-scenario parity (ZP/ZQ/ZR)", () => 
 			expect(remote["/build.txt"]).toMatchObject({ type: "file" })
 			expect(remote["/build"]).toBeUndefined()
 			expect(remote["/build/artifact.o"]).toBeUndefined()
+		})
+	}, 120_000)
+
+	it("ZV-live: a synced file made unreadable is KEPT on the remote, then reconciles when readable again", async ctx => {
+		// chmod 0o000 doesn't deny reads on Windows, and root bypasses it — probe first, skip if it won't deny.
+		if (process.platform === "win32") {
+			ctx.skip()
+
+			return
+		}
+
+		const probeDir = await fs.mkdtemp(pathModule.join(os.tmpdir(), `e2e-perm-${uuidv4()}-`))
+		const probeFile = pathModule.join(probeDir, "p")
+
+		await fs.writeFile(probeFile, "x")
+		await fs.chmod(probeFile, 0o000)
+
+		let denies = false
+
+		try {
+			await fs.readFile(probeFile)
+		} catch {
+			denies = true
+		}
+
+		await fs.chmod(probeFile, 0o644).catch(() => {})
+		await fs.rm(probeDir, { recursive: true, force: true }).catch(() => {})
+
+		if (!denies) {
+			ctx.skip()
+
+			return
+		}
+
+		await withE2EWorld({ sdk, mode: "twoWay" }, async world => {
+			await writeLocal(world, "doc.txt", "important")
+			await writeLocal(world, "keep.txt", "keep")
+			await settle(world)
+
+			// Revoke read permission on the already-synced file (the data-loss case the engine must survive).
+			await chmodLocal(world, "doc.txt", 0o000)
+			await settle(world)
+
+			// The unreadable-but-previously-synced file must NOT be deleted from the remote.
+			expect((await snapshotRemoteReal(world))["/doc.txt"]).toMatchObject({ type: "file" })
+
+			// Restore permission — the file must reconcile cleanly with no lingering divergence.
+			await chmodLocal(world, "doc.txt", 0o644)
+			await settle(world)
+
+			expect((await snapshotRemoteReal(world))["/doc.txt"]).toMatchObject({ type: "file" })
+			await expectConverged(world)
 		})
 	}, 120_000)
 })

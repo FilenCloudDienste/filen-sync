@@ -538,6 +538,23 @@ export class Deltas {
 			ignoredLocalPaths[ignored.relativePath] = true
 		}
 
+		// A structurally ignored/errored DIRECTORY (one that became a symlink, an unreadable/permission-denied
+		// dir, ...) HIDES its whole subtree from the local scan: the walk records the ancestor and never
+		// enumerates what is behind it. Those descendants are present in the base + on the OTHER side but absent
+		// from the current local tree, so without protection the deletion passes would mis-read them as "locally
+		// gone" and wipe their still-valid counterpart (silent CLOUD data loss when a synced folder is replaced
+		// by a symlink), and the additions pass would try to re-download them ONTO the symlink — failing to write
+		// under it and WEDGING every cycle. Extend the BUG-006 / M4 "ignore ≠ delete" protection to the whole
+		// subtree AND to the re-download path: an ignored/errored path or any descendant of one is left exactly
+		// as the user left it — never deleted, never re-fetched. The cheap O(1) exact checks (ignoredLocalPaths/
+		// erroredLocalPaths) stay in the per-pass guards; this predicate adds the O(depth) ANCESTOR walk, gated
+		// so a clean scan pays nothing and the walk only runs at an actual delete/download decision (few paths),
+		// never across the unchanged bulk of the tree. (Maintainer decision 2026-06-29 — "keep them".)
+		const ignoredOrErroredLocalPaths = new Set<string>([...Object.keys(erroredLocalPaths), ...Object.keys(ignoredLocalPaths)])
+		const hasIgnoredOrErroredLocalAncestors = ignoredOrErroredLocalPaths.size > 0
+		const hasIgnoredOrErroredLocalAncestor = (path: string): boolean =>
+			hasIgnoredOrErroredLocalAncestors && hasAncestorIn(path, ignoredOrErroredLocalPaths)
+
 		// The order of delta processing:
 		// 1. Local directory/file move/rename
 		// 2. Remote directory/file move/rename
@@ -738,7 +755,65 @@ export class Deltas {
 		// correct THIS cycle's delta attribution.
 		if (renamedRemoteDirectories.length > 0 || renamedLocalDirectories.length > 0) {
 			// renameRemoteDirectory deltas come from LOCAL-originated dir renames; renameLocalDirectory deltas
-			// from REMOTE-originated ones.
+			// from REMOTE-originated ones. Build the raw list (original destinations) to detect cross-side
+			// rename-into-renamed-directory collisions BEFORE rebasing anything.
+			const dirRenamesRaw = [
+				...renamedRemoteDirectories.flatMap(delta => (delta.type === "renameRemoteDirectory" ? [{ from: delta.from, to: delta.to }] : [])),
+				...renamedLocalDirectories.flatMap(delta => (delta.type === "renameLocalDirectory" ? [{ from: delta.from, to: delta.to }] : []))
+			]
+
+			// A rename emitted by the passes above may TARGET a path INSIDE a directory the OTHER side renamed
+			// in this same cycle — e.g. local moves /outside.txt INTO /dir, or moves the whole /sub directory
+			// INTO /dir, while the remote renamed /dir -> /dir2. The rename pass recorded the destination at its
+			// PRE-rename path (/dir/inside.txt, /dir/sub), but the operating side's directory now lives at /dir2.
+			// Left alone, the emitted rename lands under the OLD directory name — resurrecting it on the backend —
+			// while the additions pass, seeing the rebased current path (/dir2/inside.txt) un-marked, ALSO
+			// transfers it: the item is DUPLICATED and the old directory comes back (ZW4 files, ZW9 directories).
+			// Realign each emitted rename's destination across the dir renames and move its `pathsAdded` marker to
+			// the rebased path, so the additions pass recognises it as already handled. The rename objects are
+			// shared with renamedRemote/LocalDirectories, so correcting a directory rename in place also feeds the
+			// corrected destination into the tree rebases + collapse below. A rename's destination is never inside
+			// its OWN source (move-into-self is rejected) and a SAME-side rename already sits at its final path
+			// (so it never matches the OLD `from` of a sibling), so this only fires for the cross-side collision.
+			// The `from` is the real source on the operating side and is left untouched. Cheap: O(renames).
+			for (const delta of deltas) {
+				// A rename+in-place-modify of the SAME file (F1) emits, ALONGSIDE the rename, an `uploadFile` at
+				// the new path so the changed bytes upload onto the renamed node. When that destination is inside a
+				// directory the OTHER side renamed, the upload must follow to the rebased path too — otherwise it
+				// reads the file at the OLD path (already physically moved by the dir rename in phase order), finds
+				// nothing, and is SKIPPED, so the rename moves the STALE bytes and the modification is LOST. (Only
+				// live-reproducible: a real fs preserves the inode across move+modify so this F1 path fires, whereas
+				// memfs replaces it, turning the case into a delete+add. The `pathsAdded` marker for this path was
+				// already moved by the sibling rename's correction below.)
+				if (delta.type === "uploadFile") {
+					delta.path = rebasePathAcrossRenames(delta.path, dirRenamesRaw)
+
+					continue
+				}
+
+				if (
+					delta.type !== "renameLocalFile" &&
+					delta.type !== "renameRemoteFile" &&
+					delta.type !== "renameLocalDirectory" &&
+					delta.type !== "renameRemoteDirectory"
+				) {
+					continue
+				}
+
+				const rebasedTo = rebasePathAcrossRenames(delta.to, dirRenamesRaw)
+
+				if (rebasedTo !== delta.to) {
+					delete pathsAdded[delta.to]
+
+					delta.to = rebasedTo
+					delta.path = rebasedTo
+					pathsAdded[rebasedTo] = true
+				}
+			}
+
+			// (Re)build the rename lists from the (possibly corrected) delta objects, then model the post-rename
+			// state. The base follows BOTH sides' renames; each side's CURRENT tree follows only the OTHER side's
+			// rename (its own rename already moved its current tree to the new path).
 			const localOriginatedRenames = renamedRemoteDirectories.flatMap(delta =>
 				delta.type === "renameRemoteDirectory" ? [{ from: delta.from, to: delta.to }] : []
 			)
@@ -747,8 +822,6 @@ export class Deltas {
 			)
 			const allDirRenames = [...localOriginatedRenames, ...remoteOriginatedRenames]
 
-			// The base follows BOTH sides' renames; each side's CURRENT tree follows only the OTHER side's
-			// rename (its own rename already moved its current tree to the new path).
 			previousLocalTree = rebaseLocalTreeAcrossRenames(previousLocalTree, allDirRenames)
 			previousRemoteTree = rebaseRemoteTreeAcrossRenames(previousRemoteTree, allDirRenames)
 			currentRemoteTree = rebaseRemoteTreeAcrossRenames(currentRemoteTree, localOriginatedRenames)
@@ -773,6 +846,14 @@ export class Deltas {
 						previousLocalItem //&&
 						//(mode !== "localToCloud" ? !currentLocalTree.inodes[previousLocalItem.inode] : true)
 					) {
+						// A descendant hidden behind an ignored/errored ancestor (a symlink-replaced folder, an
+						// unreadable directory) is not "locally gone", it is unscannable — never propagate it as a
+						// deletion. Checked only at this delete decision, so the unchanged bulk of the tree pays
+						// nothing. (BUG-006 extended to the subtree — maintainer decision "keep them".)
+						if (hasIgnoredOrErroredLocalAncestor(path)) {
+							continue
+						}
+
 						// Symmetric to the remote-deletions resurrect (OBS-001): the local copy was deleted, but
 						// if the REMOTE file was modified since the base — a new uuid, i.e. a real re-upload — the
 						// newer modification wins over the delete. Skip the delete and leave the path unmarked so
@@ -834,6 +915,12 @@ export class Deltas {
 
 					// If the item does not exist in the current local tree but does in the remote one, it needs to be deleted remotely in localToCloud mode.
 					if (!currentLocalItem && currentRemoteItem) {
+						// A remote path whose local counterpart is hidden behind an ignored/errored ancestor is
+						// unscannable, not deleted — keep the cloud copy (BUG-006 extended to the subtree).
+						if (hasIgnoredOrErroredLocalAncestor(path)) {
+							continue
+						}
+
 						const delta: Delta = {
 							type: currentRemoteItem.type === "directory" ? "deleteRemoteDirectory" : "deleteRemoteFile",
 							path
@@ -880,6 +967,12 @@ export class Deltas {
 						previousRemoteItem //&&
 						//(mode !== "cloudToLocal" ? !currentRemoteTree.uuids[previousRemoteItem.uuid] : true)
 					) {
+						// Never delete the LOCAL copy of a descendant hidden behind an ignored/errored ancestor
+						// (symmetric to the local-deletions guard above; BUG-006 / M4 extended to the subtree).
+						if (hasIgnoredOrErroredLocalAncestor(path)) {
+							continue
+						}
+
 						// E2E-OBS-001 (newer-modify-wins): the remote deleted this path, but if the local FILE
 						// was modified since the last sync the modification wins — skip the delete and leave the
 						// path unmarked so the local-additions pass re-uploads (resurrects) it remotely. "Modified"
@@ -1090,6 +1183,18 @@ export class Deltas {
 				const localChangedType = !previousLocalItem || previousLocalItem.type !== currentLocalItem.type
 				const remoteChangedType = !previousRemoteItem || previousRemoteItem.type !== currentRemoteItem.type
 
+				// Additive backup modes TOLERATE a FOREIGN type change on the non-authoritative (target) side,
+				// exactly as the modify branch tolerates a foreign CONTENT edit (V8/X8): reverting it would
+				// re-assert the authoritative side and DELETE the foreign item — a deletion on the very side
+				// these modes promise never to delete (localBackup never deletes the remote, cloudBackup never
+				// deletes the local). So only an ORIGINATED type change (the authoritative side is the one that
+				// diverged from base) propagates; a foreign one is left alone and the sides simply diverge at this
+				// path. The strict-mirror modes (localToCloud/cloudToLocal) still REVERT it (Category ZA), and
+				// twoWay still resolves by which side changed. (Maintainer decision 2026-06-29.)
+				if ((mode === "localBackup" && !localChangedType) || (mode === "cloudBackup" && !remoteChangedType)) {
+					continue
+				}
+
 				let localWins: boolean
 
 				if (mode === "localBackup" || mode === "localToCloud") {
@@ -1292,6 +1397,21 @@ export class Deltas {
 					// Does an item with the same path and type already exist in the current local tree (probably downloaded by something else prior)?
 					!(currentLocalTree.tree[path] && currentLocalTree.tree[path]!.type === currentRemoteItem.type)
 				) {
+					// Don't re-create local content that would land under a structurally ignored/errored local path
+					// (a symlink-replaced FOLDER, an unreadable directory): a DESCENDANT behind such an ancestor, or
+					// a remote DIRECTORY at the ignored path itself, cannot be written (the local entry is a symlink
+					// to a file, not a directory) — the task would fail to write under it and WEDGE every cycle. Skip
+					// it: the cloud copy stays untouched (the deletion passes already decline to delete it) and the
+					// local symlink/dir is left exactly as the user left it. A remote FILE at an exactly-ignored path
+					// is NOT skipped — re-downloading it simply heals the path back to a real file (the file→symlink
+					// backwards-compat case, F15). (BUG-006 extended — maintainer decision "keep them".)
+					if (
+						hasIgnoredOrErroredLocalAncestor(path) ||
+						((ignoredLocalPaths[path] || erroredLocalPaths[path]) && currentRemoteItem.type === "directory")
+					) {
+						continue
+					}
+
 					deltas.push({
 						type: currentRemoteItem.type === "directory" ? "createLocalDirectory" : "downloadFile",
 						path,

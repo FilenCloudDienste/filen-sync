@@ -229,6 +229,71 @@ export async function renameRemote(world: E2EWorld, fromRelative: string, toRela
 	})
 }
 
+/**
+ * Move a remote item ACROSS directories (optionally renaming it too), simulating a peer client's move.
+ * Mirrors the engine's own remote move sequence — renameFile/renameDirectory if the basename changes, THEN
+ * moveFile/moveDirectory to the new parent — so the live behavior matches what `controls.movePath` models in
+ * the mock. `overwriteIfExists` so a move onto an occupied name trashes the occupant (per-parent uniqueness),
+ * exactly as the engine's moves do. (renameRemote/renameRemoteDir only cover SAME-directory renames; this
+ * closes the cross-directory remote-move parity gap.)
+ */
+export async function moveRemote(world: E2EWorld, fromRelative: string, toRelative: string): Promise<void> {
+	const item = await resolveRemote(world, fromRelative)
+
+	if (!item) {
+		throw new Error(`moveRemote: no remote item at ${fromRelative}`)
+	}
+
+	const fromParts = segments(fromRelative)
+	const oldName = fromParts.pop()
+	const sourceDir = fromParts.join("/")
+	const toParts = segments(toRelative)
+	const newName = toParts.pop()
+	const destDir = toParts.join("/")
+
+	if (!oldName || !newName) {
+		throw new Error(`moveRemote: invalid paths ${fromRelative} -> ${toRelative}`)
+	}
+
+	const newParentUUID = await ensureRemoteDir(world, destDir)
+	const crossDir = sourceDir !== destDir
+
+	if (item.type === "directory") {
+		if (newName !== oldName) {
+			await world.sdk.cloud().renameDirectory({ uuid: item.uuid, name: newName, overwriteIfExists: true })
+		}
+
+		if (crossDir) {
+			await world.sdk.cloud().moveDirectory({
+				uuid: item.uuid,
+				to: newParentUUID,
+				metadata: { name: newName },
+				overwriteIfExists: true
+			})
+		}
+
+		return
+	}
+
+	const metadata = {
+		name: newName,
+		size: item.size,
+		mime: item.mime,
+		key: item.key,
+		lastModified: item.lastModified,
+		...(item.creation !== undefined ? { creation: item.creation } : {}),
+		...(item.hash !== undefined ? { hash: item.hash } : {})
+	}
+
+	if (newName !== oldName) {
+		await world.sdk.cloud().renameFile({ uuid: item.uuid, metadata, name: newName, overwriteIfExists: true })
+	}
+
+	if (crossDir) {
+		await world.sdk.cloud().moveFile({ uuid: item.uuid, to: newParentUUID, metadata, overwriteIfExists: true })
+	}
+}
+
 /** Force a local file's mtime to a specific epoch-ms (e.g. to age it before a newer conflicting write). */
 export async function setLocalMtime(world: E2EWorld, relativePath: string, epochMs: number): Promise<void> {
 	const when = new Date(epochMs)

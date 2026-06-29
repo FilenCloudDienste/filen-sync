@@ -35,12 +35,12 @@ describe("Category ZS — ignore traversal pruning", () => {
 						readdirPaths.push(String(path))
 
 						return origAsync(path, ...rest)
-					}) as typeof world.vfs.globFs.readdir
+					}) as NonNullable<typeof world.vfs.globFs.readdir>
 					world.vfs.globFs.readdirSync = ((path: string, ...rest: unknown[]) => {
 						readdirPaths.push(String(path))
 
 						return origSync(path, ...rest)
-					}) as typeof world.vfs.globFs.readdirSync
+					}) as NonNullable<typeof world.vfs.globFs.readdirSync>
 				}),
 				// Force a fresh scan with the spy installed.
 				localMutate(world => writeLocal(world, "trigger.txt", "t")),

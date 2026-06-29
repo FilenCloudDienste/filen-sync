@@ -43,7 +43,7 @@
 		"@microsoft/eslint-formatter-sarif": "^3.1.0",
 		"@types/fs-extra": "^11.0.4",
 		"@types/micromatch": "^4.0.9",
-		"@types/mime-types": "^2.1.4",
+		"@types/mime-types": "^3.0.1",
 		"@types/uuid": "^10.0.0",
 		"@types/write-file-atomic": "^4.0.3",
 		"@vitest/coverage-v8": "^4.1.9",

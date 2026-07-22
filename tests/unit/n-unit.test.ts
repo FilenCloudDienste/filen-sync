@@ -205,9 +205,30 @@ describe("Category N — utils.isValidPath (linux)", () => {
 	})
 })
 
+describe("Category N — utils.isValidPath (freebsd)", () => {
+	it("accepts an ordinary absolute path", () => {
+		withPlatform("freebsd", () => {
+			expect(isValidPath("/home/me/Documents/file.txt")).toBe(true)
+		})
+	})
+
+	it("permits a colon (only NUL is illegal on freebsd, same as linux)", () => {
+		withPlatform("freebsd", () => {
+			expect(isValidPath("/home/me/foo:bar")).toBe(true)
+			expect(isValidPath("/home/me/a<b>:c")).toBe(true)
+		})
+	})
+
+	it("rejects a NUL byte", () => {
+		withPlatform("freebsd", () => {
+			expect(isValidPath("/home/me/foo\x00bar")).toBe(false)
+		})
+	})
+})
+
 describe("Category N — utils.isValidPath (unknown platform)", () => {
 	it("rejects everything on an unrecognized platform (default branch)", () => {
-		withPlatform("freebsd", () => {
+		withPlatform("sunos", () => {
 			expect(isValidPath("/perfectly/valid/path.txt")).toBe(false)
 		})
 	})

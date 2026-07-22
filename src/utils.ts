@@ -210,7 +210,9 @@ export function isValidPath(inputPath: string): boolean {
 			return true
 		}
 
-		case "linux": {
+		case "linux":
+		case "freebsd": {
+			// FreeBSD only forbids NUL in a filename component too, same as linux.
 			for (const part of parts) {
 				if (part.trim().length === 0) {
 					continue

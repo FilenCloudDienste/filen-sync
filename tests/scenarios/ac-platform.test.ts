@@ -15,6 +15,7 @@ import { type SyncMessage } from "../../src/types"
  *              ceiling (NOT the legacy 260/512 — Node/libuv handles long paths via the `\\?\` prefix).
  *   - darwin → forbids `:` and NUL; paths over 1024 chars.
  *   - linux  → forbids only NUL; paths over 4096 chars.
+ *   - freebsd → forbids only NUL, same as linux; paths over 4096 chars (generic-platform fallback).
  *
  * A path the local platform can't represent must be SKIPPED (reason `invalidPath` / `pathLength` /
  * `nameLength`) — never downloaded, never crashing the cycle, and (crucially) never deleted from the
@@ -89,6 +90,24 @@ describe("Category AC — cross-platform path rules", () => {
 				mode: "twoWay",
 				initialRemote: {
 					"/report:v2.txt": "legal on linux",
+					"/ok.txt": "fine"
+				},
+				steps: [runCycle(), runCycle()]
+			})
+		)
+
+		expect(result.finalLocal["/report:v2.txt"]).toMatchObject({ type: "file" })
+		expect(result.finalLocal["/ok.txt"]).toMatchObject({ type: "file" })
+		expect(ignoredReasons(result.messages)).not.toContain("invalidPath")
+	})
+
+	it("AC2b: freebsd also syncs the colon file down — same rule as linux (regression: freebsd used to fall into the default `invalidPath` branch and reject every path)", async () => {
+		const result = await withPlatform("freebsd", () =>
+			runScenario({
+				name: "AC2b",
+				mode: "twoWay",
+				initialRemote: {
+					"/report:v2.txt": "legal on freebsd",
 					"/ok.txt": "fine"
 				},
 				steps: [runCycle(), runCycle()]

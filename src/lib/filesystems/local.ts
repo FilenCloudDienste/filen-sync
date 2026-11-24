@@ -778,6 +778,31 @@ export class LocalFileSystem {
 		}
 	}
 
+	/**
+	 * Return a path inside the local trash that doesn't exist yet: `<name>` if free, otherwise
+	 * `<stem> (n)<ext>` (files) or `<name> (n)` (directories).
+	 */
+	private async uniqueLocalTrashPath(localTrashPath: string, name: string, isDirectory: boolean): Promise<string> {
+		const first = pathModule.join(localTrashPath, name)
+
+		if (!(await this.sync.environment.fs.exists(first))) {
+			return first
+		}
+
+		const ext = isDirectory ? "" : pathModule.extname(name)
+		const stem = ext.length > 0 ? name.slice(0, -ext.length) : name
+
+		for (let i = 1; i <= 10000; i++) {
+			const candidate = pathModule.join(localTrashPath, `${stem} (${i})${ext}`)
+
+			if (!(await this.sync.environment.fs.exists(candidate))) {
+				return candidate
+			}
+		}
+
+		return pathModule.join(localTrashPath, `${stem} (${Date.now()})${ext}`)
+	}
+
 	public async unlink({ relativePath, permanent = false }: { relativePath: string; permanent?: boolean }): Promise<void> {
 		await this.mutex.acquire()
 
@@ -799,7 +824,16 @@ export class LocalFileSystem {
 					const localTrashPath = pathModule.join(this.sync.syncPair.localPath, LOCAL_TRASH_NAME)
 
 					await this.sync.environment.fs.ensureDir(localTrashPath)
-					await this.sync.environment.fs.move(localPath, pathModule.join(localTrashPath, pathModule.posix.basename(relativePath)), {
+
+					// The trash is flat (keyed by basename), so deleting `/a/report.txt` and later `/b/report.txt`
+					// would otherwise overwrite the first file's only local recovery copy. Pick a free name instead.
+					const trashDestination = await this.uniqueLocalTrashPath(
+						localTrashPath,
+						pathModule.posix.basename(relativePath),
+						item.type === "directory"
+					)
+
+					await this.sync.environment.fs.move(localPath, trashDestination, {
 						overwrite: true
 					})
 				} else {
